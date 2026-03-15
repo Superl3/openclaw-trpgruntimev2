@@ -1,0 +1,64 @@
+{
+  "id": "trpg-runtime",
+  "name": "TRPG Runtime",
+  "description": "Structured TRPG world-store tools for dedicated trpg sessions.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "worldRoot": {
+        "type": "string",
+        "description": "Optional absolute or resolvable path to world root. Defaults to <workspace>/world."
+      },
+      "allowPatchApply": {
+        "type": "boolean",
+        "default": false,
+        "description": "When false, trpg_patch_apply always denies writes."
+      },
+      "maxReadBytes": {
+        "type": "integer",
+        "minimum": 4096,
+        "maximum": 1048576,
+        "default": 262144
+      },
+      "maxFilesPerQuery": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 200,
+        "default": 40
+      },
+      "maxOperationsPerPatch": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 200,
+        "default": 64
+      },
+      "allowedAgentIds": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": ["trpg"],
+        "description": "Only these agent ids may execute tools."
+      }
+    }
+  },
+  "uiHints": {
+    "worldRoot": {
+      "label": "World Root",
+      "placeholder": "~/.openclaw/workspace-trpg/world",
+      "help": "Use only when workspace-based auto-resolution is not desired.",
+      "advanced": true
+    },
+    "allowPatchApply": {
+      "label": "Allow Patch Apply",
+      "help": "Keep disabled unless you intentionally allow writes from trpg_patch_apply."
+    },
+    "allowedAgentIds": {
+      "label": "Allowed Agent IDs",
+      "help": "Restrict tool execution to dedicated agents.",
+      "advanced": true
+    }
+  }
+}
