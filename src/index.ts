@@ -35,6 +35,11 @@ import {
   runStateCompactionTool,
   type StateCompactInput,
 } from "./lifecycle-compact.js";
+import {
+  buildSceneComponents,
+  COMPONENT_USAGE_GUIDE,
+  type SceneComponentInput,
+} from "./discord-components.js";
 
 const STORE_GET_PARAMETERS = {
   type: "object",
@@ -383,6 +388,7 @@ function buildPromptSurfaceChunk(params: {
     TRPG_RUNTIME_NPC_VISIBILITY_GUARD: { mandatory: true, priority: 90, maxLines: 9, maxChars: 900 },
     TRPG_RUNTIME_ACTION_FEASIBILITY_GUARD: { mandatory: true, priority: 88, maxLines: 14, maxChars: 1800 },
     TRPG_RUNTIME_FREEFORM_RULE: { mandatory: true, priority: 86, maxLines: 10, maxChars: 1200 },
+    TRPG_DISCORD_COMPONENTS: { mandatory: true, priority: 84, maxLines: 20, maxChars: 2500 },
     TRPG_RUNTIME_STATUS_PANEL_V1: { mandatory: true, priority: 82, maxLines: 8, maxChars: 950 },
     TRPG_RUNTIME_TRAVEL_TRANSITION: { mandatory: false, priority: 76, maxLines: 9, maxChars: 1000 },
     TRPG_RUNTIME_FAST_WAIT_V1: { mandatory: false, priority: 74, maxLines: 8, maxChars: 900 },
@@ -4215,6 +4221,9 @@ const trpgRuntimePlugin = {
           ].join(String.fromCharCode(10)),
         );
 
+        // Discord component usage guide — always injected
+        appendChunks.push(COMPONENT_USAGE_GUIDE);
+
         const travelTransition = fastWaitContext.waitApplied
           ? {
               movementIntent: false,
@@ -4513,8 +4522,131 @@ const trpgRuntimePlugin = {
       { name: "trpg_dice_roll" },
     );
 
+    // ── Discord component builder tool ──
+    const SCENE_COMPONENT_PARAMETERS = {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        scene: {
+          type: "string",
+          enum: ["exploration", "npc_encounter", "combat", "choice", "dialogue"],
+          description: "Scene type determines template",
+        },
+        description: {
+          type: "string",
+          description: "Scene description text (Discord markdown supported)",
+        },
+        locationInfo: {
+          type: "string",
+          description: "Optional location/status line",
+        },
+        npc: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            name: { type: "string" },
+            title: { type: "string" },
+            dialogue: { type: "string" },
+            disposition: { type: "string" },
+            status: { type: "string" },
+            color: { type: "string" },
+            action: { type: "string" },
+            oldDisposition: { type: "string" },
+            newDisposition: { type: "string" },
+          },
+          required: ["name", "title"],
+        },
+        combat: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            round: { type: "integer" },
+            hpCurrent: { type: "integer" },
+            hpMax: { type: "integer" },
+            ac: { type: "integer" },
+            acBuff: { type: "string" },
+            manaCurrent: { type: "integer" },
+            manaMax: { type: "integer" },
+            enemySummary: { type: "string" },
+            effects: { type: "string" },
+          },
+          required: ["round", "hpCurrent", "hpMax", "ac", "manaCurrent", "manaMax", "enemySummary"],
+        },
+        buttons: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              label: { type: "string" },
+              style: { type: "string", enum: ["primary", "secondary", "success", "danger"] },
+            },
+            required: ["label", "style"],
+          },
+          description: "Override default buttons for this scene type",
+        },
+        choices: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              label: { type: "string" },
+              description: { type: "string" },
+              value: { type: "string" },
+              emoji: { type: "string" },
+            },
+            required: ["label", "value"],
+          },
+          description: "Select menu choices (required for choice scene)",
+        },
+        modalTitle: {
+          type: "string",
+          description: "Override modal dialog title",
+        },
+        includeInput: {
+          type: "boolean",
+          description: "Include freeform input modal (default: true)",
+        },
+      },
+      required: ["scene", "description"],
+    } as const;
+
+    api.registerTool(
+      (ctx) => ({
+        name: "trpg_scene_components",
+        description:
+          "Build a Discord component payload for a TRPG scene response. Returns JSON components to pass to the message tool. " +
+          "Always use this for scene responses instead of plain text. " +
+          "Scene types: exploration, npc_encounter, combat, choice, dialogue.",
+        parameters: SCENE_COMPONENT_PARAMETERS,
+        async execute(_toolCallId, params) {
+          const gate = toolGate({ cfg, ctx, api });
+          if (!gate.ok) {
+            return jsonToolResult(gate.payload);
+          }
+
+          try {
+            const components = buildSceneComponents(params as SceneComponentInput);
+            return jsonToolResult({
+              ok: true,
+              components,
+              instructions:
+                "Pass this 'components' object to the message tool: message(action='send', message='scene update', components=<this.components>)",
+            });
+          } catch (error) {
+            return jsonToolResult({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        },
+      }),
+      { name: "trpg_scene_components" },
+    );
+
     api.logger.info(
-      "[trpg-runtime] registered tools: trpg_store_get, trpg_patch_dry_run, trpg_patch_apply, trpg_state_compact, trpg_faction_tick, trpg_hooks_query, trpg_dice_roll",
+      "[trpg-runtime] registered tools: trpg_store_get, trpg_patch_dry_run, trpg_patch_apply, trpg_state_compact, trpg_faction_tick, trpg_hooks_query, trpg_dice_roll, trpg_scene_components",
     );
   },
 };
