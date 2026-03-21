@@ -1,0 +1,83 @@
+{
+  "agents": {
+    "list": [
+      {
+        "id": "trpg",
+        "workspace": "~/.openclaw/extensions/trpg-runtime/workspace",
+        "agentDir": "~/.openclaw/extensions/trpg-runtime/agent",
+        "sandbox": {
+          "mode": "all",
+          "workspaceAccess": "rw",
+          "scope": "agent"
+        },
+        "tools": {
+          "allow": [
+            "read",
+            "sessions_list",
+            "sessions_history",
+            "sessions_spawn",
+            "session_status",
+            "trpg_store_get",
+            "trpg_patch_dry_run",
+            "trpg_faction_tick",
+            "trpg_patch_apply",
+            "trpg_hooks_query",
+            "trpg_dice_roll",
+            "trpg_state_compact",
+            "trpg_scene_components"
+          ],
+          "deny": [
+            "exec",
+            "process",
+            "write",
+            "edit",
+            "apply_patch",
+            "sessions_send",
+            "message",
+            "gateway",
+            "cron",
+            "nodes",
+            "browser",
+            "canvas"
+          ],
+          "exec": {
+            "security": "deny",
+            "ask": "always"
+          },
+          "fs": {
+            "workspaceOnly": true
+          }
+        }
+      }
+    ]
+  },
+  "bindings": [
+    {
+      "type": "route",
+      "agentId": "trpg",
+      "match": {
+        "channel": "discord",
+        "accountId": "<discord_account_id>",
+        "peer": {
+          "kind": "channel",
+          "id": "<discord_channel_id>"
+        }
+      }
+    }
+  ],
+  "plugins": {
+    "load": {
+      "paths": ["~/.openclaw/extensions/trpg-runtime"],
+      "allow": ["trpg-runtime"]
+    },
+    "entries": {
+      "trpg-runtime": {
+        "enabled": true,
+        "config": {
+          "allowPatchApply": false,
+          "allowedAgentIds": ["trpg"]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "plugins": {
+    "load": {
+      "paths": ["~/.openclaw/extensions/trpg-runtime"],
+      "allow": ["trpg-runtime"]
+    },
+    "entries": {
+      "trpg-runtime": {
+        "enabled": true,
+        "config": {
+          "allowPatchApply": false,
+          "allowedAgentIds": []
+        }
+      }
+    }
+  }
+}

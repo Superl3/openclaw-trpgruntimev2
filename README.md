@@ -15,7 +15,7 @@ All tools return JSON-shaped output (`details`) and JSON text in `content`.
 
 ## Safety model
 
-- Agent gate: defaults to `allowedAgentIds: ["trpg"]`
+- Agent gate: defaults to `allowedAgentIds: []` (empty list means allow all agents)
 - Path guard: blocks traversal and write/read outside resolved `world/*`
 - Canon target guard: patch operations support structured files only (`.yaml`, `.yml`, `.json`)
 - No hidden side effects in dry-run tools
@@ -51,6 +51,41 @@ Then enable/configure under:
 
 - `plugins.entries.trpg-runtime.enabled`
 - `plugins.entries.trpg-runtime.config`
+
+## Drop-in / Plug-and-Play
+
+You can use this extension with either mode:
+
+- Plugin-only mode: load only the plugin with `examples/openclaw.overlay.plugin-only.json` and keep your existing agents/bindings.
+- Dedicated `trpg` agent mode: use `examples/openclaw.overlay.trpg-agent.json` to load plugin + agent + binding together.
+
+## Onboarding
+
+- Plugin-only onboarding overlay: `examples/openclaw.overlay.onboard.plugin-only.json`
+- Dedicated `trpg` onboarding overlay: `examples/openclaw.overlay.onboard.trpg-agent.json`
+
+These are minimal post-install examples with safe defaults:
+
+- `plugins.entries.trpg-runtime.config.allowPatchApply=false`
+- `plugins.entries.trpg-runtime.config.allowedAgentIds=[]` (plugin-only) or `["trpg"]` (dedicated agent)
+
+## Bilingual docs
+
+- English guide: `docs/USAGE.en.md`
+- Korean guide: `docs/USAGE.ko.md`
+
+Verify wiring after applying your overlay:
+
+```bash
+openclaw config validate --json
+openclaw plugins info trpg-runtime
+```
+
+Dedicated mode extra check:
+
+```bash
+openclaw agents bindings --agent trpg --json
+```
 
 ## Smoke checks after link/install
 
