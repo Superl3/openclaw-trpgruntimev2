@@ -18,6 +18,16 @@
 9. `plugins.entries.trpg-runtime.config.allowedAgentIds` 기반 에이전트 실행 제한.
 10. world root 해석/패치 작업에 대한 경로 및 쓰기 가드.
 
+## 2.1) World-data-driven 동작
+
+- 런타임 프롬프트 훅의 하드코딩된 설정/시나리오 주입 로직은 제거되었습니다.
+- 이제 장면/위치/관계 정보는 사용자 world 파일에서만 읽어옵니다.
+- 다음과 같은 파일에 위치 그래프, 인트로 장면 필드, 관계 엣지를 직접 정의하세요:
+  - `world/canon/locations.yaml`
+  - `world/state/current-scene.yaml`
+  - `world/state/relationships.yaml`
+- 파일이 비어 있거나 정보가 부족해도 런타임은 중립적 fallback 가드 문구(예: current scene unknown)로 계속 동작합니다.
+
 ## 3) Install / Onboard steps
 
 1. 확장 파일을 `~/.openclaw/extensions/trpg-runtime`에 둡니다.

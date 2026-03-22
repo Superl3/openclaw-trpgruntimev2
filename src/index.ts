@@ -1090,27 +1090,6 @@ function hasBootstrapReadySignal(message: string): boolean {
   );
 }
 
-function inferWorldStructuresFromBootstrap(message: string): string[] {
-  const inferred: string[] = [];
-  if (!message) {
-    return inferred;
-  }
-
-  if (/왕립\s*해군|해군\s*출신|royal\s*navy/i.test(message)) {
-    inferred.push("naval faction", "maritime trade routes", "port authority");
-  }
-
-  if (/몰락한\s*귀족\s*가문|귀족\s*가문|noble\s*house/i.test(message)) {
-    inferred.push("noble houses", "political tensions", "inheritance disputes");
-  }
-
-  if (/장부|채무|빚|비공식\s*중개|그림자\s*중개|ledger|debt|broker/i.test(message)) {
-    inferred.push("debt broker network", "shadow brokerage", "ledger coercion channels");
-  }
-
-  return Array.from(new Set(inferred));
-}
-
 function collectMissingBootstrapFields(player: Record<string, unknown>): string[] {
   const missing: string[] = [];
   if (!readString(player.name)) missing.push("이름");
@@ -1132,18 +1111,6 @@ function hasMinimalBootstrapFields(player: Record<string, unknown>): boolean {
   }
   return Boolean(readString(player.name) && answered >= 3);
 }
-
-type BootstrapRelationshipEdge = {
-  from: string;
-  to: string;
-  relation_type: string;
-  polarity: "positive" | "negative" | "mixed" | "neutral";
-  strength: number;
-  visibility: "public" | "private" | "secret";
-  source: "bootstrap";
-  mutable: boolean;
-  zones?: string[];
-};
 
 function extractBootstrapFreeform(message: string): string {
   if (!message) {
@@ -1202,68 +1169,6 @@ function mergeFreeformDescription(existingValue: string, incomingValue: string):
   return `${existing}${String.fromCharCode(10)}${incoming}`;
 }
 
-function bootstrapSeedZones(structures: string[]): string[] {
-  const out: string[] = [];
-  const normalized = structures.map((entry) => entry.toLowerCase());
-
-  if (
-    normalized.includes("naval faction") ||
-    normalized.includes("maritime trade routes") ||
-    normalized.includes("port authority")
-  ) {
-    out.push("zone-harbor-docks", "zone-blackwater-quay", "zone-shallow-sea-lane");
-  }
-
-  if (
-    normalized.includes("noble houses") ||
-    normalized.includes("inheritance disputes") ||
-    normalized.includes("political tensions")
-  ) {
-    out.push("zone-glass-court-vault", "zone-ruined-shrine");
-  }
-
-  return Array.from(new Set(out));
-}
-
-function buildKnownZoneIdSet(locationsParsed: unknown): Set<string> {
-  const known = new Set<string>();
-  const root = toObject(locationsParsed);
-  const zonesNode = root.zones;
-
-  if (Array.isArray(zonesNode)) {
-    for (const entry of zonesNode) {
-      const zone = toObject(entry);
-      const zoneId = normalizeZoneId(readString(zone.id));
-      if (zoneId) {
-        known.add(zoneId);
-      }
-    }
-    return known;
-  }
-
-  const zonesObject = toObject(zonesNode);
-  for (const key of Object.keys(zonesObject)) {
-    const zoneId = normalizeZoneId(key);
-    if (zoneId) {
-      known.add(zoneId);
-    }
-  }
-
-  return known;
-}
-
-function filterKnownZoneIds(candidates: string[], knownZoneIds: Set<string>): string[] {
-  const normalized = Array.from(
-    new Set(candidates.map((entry) => normalizeZoneId(entry)).filter(Boolean)),
-  );
-
-  if (knownZoneIds.size === 0) {
-    return normalized;
-  }
-
-  return normalized.filter((zoneId) => knownZoneIds.has(zoneId));
-}
-
 function relationshipKey(value: Record<string, unknown>): string {
   const from = readString(value.from).toLowerCase();
   const to = readString(value.to).toLowerCase();
@@ -1276,154 +1181,6 @@ function relationshipKey(value: Record<string, unknown>): string {
   }
 
   return `${from}|${to}|${relationType}|${visibility}|${source}`;
-}
-
-function makeBootstrapRelationshipEdges(params: {
-  player: Record<string, unknown>;
-  latestUserMessage: string;
-  knownZoneIds: Set<string>;
-}): BootstrapRelationshipEdge[] {
-  const evidence = [
-    readString(params.player.background),
-    readString(params.player.motive),
-    readString(params.player.secret),
-    readString(params.player.fear),
-    readString(params.player.goal),
-    readString(params.player.freeform_description),
-    params.latestUserMessage,
-  ]
-    .filter(Boolean)
-    .join(String.fromCharCode(10));
-
-  const goalText = readString(params.player.goal);
-  const out: BootstrapRelationshipEdge[] = [];
-  const seen = new Set<string>();
-
-  const addEdge = (edge: BootstrapRelationshipEdge) => {
-    const zoneRefs = filterKnownZoneIds(edge.zones ?? [], params.knownZoneIds);
-    const normalizedEdge: BootstrapRelationshipEdge =
-      zoneRefs.length > 0 ? { ...edge, zones: zoneRefs } : { ...edge };
-    const key = relationshipKey(normalizedEdge as unknown as Record<string, unknown>);
-    if (!key || seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    out.push(normalizedEdge);
-  };
-
-  if (/왕립\s*해군|해군\s*출신|royal\s*navy/i.test(evidence)) {
-    addEdge({
-      from: "player",
-      to: "faction-royal-navy",
-      relation_type: "former_service",
-      polarity: "mixed",
-      strength: 3,
-      visibility: "secret",
-      source: "bootstrap",
-      mutable: true,
-      zones: ["zone-harbor-docks", "zone-blackwater-quay", "zone-shallow-sea-lane"],
-    });
-  }
-
-  if (/몰락한\s*귀족\s*가문|귀족\s*가문|noble\s*house/i.test(evidence)) {
-    addEdge({
-      from: "player",
-      to: "fac-glass-court",
-      relation_type: "fallen_lineage",
-      polarity: "mixed",
-      strength: 3,
-      visibility: "secret",
-      source: "bootstrap",
-      mutable: true,
-      zones: ["zone-glass-court-vault", "zone-ruined-shrine"],
-    });
-  }
-
-  if (/길드|밀수|선창|하역|river\s*guild|smuggl/i.test(evidence)) {
-    addEdge({
-      from: "player",
-      to: "fac-river-guild",
-      relation_type: "active_interest",
-      polarity: "negative",
-      strength: 2,
-      visibility: "private",
-      source: "bootstrap",
-      mutable: true,
-      zones: ["zone-blackwater-quay", "zone-harbor-docks"],
-    });
-  }
-
-  if (/의회|청문|glass\s*court|magistrate/i.test(evidence)) {
-    addEdge({
-      from: "player",
-      to: "fac-glass-court",
-      relation_type: "active_interest",
-      polarity: "negative",
-      strength: 2,
-      visibility: "private",
-      source: "bootstrap",
-      mutable: true,
-      zones: ["zone-glass-court-vault", "zone-grayglass-northgate"],
-    });
-  }
-
-  if (/북문|검문|north\s*gate/i.test(goalText) || /북문|검문|north\s*gate/i.test(evidence)) {
-    addEdge({
-      from: "player",
-      to: "zone-grayglass-northgate",
-      relation_type: "immediate_focus",
-      polarity: "neutral",
-      strength: 2,
-      visibility: "public",
-      source: "bootstrap",
-      mutable: true,
-      zones: ["zone-grayglass-northgate"],
-    });
-  }
-
-  if (/하급\s*관리|관리\s*하나|빚을\s*진\s*하급\s*관리|owed\s*favor|low[-\s]*rank\s*official/i.test(evidence)) {
-    addEdge({
-      from: "player",
-      to: "fac-city-watch",
-      relation_type: "owed_favor",
-      polarity: "positive",
-      strength: 2,
-      visibility: "secret",
-      source: "bootstrap",
-      mutable: true,
-      zones: ["zone-grayglass-northgate", "zone-ember-belltower"],
-    });
-  }
-
-  if (/못마땅|옛\s*인연|old\s*(?:tie|connection|rival)|grudge/i.test(evidence)) {
-    addEdge({
-      from: "player",
-      to: "fac-glass-court",
-      relation_type: "old_grudge",
-      polarity: "negative",
-      strength: 2,
-      visibility: "private",
-      source: "bootstrap",
-      mutable: true,
-      zones: ["zone-glass-court-vault", "zone-grayglass-northgate"],
-    });
-  }
-
-  if (/장부|채무|빚|비공식\s*중개|그림자\s*중개|ledger|debt|broker/i.test(evidence)) {
-    addEdge({
-      from: "player",
-      to: "fac-river-guild",
-      relation_type: "debt_broker_entanglement",
-      polarity: "mixed",
-      strength: 3,
-      visibility: "private",
-      source: "bootstrap",
-      mutable: true,
-      zones: ["zone-blackwater-quay", "zone-glass-court-vault", "zone-grayglass-northgate"],
-    });
-  }
-
-  return out;
 }
 
 async function applyBootstrapAuditedPersistence(params: {
@@ -3273,101 +3030,12 @@ ${promptTail}`;
   };
 }
 
-function renderSceneIntroSeed(parsed: unknown): string {
-  const root = toObject(parsed);
-  const scene = toObject(root.scene);
-  const location = toObject(scene.location);
-  const surfaces = toObject(root.surfaces);
-  const actors = toObject(root.actors);
-  const interaction = toObject(root.interaction);
-  const npcVisibility = collectSceneNpcVisibility(root);
-  const redact = (value: string) => redactHiddenNpcNames(value, npcVisibility);
-
-  const clueTexts = (Array.isArray(surfaces.observable_clues) ? surfaces.observable_clues : [])
-    .map((entry) => redact(readString(toObject(entry).text)))
-    .filter(Boolean)
-    .slice(0, 5);
-
-  const visibleNpcEntries = Array.isArray(actors.visible_npcs) ? actors.visible_npcs : [];
-  const npcPostures = visibleNpcEntries
-    .map((entry, index) => {
-      const obj = toObject(entry);
-      const visibility = npcVisibility[index];
-      const name = visibility?.displayName || readString(obj.name) || npcMaskLabel(obj, index);
-      const attitude = readString(obj.attitude) || "unknown";
-      const intent = redact(readString(obj.immediate_intent));
-      return intent ? `- ${name}: ${attitude} (${intent})` : `- ${name}: ${attitude}`;
-    })
-    .filter(Boolean)
-    .slice(0, 5);
-
-  const suggestionsNode = toObject(interaction.suggestions);
-  const rawSuggestions = Array.isArray(suggestionsNode.optional_actions)
-    ? suggestionsNode.optional_actions
-    : Array.isArray(interaction.suggested_actions_optional)
-      ? interaction.suggested_actions_optional
-      : [];
-  const suggestedActions = rawSuggestions
-    .map((entry) =>
-      typeof entry === "string"
-        ? entry.trim()
-        : readString(toObject(entry).action) || readString(toObject(entry).optional_action),
-    )
-    .filter(Boolean)
-    .map((entry) => redact(entry))
-    .slice(0, 5);
-
-  const lines: string[] = [];
-  const title = readString(scene.title);
-  const region = readString(location.region);
-  const site = readString(location.site);
-  const zoneId = readString(location.zone_id);
-  const nearbyZones = (Array.isArray(location.nearby_zone_ids) ? location.nearby_zone_ids : [])
-    .filter((entry): entry is string => typeof entry === "string")
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .slice(0, 3);
-  const openingBeat = redact(readString(scene.opening_beat));
-  const objective = redact(readString(scene.immediate_objective));
-  const risk = redact(readString(scene.obvious_risk));
-  const freeformPrompt =
-    redact(readString(interaction.freeform_prompt)) ||
-    "Declare your action freely in one line. Suggestions are optional support only.";
-
-  if (title) lines.push(`Scene: ${title}`);
-  if (region || site) lines.push(`Location: ${region || "unknown-region"} / ${site || "unknown-site"}`);
-  if (zoneId || nearbyZones.length > 0) {
-    const nearbyText = nearbyZones.length > 0 ? ` (nearby: ${nearbyZones.join(", ")})` : "";
-    lines.push(`Zone: ${zoneId || "unknown-zone"}${nearbyText}`);
-  }
-  if (openingBeat) lines.push(`Current situation: ${openingBeat}`);
-  if (objective) lines.push(`Why it matters now: ${objective}`);
-  if (risk) lines.push(`Immediate pressure: ${risk}`);
-  if (clueTexts.length > 0) {
-    lines.push("Visible observations:");
-    for (const clue of clueTexts) lines.push(`- ${clue}`);
-  }
-  if (npcPostures.length > 0) {
-    lines.push("Nearby NPC posture:");
-    lines.push(...npcPostures);
-  }
-  if (npcVisibility.some((entry) => entry.hidden)) {
-    lines.push("NPC identity guard: some names are withheld until introduced or made public.");
-  }
-  lines.push(`Freeform invitation: ${freeformPrompt}`);
-  if (suggestedActions.length > 0) {
-    lines.push("Optional suggestions (after freeform invitation only):");
-    for (const action of suggestedActions) lines.push(`- ${action}`);
-  }
-
-  return lines.join("\n");
-}
 async function applySceneIntroGuard(params: {
   cfg: ReturnType<typeof parseTrpgRuntimeConfig>;
   worldRoot: string;
-}): Promise<{ introRequired: boolean; introSeed?: string; sceneId: string; majorSceneStart: boolean }> {
+}): Promise<{ introRequired: boolean; sceneId: string; majorSceneStart: boolean }> {
   const loaded = await loadStructuredWorldFile(params.worldRoot, "state/current-scene.yaml", {
-    allowMissing: false,
+    allowMissing: true,
     maxReadBytes: params.cfg.maxReadBytes,
   });
 
@@ -3387,8 +3055,6 @@ async function applySceneIntroGuard(params: {
     };
   }
 
-  const introSeed = renderSceneIntroSeed(root);
-
   sceneFlow.intro_shown = true;
   sceneFlow.awaiting_player_action = true;
   scene.scene_flow = sceneFlow;
@@ -3400,7 +3066,6 @@ async function applySceneIntroGuard(params: {
 
   return {
     introRequired: true,
-    introSeed,
     sceneId,
     majorSceneStart,
   };
@@ -3704,7 +3369,6 @@ async function runCharacterBootstrapGate(params: {
   const player = toObject(root.player);
   const gameState = toObject(root.game_state);
   const worldHints = toObject(root.world_hints);
-  const inferredStructures = toStringArray(worldHints.inferred_structures);
 
   const latestUserMessage =
     extractLatestUserMessageFromPrompt(params.prompt) || extractLatestUserMessage(params.messages);
@@ -3728,13 +3392,6 @@ async function runCharacterBootstrapGate(params: {
   );
   if (readString(player.freeform_description) !== mergedFreeform) {
     player.freeform_description = mergedFreeform;
-    changed = true;
-  }
-
-  const inferredFromAnswer = inferWorldStructuresFromBootstrap(latestUserMessage);
-  const mergedInferred = Array.from(new Set([...inferredStructures, ...inferredFromAnswer]));
-  if (mergedInferred.length !== inferredStructures.length) {
-    worldHints.inferred_structures = mergedInferred;
     changed = true;
   }
 
@@ -3827,11 +3484,7 @@ async function runCharacterBootstrapGate(params: {
     }
   }
 
-  const [locationsLoaded, worldSeedsLoaded, relationshipsLoaded] = await Promise.all([
-    loadStructuredWorldFile(params.worldRoot, "canon/locations.yaml", {
-      allowMissing: true,
-      maxReadBytes: params.cfg.maxReadBytes,
-    }),
+  const [worldSeedsLoaded, relationshipsLoaded] = await Promise.all([
     loadStructuredWorldFile(params.worldRoot, "state/world-seeds.yaml", {
       allowMissing: true,
       maxReadBytes: params.cfg.maxReadBytes,
@@ -3842,8 +3495,6 @@ async function runCharacterBootstrapGate(params: {
     }),
   ]);
 
-  const knownZoneIds = buildKnownZoneIdSet(locationsLoaded.parsed);
-
   const worldSeedsRoot = toObject(worldSeedsLoaded.parsed);
   const worldSeeds = toObject(worldSeedsRoot.seeds);
   const bootstrapSeeds = toObject(worldSeeds.bootstrap);
@@ -3852,8 +3503,7 @@ async function runCharacterBootstrapGate(params: {
   const inferredMerged = Array.from(
     new Set([...existingSeedStructures, ...toStringArray(worldHints.inferred_structures)]),
   );
-  const seededZones = filterKnownZoneIds(bootstrapSeedZones(inferredMerged), knownZoneIds);
-  const mergedSeedZones = Array.from(new Set([...existingSeedZones, ...seededZones]));
+  const mergedSeedZones = Array.from(new Set(existingSeedZones));
 
   let worldSeedsChanged = false;
   if (
@@ -3879,12 +3529,6 @@ async function runCharacterBootstrapGate(params: {
     : Array.isArray(relationshipsRoot.edges)
       ? relationshipsRoot.edges
       : [];
-  const generatedEdges = makeBootstrapRelationshipEdges({
-    player,
-    latestUserMessage,
-    knownZoneIds,
-  });
-
   const mergedEdges: Record<string, unknown>[] = [];
   const seenEdgeKeys = new Set<string>();
   for (const edge of existingEdges) {
@@ -3894,14 +3538,6 @@ async function runCharacterBootstrapGate(params: {
     seenEdgeKeys.add(key);
     mergedEdges.push(edgeObj);
   }
-  for (const edge of generatedEdges) {
-    const edgeObj = edge as unknown as Record<string, unknown>;
-    const key = relationshipKey(edgeObj);
-    if (!key || seenEdgeKeys.has(key)) continue;
-    seenEdgeKeys.add(key);
-    mergedEdges.push(edgeObj);
-  }
-
   const relationshipsChanged = mergedEdges.length !== existingEdges.length;
   if (relationshipsChanged) {
     relationshipsNode.edges = mergedEdges;
@@ -3989,7 +3625,15 @@ function isAllowedRuntimeAgent(
   agentId: string | undefined,
 ): boolean {
   const normalized = typeof agentId === "string" ? agentId.trim() : "";
-  return normalized.length > 0 && cfg.allowedAgentIds.includes(normalized);
+  if (!normalized) {
+    return false;
+  }
+
+  if (cfg.allowedAgentIds.length === 0) {
+    return true;
+  }
+
+  return cfg.allowedAgentIds.includes(normalized);
 }
 
 function toolGate(params: {
@@ -4097,11 +3741,13 @@ const trpgRuntimePlugin = {
         }
 
         const guard = await applySceneIntroGuard({ cfg, worldRoot });
-        if (guard.introRequired && guard.introSeed) {
+        if (guard.introRequired) {
           const guidance = [
             "[TRPG_RUNTIME_INTRO_GUARD]",
             "scene.scene_flow.intro_shown was false for a major scene start.",
             "Runtime has now set scene.scene_flow.intro_shown=true and awaiting_player_action=true.",
+            `Current scene id: ${guard.sceneId || "unknown-scene"}`,
+            "If scene details are missing, use neutral wording and state that the current scene is unknown.",
             "For this response, output order is mandatory:",
             "1) current location and situation",
             "2) visible observations and clues",
@@ -4111,9 +3757,6 @@ const trpgRuntimePlugin = {
             "6) optional suggestions only after freeform invitation",
             "Never lead with bare choices or menu lists before step 4.",
             "If the player already supplied a concrete freeform action this turn, resolve it directly and skip suggestion lists.",
-            "",
-            "Scene intro seed:",
-            guard.introSeed,
           ].join(String.fromCharCode(10));
           appendChunks.push(guidance);
           api.logger.info(
@@ -4504,10 +4147,15 @@ const trpgRuntimePlugin = {
         description: "Return deterministic and traceable structured dice roll results.",
         parameters: DICE_ROLL_PARAMETERS,
         async execute(_toolCallId, params) {
+          const gate = toolGate({ cfg, ctx, api });
+          if (!gate.ok) {
+            return jsonToolResult(gate.payload);
+          }
+
           try {
             const payload = runDiceRoll({
               input: params as DiceRollInput,
-              agentId: ctx.agentId,
+              agentId: gate.agentId,
               sessionId: ctx.sessionId,
             });
             return jsonToolResult(payload);

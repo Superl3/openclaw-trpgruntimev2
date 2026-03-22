@@ -18,6 +18,16 @@ Use it from `~/.openclaw/extensions/trpg-runtime` either as a plugin-only overla
 9. Agent-level gate through `plugins.entries.trpg-runtime.config.allowedAgentIds`.
 10. Path/write safety guards around world-root resolution and patch operations.
 
+## 2.1) World-data-driven behavior
+
+- Hardcoded setting/scenario content has been removed from runtime prompt hooks.
+- The runtime now reads scene/location/relationship context from your world files only.
+- Put your own location graph, intro scene fields, and relationship edges in files such as:
+  - `world/canon/locations.yaml`
+  - `world/state/current-scene.yaml`
+  - `world/state/relationships.yaml`
+- If those files are sparse or empty, runtime keeps working with neutral fallback guard text (for example: current scene unknown).
+
 ## 3) Install / Onboard steps
 
 1. Keep extension files at `~/.openclaw/extensions/trpg-runtime`.

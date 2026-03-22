@@ -13,6 +13,13 @@ Structured TRPG runtime plugin for OpenClaw.
 
 All tools return JSON-shaped output (`details`) and JSON text in `content`.
 
+## World-data-driven runtime
+
+- Hardcoded setting/scenario seeding has been removed from runtime hooks.
+- Scene generation now depends on your world files only.
+- Define locations, intro scene data, and relationship edges in `world/` files (for example `canon/locations.yaml`, `state/current-scene.yaml`, and `state/relationships.yaml`).
+- If scene data is missing, runtime falls back to neutral guard text (for example current scene unknown) instead of injecting fixed lore.
+
 ## Safety model
 
 - Agent gate: defaults to `allowedAgentIds: []` (empty list means allow all agents)
