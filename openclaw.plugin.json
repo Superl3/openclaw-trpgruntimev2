@@ -1,7 +1,7 @@
 {
-  "id": "trpg-runtime",
-  "name": "TRPG Runtime",
-  "description": "Structured TRPG world-store tools for dedicated trpg sessions.",
+  "id": "trpg-runtime-v2",
+  "name": "TRPG Runtime V2",
+  "description": "Structured TRPG world-store tools for OpenClaw sessions (V2).",
   "version": "0.1.0",
   "configSchema": {
     "type": "object",
@@ -9,7 +9,7 @@
     "properties": {
       "worldRoot": {
         "type": "string",
-        "description": "Optional absolute or resolvable path to world root. Defaults to <workspace>/world."
+        "description": "Optional absolute or resolvable path to world root. Defaults to extension-local world directory."
       },
       "allowPatchApply": {
         "type": "boolean",
@@ -39,8 +39,8 @@
         "items": {
           "type": "string"
         },
-        "default": ["trpg"],
-        "description": "Only these agent ids may execute tools."
+        "default": [],
+        "description": "Only these agent ids may execute tools. Empty array allows all agents."
       }
     }
   },
@@ -57,7 +57,7 @@
     },
     "allowedAgentIds": {
       "label": "Allowed Agent IDs",
-      "help": "Restrict tool execution to dedicated agents.",
+      "help": "Restrict tool execution to dedicated agents. Leave empty to allow all agents.",
       "advanced": true
     }
   }

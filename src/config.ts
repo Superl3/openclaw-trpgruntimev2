@@ -16,7 +16,7 @@ const DEFAULT_CONFIG: TrpgRuntimeConfig = {
   maxReadBytes: 262_144,
   maxFilesPerQuery: 40,
   maxOperationsPerPatch: 64,
-  allowedAgentIds: ["trpg"],
+  allowedAgentIds: [],
 };
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -101,20 +101,11 @@ export function resolveWorldRootForContext(params: {
   ctx: OpenClawPluginToolContext;
   resolvePath: (input: string) => string;
 }): string {
-  const fromWorkspace =
-    typeof params.ctx.workspaceDir === "string" && params.ctx.workspaceDir.trim()
-      ? path.join(params.ctx.workspaceDir, "world")
-      : undefined;
-
-  if (fromWorkspace) {
-    return path.resolve(fromWorkspace);
-  }
-
   if (params.cfg.worldRoot) {
     return path.resolve(params.resolvePath(params.cfg.worldRoot));
   }
 
-  return path.resolve(params.resolvePath("~/.openclaw/workspace-trpg/world"));
+  return path.resolve(params.resolvePath("world"));
 }
 
 export function assertAgentAllowed(
@@ -125,9 +116,12 @@ export function assertAgentAllowed(
   if (!agentId) {
     return {
       ok: false,
-      error:
-        "agentId is missing in tool context. This plugin is restricted to dedicated TRPG agent sessions.",
+      error: "agentId is missing in tool context.",
     };
+  }
+
+  if (cfg.allowedAgentIds.length === 0) {
+    return { ok: true };
   }
 
   if (!cfg.allowedAgentIds.includes(agentId)) {
