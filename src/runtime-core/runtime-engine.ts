@@ -719,6 +719,51 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
       session,
       createTraceEvent({
         lane: "engine",
+        type: "engine.pressure.advanced",
+        tsIso: nowIso,
+        data: {
+          advancedCount: resolution.questSummary.pressureAdvancedCount,
+          topPressure: resolution.questSummary.pressureTop,
+          spawnedSeeds: resolution.questSummary.spawnedSeeds,
+        },
+      }),
+    );
+
+    session = appendTraceEvent(
+      session,
+      createTraceEvent({
+        lane: "engine",
+        type: "engine.quest.lifecycle",
+        tsIso: nowIso,
+        data: {
+          transitionCount: resolution.questSummary.transitionCount,
+          transitions: resolution.questSummary.transitions.slice(0, 6),
+          surfacedNow: resolution.questSummary.surfacedNow,
+          expiredDeleted: resolution.questSummary.expiredDeleted,
+          failedNow: resolution.questSummary.failedNow,
+          mutatedNow: resolution.questSummary.mutatedNow,
+          archivedNow: resolution.questSummary.archivedNow,
+          budgetUsed: resolution.questSummary.budget.used,
+          budgetCaps: resolution.questSummary.budget.caps,
+          softQuotaCaps: resolution.questSummary.softQuota.caps,
+          topQuotaUsage: {
+            location: resolution.questSummary.softQuota.usageByLocation[0] ?? null,
+            pressure: resolution.questSummary.softQuota.usageByPressure[0] ?? null,
+            archetype: resolution.questSummary.softQuota.usageByArchetype[0] ?? null,
+          },
+          qualitative: {
+            surfaced: resolution.questSummary.qualitative.surfaced,
+            urgent: resolution.questSummary.qualitative.urgent,
+            pressure: resolution.questSummary.qualitative.pressure,
+          },
+        },
+      }),
+    );
+
+    session = appendTraceEvent(
+      session,
+      createTraceEvent({
+        lane: "engine",
         type: "engine.action.resolved",
         tsIso: nowIso,
         data: {
@@ -733,6 +778,8 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
           preResolvedClaimUntrusted,
           locationId: nextLoop.scene.locationId,
           temporalLocationShifted: resolution.temporalSummary.locationShifted,
+          questTransitionCount: resolution.questSummary.transitionCount,
+          questSpawnedSeeds: resolution.questSummary.spawnedSeeds,
           sceneTransitioned,
         },
       }),

@@ -38,6 +38,14 @@ Use it from `~/.openclaw/extensions/trpg-runtime` either as a plugin-only overla
 - Persistent location drift requires explicit `locationId`; scenes without `locationId` remain valid and continue running.
 - `debugRuntimeSignals=true` reveals raw temporal metrics; default UX keeps qualitative cues.
 
+## 2.4) Quest economy notes (Checkpoint 6)
+
+- Runtime now keeps deterministic `worldPressures` + bounded `quests` pool (`seed/surfaced/active/stalled/resolved/failed/archived/deleted`).
+- `deleted` is only used for pre-start opportunity expiration; started quests use `failed`/`successor` paths instead of hard delete.
+- Quest growth is constrained by hard live cap + weighted world/attention budget + soft quotas (location/pressure/archetype).
+- Quest economy reads compact `QuestTemporalSignal` bridge from temporal systems, not raw temporal internals.
+- Panel shows qualitative quest status by default; debug mode exposes raw budget/quota counters.
+
 ## 2.1) World-data-driven behavior
 
 - Hardcoded setting/scenario content has been removed from runtime prompt hooks.

@@ -38,6 +38,14 @@
 - persistent location drift는 명시적 `locationId`가 있을 때만 적용됩니다. `locationId`가 없는 scene도 정상 동작합니다.
 - 기본 UX는 정성 신호 위주이며, raw temporal 수치는 `debugRuntimeSignals=true`에서만 노출됩니다.
 
+## 2.4) Quest economy 메모 (Checkpoint 6)
+
+- runtime이 deterministic `worldPressures`와 bounded `quests` 풀을 유지합니다 (`seed/surfaced/active/stalled/resolved/failed/archived/deleted`).
+- `deleted`는 시작 전 기회 만료에만 사용되고, started quest는 hard delete 대신 `failed`/`successor` 경로를 사용합니다.
+- 퀘스트 증식은 hard live cap + weighted world/attention budget + soft quota(location/pressure/archetype)로 제한됩니다.
+- quest economy는 raw temporal 내부를 직접 보지 않고 `QuestTemporalSignal` bridge 입력만 사용합니다.
+- 기본 패널은 정성 요약을 보여주고, raw budget/quota 수치는 `debugRuntimeSignals=true`에서만 노출됩니다.
+
 ## 2.1) World-data-driven 동작
 
 - 런타임 프롬프트 훅의 하드코딩된 설정/시나리오 주입 로직은 제거되었습니다.

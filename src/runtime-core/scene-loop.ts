@@ -1,9 +1,16 @@
 import {
+  buildQuestTemporalSignal,
   ensureTemporalRuntimeState,
   runTemporalUpdatePipeline,
   type TemporalRuntimeState,
   type TemporalUpdateSummary,
 } from "./temporal-systems.js";
+import {
+  ensureQuestEconomyState,
+  runQuestEconomyTick,
+  type QuestEconomyState,
+  type QuestEconomyTickSummary,
+} from "./quest-economy.js";
 
 export type ActionFeasibility = "possible" | "currently_impossible" | "reckless" | "impossible";
 
@@ -125,6 +132,7 @@ export type DeterministicSceneLoopState = {
   intentInertia: IntentInertiaState;
   analyzerMemory: AnalyzerMemoryState;
   temporal: TemporalRuntimeState;
+  questEconomy: QuestEconomyState;
   actionPalette: ActionPaletteEntry[];
 };
 
@@ -147,6 +155,7 @@ export type DeterministicActionResolution = {
   reactionChain: string[];
   exchange: ExchangeState;
   temporalSummary: TemporalUpdateSummary;
+  questSummary: QuestEconomyTickSummary;
 };
 
 const DEFAULT_SCENE_ID = "scene-bootstrap";
@@ -613,6 +622,7 @@ export function createInitialDeterministicSceneLoop(params: {
       expiresAtIso: nextAnalyzerMemoryExpiry(params.nowIso),
     },
     temporal: ensureTemporalRuntimeState(undefined, params.nowIso),
+    questEconomy: ensureQuestEconomyState(undefined, params.nowIso),
     actionPalette: [],
   };
 
@@ -746,6 +756,7 @@ export function ensureDeterministicSceneLoopState(value: unknown, params: {
       };
 
   const temporal = ensureTemporalRuntimeState(root.temporal, time.worldNowIso || params.nowIso);
+  const questEconomy = ensureQuestEconomyState(root.questEconomy, time.worldNowIso || params.nowIso);
 
   const exchangeObj = toRecord(root.exchange);
   const exchange: ExchangeState | null = Object.keys(exchangeObj).length
@@ -789,6 +800,7 @@ export function ensureDeterministicSceneLoopState(value: unknown, params: {
     intentInertia,
     analyzerMemory,
     temporal,
+    questEconomy,
     actionPalette: [],
   };
 
@@ -990,6 +1002,22 @@ export function resolveDeterministicSceneAction(input: DeterministicActionInput)
     }
   }
 
+  const questTemporalSignal = buildQuestTemporalSignal({
+    temporal: temporalPipeline.nextTemporal,
+    locationId: nextScene.locationId,
+  });
+
+  const questTick = runQuestEconomyTick({
+    economy: current.questEconomy,
+    nowIso: worldNowIso,
+    deltaTimeSec,
+    sceneId: nextScene.sceneId,
+    locationId: nextScene.locationId,
+    actionId: resolvedAction.resolvedActionId,
+    classification: classified.classification,
+    temporalSignal: questTemporalSignal,
+  });
+
   nextScene.riskTier = riskTierFromPressure(nextScene.pressure);
 
   const exchangeIndex = sceneTransitioned ? 1 : (current.exchange?.exchangeIndex ?? 0) + 1;
@@ -1053,6 +1081,7 @@ export function resolveDeterministicSceneAction(input: DeterministicActionInput)
       expiresAtIso: current.analyzerMemory.expiresAtIso ?? nextAnalyzerMemoryExpiry(input.nowIso),
     },
     temporal: temporalPipeline.nextTemporal,
+    questEconomy: questTick.nextEconomy,
     actionPalette: [],
   };
 
@@ -1069,5 +1098,6 @@ export function resolveDeterministicSceneAction(input: DeterministicActionInput)
     reactionChain,
     exchange,
     temporalSummary: temporalPipeline.summary,
+    questSummary: questTick.summary,
   };
 }

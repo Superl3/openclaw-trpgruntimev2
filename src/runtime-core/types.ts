@@ -34,6 +34,8 @@ export type RuntimeTraceEventType =
   | "panel.commit.expired"
   | "engine.time.advanced"
   | "engine.temporal.updated"
+  | "engine.pressure.advanced"
+  | "engine.quest.lifecycle"
   | "engine.action.resolved";
 
 export type RuntimeTraceEvent = {

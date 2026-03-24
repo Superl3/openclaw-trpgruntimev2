@@ -105,6 +105,17 @@ export type TemporalUpdateSummary = {
   };
 };
 
+export type QuestTemporalSignal = {
+  locationId: string | null;
+  locationTension: number;
+  locationAlertness: number;
+  locationAccessibility: number;
+  infoFreshness: number;
+  memoryFamiliarity: number;
+  residualTraceHeat: number;
+  incidentCount: number;
+};
+
 export type TemporalPipelineInput = {
   temporal: TemporalRuntimeState | null | undefined;
   sceneId: string;
@@ -975,6 +986,40 @@ export function buildTemporalQualitativeSummary(params: {
           }
         : null,
     },
+  };
+}
+
+export function buildQuestTemporalSignal(params: {
+  temporal: TemporalRuntimeState;
+  locationId: string | null;
+}): QuestTemporalSignal {
+  const locationState = params.locationId
+    ? params.temporal.locationStates.find((entry) => entry.locationId === params.locationId) ?? null
+    : null;
+
+  const freshnessPool = params.locationId
+    ? params.temporal.infoFreshness.filter((entry) => entry.locationId === params.locationId || entry.locationId === null)
+    : params.temporal.infoFreshness;
+  const memoryPool = params.locationId
+    ? params.temporal.npcMemory.filter((entry) => entry.locationId === params.locationId || entry.locationId === null)
+    : params.temporal.npcMemory;
+  const tracePool = params.locationId
+    ? params.temporal.residualTraces.filter((entry) => entry.locationId === params.locationId)
+    : params.temporal.residualTraces;
+
+  const infoFreshness = freshnessPool.reduce((max, entry) => Math.max(max, entry.freshness), 0);
+  const memoryFamiliarity = memoryPool.reduce((max, entry) => Math.max(max, entry.familiarity), 0);
+  const residualTraceHeat = tracePool.reduce((max, entry) => Math.max(max, entry.intensity), 0);
+
+  return {
+    locationId: params.locationId,
+    locationTension: locationState?.tension ?? 35,
+    locationAlertness: locationState?.alertness ?? 30,
+    locationAccessibility: locationState?.accessibility ?? 70,
+    infoFreshness,
+    memoryFamiliarity,
+    residualTraceHeat,
+    incidentCount: locationState?.recentIncidents.length ?? 0,
   };
 }
 

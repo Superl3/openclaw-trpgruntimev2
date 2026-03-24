@@ -1,4 +1,5 @@
 import { actionLabelFor, collectButtonActionIds, feasibilityLabel } from "./scene-loop.js";
+import { buildQuestEconomyQualitativeSummary } from "./quest-economy.js";
 import { buildTemporalQualitativeSummary } from "./temporal-systems.js";
 import type { InteractionRouteKey, InteractionRouteRecord, SessionState } from "./types.js";
 
@@ -112,6 +113,10 @@ function subSectionText(session: SessionState, debugRuntimeSignals: boolean): st
     temporal: loop.temporal,
     locationId: loop.scene.locationId,
   });
+  const questSummary = buildQuestEconomyQualitativeSummary({
+    economy: loop.questEconomy,
+    locationId: loop.scene.locationId,
+  });
 
   if (session.status === "ended") {
     lines.push("세션 종료 상태다.");
@@ -154,12 +159,21 @@ function subSectionText(session: SessionState, debugRuntimeSignals: boolean): st
     `지역 상태: ${temporalSummary.location}`,
   );
 
+  lines.push(
+    `퀘스트 기회: ${questSummary.surfaced}`,
+    `긴급 퀘스트: ${questSummary.urgent}`,
+    `월드 압력: ${questSummary.pressure}`,
+  );
+
   if (debugRuntimeSignals) {
     lines.push(
       `debug.behavioral_drift.raw: warm=${drift.warmth.toFixed(2)} bold=${drift.boldness.toFixed(2)} caution=${drift.caution.toFixed(2)} altruism=${drift.altruism.toFixed(2)} aggression=${drift.aggression.toFixed(2)} humor=${drift.humor.toFixed(2)}`,
     );
     lines.push(
       `debug.temporal.raw: location=${temporalSummary.debug.locationId ?? "none"} memory=${String(temporalSummary.debug.memoryCount)} max_familiarity=${String(temporalSummary.debug.maxFamiliarity)} max_freshness=${String(temporalSummary.debug.maxFreshness)} traces=${String(temporalSummary.debug.activeTraceCount)} max_trace=${String(temporalSummary.debug.maxTraceIntensity)} location_state=${temporalSummary.debug.locationState ? `tension=${String(temporalSummary.debug.locationState.tension)} alertness=${String(temporalSummary.debug.locationState.alertness)} accessibility=${String(temporalSummary.debug.locationState.accessibility)}` : "none"}`,
+    );
+    lines.push(
+      `debug.quest_economy.raw: live=${String(questSummary.debug.liveQuestCount)} surfaced=${String(questSummary.counts.surfaced)} active=${String(questSummary.counts.active)} budget_used=live:${String(questSummary.debug.budget.used.livePool)}/world:${String(questSummary.debug.budget.used.world)}/attention:${String(questSummary.debug.budget.used.attention)}/narrative:${String(questSummary.debug.budget.used.narrative)} budget_caps=live:${String(questSummary.debug.budget.caps.livePool)}/world:${String(questSummary.debug.budget.caps.world)}/attention:${String(questSummary.debug.budget.caps.attention)}/narrative:${String(questSummary.debug.budget.caps.narrative)} quota_caps=loc:${String(questSummary.debug.softQuota.caps.perLocation)}/pressure:${String(questSummary.debug.softQuota.caps.perPressure)}/archetype:${String(questSummary.debug.softQuota.caps.perArchetype)}`,
     );
   }
 

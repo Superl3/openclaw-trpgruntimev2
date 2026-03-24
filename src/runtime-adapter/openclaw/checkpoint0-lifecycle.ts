@@ -16,6 +16,7 @@ import {
   parsePanelCustomId,
   type PanelMessageMode,
 } from "../../runtime-core/panel-mvp.js";
+import { buildQuestEconomyQualitativeSummary } from "../../runtime-core/quest-economy.js";
 import { buildTemporalQualitativeSummary } from "../../runtime-core/temporal-systems.js";
 import { ensureDeterministicSceneLoopState } from "../../runtime-core/scene-loop.js";
 import { appendTraceEvent, createTraceEvent, ensureTraceState } from "../../runtime-core/trace.js";
@@ -495,6 +496,10 @@ function preparePanelDispatch(params: {
     temporal: loop.temporal,
     locationId: loop.scene.locationId,
   });
+  const questSummary = buildQuestEconomyQualitativeSummary({
+    economy: loop.questEconomy,
+    locationId: loop.scene.locationId,
+  });
   const temporalSummaryPayload = params.debugRuntimeSignals
     ? temporalSummary
     : {
@@ -502,6 +507,13 @@ function preparePanelDispatch(params: {
         traces: temporalSummary.traces,
         freshness: temporalSummary.freshness,
         location: temporalSummary.location,
+      };
+  const questSummaryPayload = params.debugRuntimeSignals
+    ? questSummary
+    : {
+        surfaced: questSummary.surfaced,
+        urgent: questSummary.urgent,
+        pressure: questSummary.pressure,
       };
 
   const preparedSession = appendTraceEvent(
@@ -555,6 +567,7 @@ function preparePanelDispatch(params: {
         exchangeId: loop.exchange?.exchangeId ?? null,
         deltaTimeSec: loop.time.lastDeltaSec,
         temporalSummary: temporalSummaryPayload,
+        questSummary: questSummaryPayload,
       },
       sub: {
         availableButtons,
