@@ -511,9 +511,33 @@ function preparePanelDispatch(params: {
   const questSummaryPayload = params.debugRuntimeSignals
     ? questSummary
     : {
-        surfaced: questSummary.surfaced,
-        urgent: questSummary.urgent,
-        pressure: questSummary.pressure,
+        actionable: {
+          activeCount: questSummary.actionable.activeCount,
+          surfacedCount: questSummary.actionable.surfacedCount,
+          activeTop: questSummary.actionable.activeTop
+            ? {
+                slotKey: questSummary.actionable.activeTop.slotKey,
+                questId: questSummary.actionable.activeTop.questId,
+                lifecycle: questSummary.actionable.activeTop.lifecycle,
+                urgencyBand: questSummary.actionable.activeTop.urgencyBand,
+                text:
+                  questSummary.actionable.activeTop.llmShortText ??
+                  questSummary.actionable.activeTop.defaultText,
+              }
+            : null,
+          surfacedTop: questSummary.actionable.surfacedTop.map((slot) => ({
+            slotKey: slot.slotKey,
+            questId: slot.questId,
+            lifecycle: slot.lifecycle,
+            urgencyBand: slot.urgencyBand,
+            text: slot.llmShortText ?? slot.defaultText,
+          })),
+        },
+        worldPulse: {
+          text: questSummary.worldPulse.text,
+          trend: questSummary.worldPulse.topPressure?.trend ?? null,
+        },
+        recentOutcomes: questSummary.recentOutcomes.items.map((entry) => entry.text),
       };
 
   const preparedSession = appendTraceEvent(

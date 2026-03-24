@@ -46,6 +46,15 @@ Use it from `~/.openclaw/extensions/trpg-runtime` either as a plugin-only overla
 - Quest economy reads compact `QuestTemporalSignal` bridge from temporal systems, not raw temporal internals.
 - Panel shows qualitative quest status by default; debug mode exposes raw budget/quota counters.
 
+## 2.5) Rich surfacing + tuning notes (Checkpoint 6B)
+
+- Quest panel summary is layered as actionable / world pulse / recent outcomes.
+- Active and surfaced opportunities are shown separately (active top 1, surfaced top up to 2).
+- Recent lifecycle outcomes are shown in player-facing natural phrases (no raw lifecycle code terms).
+- `hookSlot.llmShortText` is a reserved optional field only; no runtime LLM hook call path is used in this checkpoint.
+- Tuning telemetry is bounded via ring+snapshot (`surfacing/expiration/mutation/successor rates`, budget utilization, quota saturation, urgency ratio).
+- Raw tuning/budget/quota values remain debug-only behind `debugRuntimeSignals=true`.
+
 ## 2.1) World-data-driven behavior
 
 - Hardcoded setting/scenario content has been removed from runtime prompt hooks.

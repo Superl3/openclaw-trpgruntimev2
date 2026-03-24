@@ -61,12 +61,20 @@ function fixedSectionText(session: SessionState): string {
 
 function mainSectionText(session: SessionState): string {
   const loop = session.deterministicLoop;
+  const questSummary = buildQuestEconomyQualitativeSummary({
+    economy: loop.questEconomy,
+    locationId: loop.scene.locationId,
+  });
   const lines = [
     "**Main UI**",
     `장면: ${loop.scene.title} (${loop.scene.sceneId}) / phase=${loop.scene.phase}`,
     `위치: ${loop.scene.locationId ?? "(미지정)"}`,
     `Beat ${String(loop.beat.beatIndex)}: ${loop.beat.objective}`,
     `압력: ${String(loop.scene.pressure)} (${loop.scene.riskTier})`,
+    `활성 과제: ${String(questSummary.actionable.activeCount)}건 · ${questSummary.actionable.activeTop ? (questSummary.actionable.activeTop.llmShortText ?? questSummary.actionable.activeTop.defaultText) : "진행 중 과제가 없다."}`,
+    `접촉 기회: ${String(questSummary.actionable.surfacedCount)}건 · ${questSummary.actionable.surfacedTop.length > 0 ? questSummary.actionable.surfacedTop.map((slot) => slot.llmShortText ?? slot.defaultText).join(" / ") : "현재 접촉 가능한 기회가 없다."}`,
+    `세계 동향: ${questSummary.worldPulse.text}`,
+    `최근 변화: ${questSummary.recentOutcomes.text}`,
   ];
 
   if (session.status === "ended") {
@@ -160,10 +168,16 @@ function subSectionText(session: SessionState, debugRuntimeSignals: boolean): st
   );
 
   lines.push(
-    `퀘스트 기회: ${questSummary.surfaced}`,
-    `긴급 퀘스트: ${questSummary.urgent}`,
-    `월드 압력: ${questSummary.pressure}`,
+    `퀘스트(진행): ${questSummary.actionable.activeText}`,
+    `퀘스트(기회): ${questSummary.actionable.surfacedText}`,
+    `월드 축: ${questSummary.worldPulse.text}`,
   );
+
+  if (questSummary.recentOutcomes.items.length > 0) {
+    lines.push(
+      `최근 변화: ${questSummary.recentOutcomes.items.map((entry) => entry.text).join(" / ")}`,
+    );
+  }
 
   if (debugRuntimeSignals) {
     lines.push(
@@ -173,7 +187,10 @@ function subSectionText(session: SessionState, debugRuntimeSignals: boolean): st
       `debug.temporal.raw: location=${temporalSummary.debug.locationId ?? "none"} memory=${String(temporalSummary.debug.memoryCount)} max_familiarity=${String(temporalSummary.debug.maxFamiliarity)} max_freshness=${String(temporalSummary.debug.maxFreshness)} traces=${String(temporalSummary.debug.activeTraceCount)} max_trace=${String(temporalSummary.debug.maxTraceIntensity)} location_state=${temporalSummary.debug.locationState ? `tension=${String(temporalSummary.debug.locationState.tension)} alertness=${String(temporalSummary.debug.locationState.alertness)} accessibility=${String(temporalSummary.debug.locationState.accessibility)}` : "none"}`,
     );
     lines.push(
-      `debug.quest_economy.raw: live=${String(questSummary.debug.liveQuestCount)} surfaced=${String(questSummary.counts.surfaced)} active=${String(questSummary.counts.active)} budget_used=live:${String(questSummary.debug.budget.used.livePool)}/world:${String(questSummary.debug.budget.used.world)}/attention:${String(questSummary.debug.budget.used.attention)}/narrative:${String(questSummary.debug.budget.used.narrative)} budget_caps=live:${String(questSummary.debug.budget.caps.livePool)}/world:${String(questSummary.debug.budget.caps.world)}/attention:${String(questSummary.debug.budget.caps.attention)}/narrative:${String(questSummary.debug.budget.caps.narrative)} quota_caps=loc:${String(questSummary.debug.softQuota.caps.perLocation)}/pressure:${String(questSummary.debug.softQuota.caps.perPressure)}/archetype:${String(questSummary.debug.softQuota.caps.perArchetype)}`,
+      `debug.quest_tuning.raw: surfacing_rate=${questSummary.debug.tuning.surfacingRate.toFixed(2)} expiration_rate=${questSummary.debug.tuning.expirationRate.toFixed(2)} mutation_rate=${questSummary.debug.tuning.mutationRate.toFixed(2)} successor_rate=${questSummary.debug.tuning.successorRate.toFixed(2)} avg_urgency=${String(questSummary.debug.tuning.averageUrgency)} active_vs_surfaced=${questSummary.debug.tuning.activeVsSurfacedRatio.toFixed(2)} budget_util=live:${questSummary.debug.tuning.budgetUtilization.live.toFixed(2)}/world:${questSummary.debug.tuning.budgetUtilization.world.toFixed(2)}/attention:${questSummary.debug.tuning.budgetUtilization.attention.toFixed(2)}/narrative:${questSummary.debug.tuning.budgetUtilization.narrative.toFixed(2)} quota_sat=loc:${questSummary.debug.tuning.quotaSaturation.location.toFixed(2)}/pressure:${questSummary.debug.tuning.quotaSaturation.pressure.toFixed(2)}/archetype:${questSummary.debug.tuning.quotaSaturation.archetype.toFixed(2)}`,
+    );
+    lines.push(
+      `debug.quest_budget.raw: live=${String(questSummary.debug.liveQuestCount)} budget_used=live:${String(questSummary.debug.budget.used.livePool)}/world:${String(questSummary.debug.budget.used.world)}/attention:${String(questSummary.debug.budget.used.attention)}/narrative:${String(questSummary.debug.budget.used.narrative)} budget_caps=live:${String(questSummary.debug.budget.caps.livePool)}/world:${String(questSummary.debug.budget.caps.world)}/attention:${String(questSummary.debug.budget.caps.attention)}/narrative:${String(questSummary.debug.budget.caps.narrative)} quota_caps=loc:${String(questSummary.debug.softQuota.caps.perLocation)}/pressure:${String(questSummary.debug.softQuota.caps.perPressure)}/archetype:${String(questSummary.debug.softQuota.caps.perArchetype)} top_pressure_intensity=${String(questSummary.debug.topPressureIntensity)}`,
     );
   }
 

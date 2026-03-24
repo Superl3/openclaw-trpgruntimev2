@@ -30,12 +30,68 @@ async function loadModules() {
 
   const sceneLoop = await importFromOut("src/runtime-core/scene-loop.js");
   const questEconomy = await importFromOut("src/runtime-core/quest-economy.js");
+  const panel = await importFromOut("src/runtime-core/panel-mvp.js");
   const pluginModule = await importFromOut("index.js");
 
   return {
     sceneLoop,
     questEconomy,
+    panel,
     plugin: pluginModule.default,
+  };
+}
+
+function makeSession(sceneLoopModule, deterministicLoop, nowIso) {
+  return {
+    schemaVersion: 1,
+    sessionId: "sess-quest-ui-test",
+    channelKey: "channel:quest-ui",
+    ownerId: "owner-1",
+    status: "active",
+    sceneId: deterministicLoop.scene.sceneId,
+    uiVersion: 1,
+    actionSeq: 0,
+    turnIndex: 0,
+    lastActionId: null,
+    lastActionSummary: null,
+    deterministicLoop,
+    panelDispatch: {
+      pending: null,
+      committedDispatchIds: [],
+    },
+    trace: {
+      maxEvents: 120,
+      events: [],
+    },
+    panels: {
+      fixed: {
+        panelId: "fixed",
+        uiVersion: 1,
+        sceneId: deterministicLoop.scene.sceneId,
+        messageId: null,
+        channelMessageRef: null,
+        lastRenderedAt: null,
+      },
+      main: {
+        panelId: "main",
+        uiVersion: 1,
+        sceneId: deterministicLoop.scene.sceneId,
+        messageId: null,
+        channelMessageRef: null,
+        lastRenderedAt: null,
+      },
+      sub: {
+        panelId: "sub",
+        uiVersion: 1,
+        sceneId: deterministicLoop.scene.sceneId,
+        messageId: null,
+        channelMessageRef: null,
+        lastRenderedAt: null,
+      },
+    },
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    endedAt: null,
   };
 }
 
@@ -403,6 +459,207 @@ test("severe soft quota can block additional same-axis seed growth", async () =>
 
   assert.equal(result.summary.spawnedSeeds, 0);
   assert.ok(result.summary.debug.severeQuotaBlocks >= 1);
+});
+
+test("panel clearly separates active and surfaced quest summaries", async () => {
+  const { sceneLoop, questEconomy, panel } = await modulesPromise;
+  const nowIso = "2026-03-24T00:00:00.000Z";
+
+  const loop = sceneLoop.createInitialDeterministicSceneLoop({
+    sceneId: "scene-quest-ui-split",
+    nowIso,
+  });
+  loop.scene.locationId = "loc-ui";
+
+  const economy = questEconomy.ensureQuestEconomyState(undefined, nowIso);
+  const pressure = economy.worldPressures[0];
+  economy.quests = [
+    {
+      questId: "quest-active-ui",
+      pressureId: pressure.pressureId,
+      archetype: pressure.archetype,
+      lifecycle: "active",
+      locationId: "loc-ui",
+      urgency: 81,
+      progress: 38,
+      surfacedAtIso: "2026-03-23T23:20:00.000Z",
+      startedAtIso: "2026-03-23T23:21:00.000Z",
+      deadlineAtIso: "2026-03-24T00:40:00.000Z",
+      expiresAtIso: null,
+      lastAdvancedAtIso: nowIso,
+      parentQuestId: null,
+      successorQuestId: null,
+      terminalReason: null,
+      cost: { world: 3, attention: 2, narrative: 1 },
+      hookType: "incident",
+      mutationCount: 0,
+      lastMutationAtIso: null,
+      stallCount: 0,
+    },
+    {
+      questId: "quest-surfaced-ui-1",
+      pressureId: pressure.pressureId,
+      archetype: pressure.archetype,
+      lifecycle: "surfaced",
+      locationId: "loc-ui",
+      urgency: 70,
+      progress: 0,
+      surfacedAtIso: nowIso,
+      startedAtIso: null,
+      deadlineAtIso: null,
+      expiresAtIso: "2026-03-24T01:20:00.000Z",
+      lastAdvancedAtIso: nowIso,
+      parentQuestId: null,
+      successorQuestId: null,
+      terminalReason: null,
+      cost: { world: 2, attention: 2, narrative: 1 },
+      hookType: "witness",
+      mutationCount: 0,
+      lastMutationAtIso: null,
+      stallCount: 0,
+    },
+    {
+      questId: "quest-surfaced-ui-2",
+      pressureId: pressure.pressureId,
+      archetype: pressure.archetype,
+      lifecycle: "surfaced",
+      locationId: "loc-ui",
+      urgency: 62,
+      progress: 0,
+      surfacedAtIso: nowIso,
+      startedAtIso: null,
+      deadlineAtIso: null,
+      expiresAtIso: "2026-03-24T01:20:00.000Z",
+      lastAdvancedAtIso: nowIso,
+      parentQuestId: null,
+      successorQuestId: null,
+      terminalReason: null,
+      cost: { world: 2, attention: 2, narrative: 1 },
+      hookType: "rumor",
+      mutationCount: 0,
+      lastMutationAtIso: null,
+      stallCount: 0,
+    },
+  ];
+  loop.questEconomy = questEconomy.ensureQuestEconomyState(economy, nowIso);
+
+  const session = makeSession(sceneLoop, loop, nowIso);
+  const playerPanel = panel.buildCheckpoint1Panel({
+    session,
+    routes: [],
+    mode: "send",
+  });
+  const debugPanel = panel.buildCheckpoint1Panel({
+    session,
+    routes: [],
+    mode: "send",
+    debugRuntimeSignals: true,
+  });
+
+  const playerText = JSON.stringify(playerPanel.components);
+  const debugText = JSON.stringify(debugPanel.components);
+
+  assert.ok(playerText.includes("활성 과제:"));
+  assert.ok(playerText.includes("접촉 기회:"));
+  assert.ok(playerText.includes("퀘스트(진행):"));
+  assert.ok(playerText.includes("퀘스트(기회):"));
+  assert.equal(playerText.includes("debug.quest_tuning.raw"), false);
+  assert.equal(playerText.includes("budget_used=live"), false);
+  assert.equal(debugText.includes("debug.quest_tuning.raw"), true);
+});
+
+test("recent lifecycle changes appear as player-facing natural phrases", async () => {
+  const { sceneLoop, questEconomy, panel } = await modulesPromise;
+  const nowIso = "2026-03-24T00:00:00.000Z";
+
+  let loop = sceneLoop.createInitialDeterministicSceneLoop({
+    sceneId: "scene-quest-recent",
+    nowIso,
+  });
+  loop.scene.locationId = "loc-recent";
+
+  const economy = questEconomy.ensureQuestEconomyState(undefined, nowIso);
+  economy.worldPressures[0].intensity = 84;
+  const pressureId = economy.worldPressures[0].pressureId;
+  economy.quests = [
+    {
+      questId: "quest-recent-001",
+      pressureId,
+      archetype: economy.worldPressures[0].archetype,
+      lifecycle: "active",
+      locationId: "loc-recent",
+      urgency: 88,
+      progress: 12,
+      surfacedAtIso: "2026-03-23T18:00:00.000Z",
+      startedAtIso: "2026-03-23T18:05:00.000Z",
+      deadlineAtIso: "2026-03-23T18:15:00.000Z",
+      expiresAtIso: null,
+      lastAdvancedAtIso: "2026-03-23T18:15:00.000Z",
+      parentQuestId: null,
+      successorQuestId: null,
+      terminalReason: null,
+      cost: { world: 3, attention: 3, narrative: 1 },
+      hookType: "incident",
+      mutationCount: 0,
+      lastMutationAtIso: null,
+      stallCount: 0,
+    },
+  ];
+  loop.questEconomy = economy;
+
+  const resolved = sceneLoop.resolveDeterministicSceneAction({
+    loop,
+    routeActionId: "action.wait",
+    nowIso,
+  });
+  assert.ok(resolved.nextLoop.questEconomy.presentation.recentOutcomes.length > 0);
+
+  const session = makeSession(sceneLoop, resolved.nextLoop, nowIso);
+  const panelOut = panel.buildCheckpoint1Panel({
+    session,
+    routes: [],
+    mode: "send",
+  });
+  const panelText = JSON.stringify(panelOut.components);
+
+  assert.ok(panelText.includes("최근 변화:"));
+  assert.equal(panelText.includes("overdue_failed"), false);
+  assert.equal(panelText.includes("mutated_to_successor"), false);
+});
+
+test("telemetry ring and snapshot remain bounded", async () => {
+  const { questEconomy } = await modulesPromise;
+  const nowIso = "2026-03-24T00:00:00.000Z";
+
+  let economy = questEconomy.ensureQuestEconomyState(undefined, nowIso);
+  let cursorIso = nowIso;
+
+  for (let index = 0; index < 80; index += 1) {
+    const result = questEconomy.runQuestEconomyTick({
+      economy,
+      nowIso: cursorIso,
+      deltaTimeSec: 180,
+      sceneId: "scene-001",
+      locationId: "loc-tuning",
+      actionId: index % 3 === 0 ? "action.rush" : "action.observe",
+      classification: index % 4 === 0 ? "reckless" : "possible",
+      temporalSignal: {
+        locationId: "loc-tuning",
+        locationTension: 70,
+        locationAlertness: 60,
+        locationAccessibility: 45,
+        infoFreshness: 35,
+        memoryFamiliarity: 22,
+        residualTraceHeat: 64,
+        incidentCount: 2,
+      },
+    });
+    economy = result.nextEconomy;
+    cursorIso = new Date(Date.parse(cursorIso) + 180 * 1000).toISOString();
+  }
+
+  assert.ok(economy.presentation.telemetryRing.length <= questEconomy.QUEST_TUNING_RING_MAX);
+  assert.ok(economy.presentation.tuning.sampleCount <= questEconomy.QUEST_TUNING_RING_MAX);
 });
 
 test("quest trace events appear and resume preserves quest economy state", async () => {

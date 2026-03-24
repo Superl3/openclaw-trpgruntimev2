@@ -208,6 +208,8 @@ test("default panel hides raw drift and debug panel shows raw drift", async () =
 
   assert.equal(normalText.includes("debug.behavioral_drift.raw"), false);
   assert.equal(debugText.includes("debug.behavioral_drift.raw"), true);
+  assert.equal(normalText.includes("debug.quest_tuning.raw"), false);
+  assert.equal(debugText.includes("debug.quest_tuning.raw"), true);
 });
 
 test("dispatch commit idempotent and stale interaction gives standardized error", async () => {

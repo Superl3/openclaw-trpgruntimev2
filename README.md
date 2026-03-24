@@ -15,6 +15,7 @@ Structured TRPG runtime plugin for OpenClaw.
 - Runtime hardening: bounded session trace, stale interaction codes, and `dispatchId`-based panel commit safety
 - Checkpoint 5 temporal core: deterministic memory/freshness/residual-trace/location drift driven by `delta_time`
 - Checkpoint 6 quest economy core: deterministic world pressure, bounded quest lifecycle, and budget/quota guardrails
+- Checkpoint 6B rich surfacing: active/surfaced/recent outcome panel projection with bounded tuning telemetry snapshot
 
 All tools return JSON-shaped output (`details`) and JSON text in `content`.
 

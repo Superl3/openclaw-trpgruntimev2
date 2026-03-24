@@ -92,6 +92,7 @@ export type QuestEconomyState = {
   quests: QuestState[];
   budget: QuestBudgetState;
   softQuota: QuestSoftQuotaState;
+  presentation: QuestPresentationState;
   nextQuestSeq: number;
 };
 
@@ -104,29 +105,110 @@ export type QuestLifecycleTransition = {
   successorQuestId: string | null;
 };
 
-export type QuestEconomyQualitativeSummary = {
-  surfaced: string;
-  urgent: string;
-  pressure: string;
-  counts: {
-    surfaced: number;
-    active: number;
+export type QuestUrgencyBand = "low" | "moderate" | "high" | "critical";
+
+export type QuestRecentOutcomeKind = "expired" | "failed" | "resolved" | "mutated";
+
+export type QuestRecentOutcome = {
+  tsIso: string;
+  kind: QuestRecentOutcomeKind;
+  questId: string;
+  locationId: string | null;
+  archetype: PressureArchetype;
+  reasonCode: string;
+  text: string;
+};
+
+export type QuestHookSlot = {
+  slotKey: string;
+  questId: string;
+  lifecycle: "active" | "stalled" | "surfaced";
+  urgencyBand: QuestUrgencyBand;
+  locationId: string | null;
+  hookType: QuestHookType;
+  defaultText: string;
+  llmShortText: string | null;
+};
+
+export type QuestTuningSnapshot = {
+  sampleCount: number;
+  surfacingRate: number;
+  expirationRate: number;
+  mutationRate: number;
+  successorRate: number;
+  budgetUtilization: {
+    live: number;
+    world: number;
+    attention: number;
+    narrative: number;
   };
-  topPressure: {
-    pressureId: string;
-    archetype: PressureArchetype;
-    intensity: number;
-  } | null;
-  urgentTop: {
-    questId: string;
-    lifecycle: "active" | "stalled";
-    urgency: number;
-    locationId: string | null;
-  } | null;
+  quotaSaturation: {
+    location: number;
+    pressure: number;
+    archetype: number;
+  };
+  averageUrgency: number;
+  activeVsSurfacedRatio: number;
+};
+
+export type QuestTuningSample = {
+  tsIso: string;
+  surfacingRate: number;
+  expirationRate: number;
+  mutationRate: number;
+  successorRate: number;
+  budgetUtilization: {
+    live: number;
+    world: number;
+    attention: number;
+    narrative: number;
+  };
+  quotaSaturation: {
+    location: number;
+    pressure: number;
+    archetype: number;
+  };
+  averageUrgency: number;
+  activeVsSurfacedRatio: number;
+};
+
+export type QuestPresentationState = {
+  recentOutcomes: QuestRecentOutcome[];
+  hookSlots: QuestHookSlot[];
+  tuning: QuestTuningSnapshot;
+  telemetryRing: QuestTuningSample[];
+};
+
+export type QuestPanelSummary = {
+  actionable: {
+    activeCount: number;
+    surfacedCount: number;
+    activeTop: QuestHookSlot | null;
+    surfacedTop: QuestHookSlot[];
+    activeText: string;
+    surfacedText: string;
+  };
+  worldPulse: {
+    topPressure: {
+      pressureId: string;
+      archetype: PressureArchetype;
+      intensity: number;
+      trend: "rising" | "steady" | "cooling";
+    } | null;
+    text: string;
+  };
+  recentOutcomes: {
+    items: QuestRecentOutcome[];
+    text: string;
+  };
   debug: {
     liveQuestCount: number;
     budget: QuestBudgetState;
     softQuota: QuestSoftQuotaState;
+    tuning: QuestTuningSnapshot;
+    averageUrgency: number;
+    activeVsSurfacedRatio: number;
+    topPressureIntensity: number;
   };
 };
 
@@ -147,7 +229,8 @@ export type QuestEconomyTickSummary = {
   archivedNow: number;
   budget: QuestBudgetState;
   softQuota: QuestSoftQuotaState;
-  qualitative: QuestEconomyQualitativeSummary;
+  panelSummary: QuestPanelSummary;
+  tuningSnapshot: QuestTuningSnapshot;
   debug: {
     severeQuotaBlocks: number;
     budgetBlocked: boolean;
@@ -184,6 +267,9 @@ const MAX_QUESTS = 180;
 const MAX_TARGET_LOCATIONS = 6;
 const MAX_TRANSITIONS_RECORDED = 18;
 const MAX_USAGE_ROWS = 18;
+const MAX_RECENT_OUTCOMES = 4;
+const MAX_HOOK_SLOTS = 3;
+export const QUEST_TUNING_RING_MAX = 24;
 
 const SEED_EXPIRES_SEC = 2_100;
 const SURFACED_EXPIRES_SEC = 1_000;
@@ -219,6 +305,19 @@ function readInt(value: unknown, fallback: number): number {
   }
   if (typeof value === "string" && value.trim()) {
     const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return fallback;
+}
+
+function readNumber(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number.parseFloat(value);
     if (Number.isFinite(parsed)) {
       return parsed;
     }
@@ -419,6 +518,38 @@ function compareQuestPriority(a: QuestState, b: QuestState): number {
   return scoreIsoDesc(a.lastAdvancedAtIso, b.lastAdvancedAtIso);
 }
 
+function emptyTuningSnapshot(): QuestTuningSnapshot {
+  return {
+    sampleCount: 0,
+    surfacingRate: 0,
+    expirationRate: 0,
+    mutationRate: 0,
+    successorRate: 0,
+    budgetUtilization: {
+      live: 0,
+      world: 0,
+      attention: 0,
+      narrative: 0,
+    },
+    quotaSaturation: {
+      location: 0,
+      pressure: 0,
+      archetype: 0,
+    },
+    averageUrgency: 0,
+    activeVsSurfacedRatio: 0,
+  };
+}
+
+function makeDefaultPresentationState(): QuestPresentationState {
+  return {
+    recentOutcomes: [],
+    hookSlots: [],
+    tuning: emptyTuningSnapshot(),
+    telemetryRing: [],
+  };
+}
+
 function makeDefaultPressures(nowIso: string): WorldPressureState[] {
   return [
     {
@@ -487,6 +618,7 @@ function makeDefaultEconomy(nowIso: string): QuestEconomyState {
       usageByPressure: [],
       usageByArchetype: [],
     },
+    presentation: makeDefaultPresentationState(),
     nextQuestSeq: 1,
   };
 }
@@ -713,6 +845,156 @@ function normalizeSoftQuota(value: unknown, fallback: QuestSoftQuotaState): Ques
   };
 }
 
+function clampUnit(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(1, value));
+}
+
+function normalizeUrgencyBand(value: unknown): QuestUrgencyBand {
+  const normalized = readString(value);
+  if (normalized === "low" || normalized === "moderate" || normalized === "high" || normalized === "critical") {
+    return normalized;
+  }
+  return "moderate";
+}
+
+function normalizeRecentOutcome(value: unknown, fallbackNowIso: string): QuestRecentOutcome | null {
+  const node = toRecord(value);
+  const questId = readString(node.questId);
+  if (!questId) {
+    return null;
+  }
+
+  const kindRaw = readString(node.kind);
+  const kind: QuestRecentOutcomeKind =
+    kindRaw === "expired" || kindRaw === "failed" || kindRaw === "resolved" || kindRaw === "mutated"
+      ? kindRaw
+      : "failed";
+
+  return {
+    tsIso: readIsoString(node.tsIso, fallbackNowIso),
+    kind,
+    questId,
+    locationId: readString(node.locationId) || null,
+    archetype: normalizeArchetype(node.archetype),
+    reasonCode: readString(node.reasonCode),
+    text: readString(node.text) || "상황이 갱신되었다.",
+  };
+}
+
+function normalizeHookSlot(value: unknown): QuestHookSlot | null {
+  const node = toRecord(value);
+  const slotKey = readString(node.slotKey);
+  const questId = readString(node.questId);
+  if (!slotKey || !questId) {
+    return null;
+  }
+
+  const lifecycleRaw = readString(node.lifecycle);
+  const lifecycle: "active" | "stalled" | "surfaced" =
+    lifecycleRaw === "active" || lifecycleRaw === "stalled" || lifecycleRaw === "surfaced"
+      ? lifecycleRaw
+      : "surfaced";
+
+  return {
+    slotKey,
+    questId,
+    lifecycle,
+    urgencyBand: normalizeUrgencyBand(node.urgencyBand),
+    locationId: readString(node.locationId) || null,
+    hookType: normalizeHookType(node.hookType),
+    defaultText: readString(node.defaultText) || "접촉 가능한 기회가 있다.",
+    llmShortText: readString(node.llmShortText) || null,
+  };
+}
+
+function normalizeTuningSnapshot(value: unknown, fallback: QuestTuningSnapshot): QuestTuningSnapshot {
+  const node = toRecord(value);
+  const budget = toRecord(node.budgetUtilization);
+  const quota = toRecord(node.quotaSaturation);
+  return {
+    sampleCount: Math.max(0, readInt(node.sampleCount, fallback.sampleCount)),
+    surfacingRate: clampUnit(readNumber(node.surfacingRate, fallback.surfacingRate)),
+    expirationRate: clampUnit(readNumber(node.expirationRate, fallback.expirationRate)),
+    mutationRate: clampUnit(readNumber(node.mutationRate, fallback.mutationRate)),
+    successorRate: clampUnit(readNumber(node.successorRate, fallback.successorRate)),
+    budgetUtilization: {
+      live: clampUnit(readNumber(budget.live, fallback.budgetUtilization.live)),
+      world: clampUnit(readNumber(budget.world, fallback.budgetUtilization.world)),
+      attention: clampUnit(readNumber(budget.attention, fallback.budgetUtilization.attention)),
+      narrative: clampUnit(readNumber(budget.narrative, fallback.budgetUtilization.narrative)),
+    },
+    quotaSaturation: {
+      location: clampUnit(readNumber(quota.location, fallback.quotaSaturation.location)),
+      pressure: clampUnit(readNumber(quota.pressure, fallback.quotaSaturation.pressure)),
+      archetype: clampUnit(readNumber(quota.archetype, fallback.quotaSaturation.archetype)),
+    },
+    averageUrgency: clampInt(readInt(node.averageUrgency, fallback.averageUrgency), 0, 100),
+    activeVsSurfacedRatio: clampUnit(readNumber(node.activeVsSurfacedRatio, fallback.activeVsSurfacedRatio)),
+  };
+}
+
+function normalizeTuningSample(value: unknown, fallbackNowIso: string): QuestTuningSample | null {
+  const node = toRecord(value);
+  const budget = toRecord(node.budgetUtilization);
+  const quota = toRecord(node.quotaSaturation);
+  return {
+    tsIso: readIsoString(node.tsIso, fallbackNowIso),
+    surfacingRate: clampUnit(readNumber(node.surfacingRate, 0)),
+    expirationRate: clampUnit(readNumber(node.expirationRate, 0)),
+    mutationRate: clampUnit(readNumber(node.mutationRate, 0)),
+    successorRate: clampUnit(readNumber(node.successorRate, 0)),
+    budgetUtilization: {
+      live: clampUnit(readNumber(budget.live, 0)),
+      world: clampUnit(readNumber(budget.world, 0)),
+      attention: clampUnit(readNumber(budget.attention, 0)),
+      narrative: clampUnit(readNumber(budget.narrative, 0)),
+    },
+    quotaSaturation: {
+      location: clampUnit(readNumber(quota.location, 0)),
+      pressure: clampUnit(readNumber(quota.pressure, 0)),
+      archetype: clampUnit(readNumber(quota.archetype, 0)),
+    },
+    averageUrgency: clampInt(readInt(node.averageUrgency, 0), 0, 100),
+    activeVsSurfacedRatio: clampUnit(readNumber(node.activeVsSurfacedRatio, 0)),
+  };
+}
+
+function normalizePresentationState(value: unknown, fallbackNowIso: string): QuestPresentationState {
+  const fallback = makeDefaultPresentationState();
+  const root = toRecord(value);
+
+  const recentOutcomesRaw = Array.isArray(root.recentOutcomes) ? root.recentOutcomes : [];
+  const hookSlotsRaw = Array.isArray(root.hookSlots) ? root.hookSlots : [];
+  const ringRaw = Array.isArray(root.telemetryRing) ? root.telemetryRing : [];
+
+  const recentOutcomes = recentOutcomesRaw
+    .map((entry) => normalizeRecentOutcome(entry, fallbackNowIso))
+    .filter((entry): entry is QuestRecentOutcome => entry !== null)
+    .sort((a, b) => scoreIsoDesc(a.tsIso, b.tsIso))
+    .slice(0, MAX_RECENT_OUTCOMES);
+
+  const hookSlots = hookSlotsRaw
+    .map((entry) => normalizeHookSlot(entry))
+    .filter((entry): entry is QuestHookSlot => entry !== null)
+    .slice(0, MAX_HOOK_SLOTS);
+
+  const telemetryRing = ringRaw
+    .map((entry) => normalizeTuningSample(entry, fallbackNowIso))
+    .filter((entry): entry is QuestTuningSample => entry !== null)
+    .sort((a, b) => scoreIsoDesc(a.tsIso, b.tsIso))
+    .slice(0, QUEST_TUNING_RING_MAX);
+
+  return {
+    recentOutcomes,
+    hookSlots,
+    tuning: normalizeTuningSnapshot(root.tuning, fallback.tuning),
+    telemetryRing,
+  };
+}
+
 type UsageMaps = {
   byLocation: Map<string, number>;
   byPressure: Map<string, number>;
@@ -818,11 +1100,23 @@ export function ensureQuestEconomyState(value: unknown, nowIso: string): QuestEc
     quests,
     budget: normalizeBudget(root.budget, fallback.budget),
     softQuota: normalizeSoftQuota(root.softQuota, fallback.softQuota),
+    presentation: normalizePresentationState(root.presentation, resolvedNow),
     nextQuestSeq: Math.max(1, readInt(root.nextQuestSeq, fallback.nextQuestSeq)),
   };
 
   state = pruneEconomy(state);
   state = recalculateBudgetAndQuota(state);
+  const telemetryRing = state.presentation.telemetryRing.slice(-QUEST_TUNING_RING_MAX);
+  state = {
+    ...state,
+    presentation: {
+      ...state.presentation,
+      recentOutcomes: state.presentation.recentOutcomes.slice(0, MAX_RECENT_OUTCOMES),
+      hookSlots: state.presentation.hookSlots.slice(0, MAX_HOOK_SLOTS),
+      telemetryRing,
+      tuning: telemetryRing.length > 0 ? averageSamples(telemetryRing) : state.presentation.tuning,
+    },
+  };
   return {
     ...state,
     nextQuestSeq: recomputeNextQuestSeq(state.quests, state.nextQuestSeq),
@@ -839,7 +1133,7 @@ function topPressure(pressures: WorldPressureState[]): WorldPressureState | null
   return sorted[0] ?? null;
 }
 
-function urgencyBand(urgency: number): string {
+function urgencyBand(urgency: number): QuestUrgencyBand {
   if (urgency >= 80) {
     return "critical";
   }
@@ -852,83 +1146,252 @@ function urgencyBand(urgency: number): string {
   return "low";
 }
 
-function pressureBand(intensity: number): string {
-  if (intensity >= 75) {
-    return "surging";
+function urgencyBandText(band: QuestUrgencyBand): string {
+  switch (band) {
+    case "critical":
+      return "매우 높음";
+    case "high":
+      return "높음";
+    case "moderate":
+      return "보통";
+    default:
+      return "낮음";
   }
-  if (intensity >= 55) {
-    return "elevated";
-  }
-  if (intensity >= 35) {
-    return "present";
-  }
-  return "cooling";
 }
 
-function pickUrgentTop(quests: QuestState[], locationId: string | null): QuestEconomyQualitativeSummary["urgentTop"] {
-  const active = quests
-    .filter((quest) => quest.lifecycle === "active" || quest.lifecycle === "stalled")
-    .sort((a, b) => b.urgency - a.urgency || scoreIsoDesc(a.lastAdvancedAtIso, b.lastAdvancedAtIso));
-
-  const localized = locationId
-    ? active.filter((quest) => quest.locationId === locationId)
-    : [];
-  const selected = (localized[0] ?? active[0]) as QuestState | undefined;
-  if (!selected) {
-    return null;
+function pressureArchetypeText(archetype: PressureArchetype): string {
+  switch (archetype) {
+    case "smuggling":
+      return "밀수";
+    case "outbreak":
+      return "질병";
+    case "power_struggle":
+      return "권력 다툼";
+    case "artifact_race":
+      return "유물 쟁탈";
+    case "public_order":
+      return "치안";
+    default:
+      return "세계";
   }
+}
+
+function pressureTrend(pressure: WorldPressureState): "rising" | "steady" | "cooling" {
+  if (pressure.momentum >= 3 || pressure.intensity >= 78) {
+    return "rising";
+  }
+  if (pressure.momentum <= -3 || pressure.intensity <= 30) {
+    return "cooling";
+  }
+  return "steady";
+}
+
+function pressureTrendText(trend: "rising" | "steady" | "cooling"): string {
+  if (trend === "rising") {
+    return "상승세";
+  }
+  if (trend === "cooling") {
+    return "완화세";
+  }
+  return "지속 중";
+}
+
+function locationText(locationId: string | null): string {
+  return locationId ? `${locationId} 일대` : "현장";
+}
+
+function questHookTemplate(params: {
+  quest: QuestState;
+  urgencyBand: QuestUrgencyBand;
+}): string {
+  const locus = locationText(params.quest.locationId);
+  const urgencyText = urgencyBandText(params.urgencyBand);
+  if (params.quest.lifecycle === "active") {
+    return `${locus}에서 진행 중인 과제가 ${urgencyText} 우선순위다.`;
+  }
+  if (params.quest.lifecycle === "stalled") {
+    return `${locus} 진행 과제가 막혀 우회 접근이 필요하다.`;
+  }
+  if (params.quest.hookType === "witness") {
+    return `${locus} 목격 기반 기회를 접촉할 수 있다.`;
+  }
+  if (params.quest.hookType === "rumor") {
+    return `${locus} 소문 기반 기회가 떠올랐다.`;
+  }
+  if (params.quest.hookType === "request") {
+    return `${locus} 요청형 기회를 수락할 수 있다.`;
+  }
+  return `${locus} 사건형 기회를 접촉할 수 있다.`;
+}
+
+function questSlotPriority(quest: QuestState, locationId: string | null): number {
+  let score = quest.urgency * 10;
+  if (locationId && quest.locationId === locationId) {
+    score += 1500;
+  } else if (!locationId && quest.locationId === null) {
+    score += 800;
+  }
+  if (quest.lifecycle === "active") {
+    score += 100;
+  }
+  if (quest.lifecycle === "stalled") {
+    score += 60;
+  }
+  return score;
+}
+
+function buildHookSlotFromQuest(params: {
+  quest: QuestState;
+  locationId: string | null;
+  slotIndex: number;
+}): QuestHookSlot {
+  const band = urgencyBand(params.quest.urgency);
   return {
-    questId: selected.questId,
-    lifecycle: selected.lifecycle === "stalled" ? "stalled" : "active",
-    urgency: selected.urgency,
-    locationId: selected.locationId,
+    slotKey: `hook-${String(params.slotIndex).padStart(2, "0")}-${params.quest.questId}`,
+    questId: params.quest.questId,
+    lifecycle:
+      params.quest.lifecycle === "active" || params.quest.lifecycle === "stalled"
+        ? params.quest.lifecycle
+        : "surfaced",
+    urgencyBand: band,
+    locationId: params.quest.locationId,
+    hookType: params.quest.hookType,
+    defaultText: questHookTemplate({
+      quest: params.quest,
+      urgencyBand: band,
+    }),
+    llmShortText: null,
+  };
+}
+
+function deriveHookSlots(params: {
+  economy: QuestEconomyState;
+  locationId: string | null;
+}): QuestHookSlot[] {
+  const activeCandidates = params.economy.quests
+    .filter((quest) => quest.lifecycle === "active" || quest.lifecycle === "stalled")
+    .sort((a, b) => {
+      const score = questSlotPriority(b, params.locationId) - questSlotPriority(a, params.locationId);
+      if (score !== 0) {
+        return score;
+      }
+      return scoreIsoDesc(a.lastAdvancedAtIso, b.lastAdvancedAtIso);
+    });
+
+  const surfacedCandidates = params.economy.quests
+    .filter((quest) => quest.lifecycle === "surfaced")
+    .sort((a, b) => {
+      const score = questSlotPriority(b, params.locationId) - questSlotPriority(a, params.locationId);
+      if (score !== 0) {
+        return score;
+      }
+      return scoreIsoDesc(a.lastAdvancedAtIso, b.lastAdvancedAtIso);
+    });
+
+  const slots: QuestHookSlot[] = [];
+  const activeTop = activeCandidates[0];
+  if (activeTop) {
+    slots.push(
+      buildHookSlotFromQuest({
+        quest: activeTop,
+        locationId: params.locationId,
+        slotIndex: 1,
+      }),
+    );
+  }
+
+  for (const quest of surfacedCandidates.slice(0, 2)) {
+    slots.push(
+      buildHookSlotFromQuest({
+        quest,
+        locationId: params.locationId,
+        slotIndex: slots.length + 1,
+      }),
+    );
+  }
+
+  return slots.slice(0, MAX_HOOK_SLOTS);
+}
+
+function buildWorldPulse(params: {
+  top: WorldPressureState | null;
+}): QuestPanelSummary["worldPulse"] {
+  if (!params.top) {
+    return {
+      topPressure: null,
+      text: "세계 동향은 비교적 잠잠하다.",
+    };
+  }
+
+  const trend = pressureTrend(params.top);
+  const archetypeText = pressureArchetypeText(params.top.archetype);
+  return {
+    topPressure: {
+      pressureId: params.top.pressureId,
+      archetype: params.top.archetype,
+      intensity: params.top.intensity,
+      trend,
+    },
+    text: `${archetypeText} 압박이 ${pressureTrendText(trend)}다.`,
   };
 }
 
 export function buildQuestEconomyQualitativeSummary(params: {
   economy: QuestEconomyState;
   locationId: string | null;
-}): QuestEconomyQualitativeSummary {
+}): QuestPanelSummary {
   const surfacedCount = params.economy.quests.filter((quest) => quest.lifecycle === "surfaced").length;
   const activeCount = params.economy.quests.filter(
     (quest) => quest.lifecycle === "active" || quest.lifecycle === "stalled",
   ).length;
   const top = topPressure(params.economy.worldPressures);
-  const urgentTop = pickUrgentTop(params.economy.quests, params.locationId);
 
-  const surfaced =
-    surfacedCount > 0
-      ? `${String(surfacedCount)} surfaced opportunities are available.`
-      : "No surfaced opportunity right now.";
+  const hookSlots =
+    params.economy.presentation.hookSlots.length > 0
+      ? params.economy.presentation.hookSlots.slice(0, MAX_HOOK_SLOTS)
+      : deriveHookSlots({ economy: params.economy, locationId: params.locationId });
 
-  const urgent = urgentTop
-    ? `Urgent quest ${urgentTop.questId} is ${urgencyBand(urgentTop.urgency)} urgency.`
-    : "No urgent active quest right now.";
+  const activeTop = hookSlots.find((slot) => slot.lifecycle === "active" || slot.lifecycle === "stalled") ?? null;
+  const surfacedTop = hookSlots.filter((slot) => slot.lifecycle === "surfaced").slice(0, 2);
 
-  const pressure = top
-    ? `${pressureLabel(top.archetype)} pressure is ${pressureBand(top.intensity)} (${String(top.intensity)}).`
-    : "World pressure is stable.";
+  const actionableActiveText = activeTop
+    ? `진행 중 과제 ${activeTop.questId}: ${activeTop.llmShortText ?? activeTop.defaultText}`
+    : "진행 중 과제가 없다.";
+  const actionableSurfacedText =
+    surfacedTop.length > 0
+      ? `접촉 가능한 기회 ${String(surfacedCount)}건: ${surfacedTop.map((slot) => slot.llmShortText ?? slot.defaultText).join(" / ")}`
+      : "새로 노출된 기회가 없다.";
+
+  const recentItems = params.economy.presentation.recentOutcomes
+    .slice()
+    .sort((a, b) => scoreIsoDesc(a.tsIso, b.tsIso))
+    .slice(0, MAX_RECENT_OUTCOMES);
+
+  const worldPulse = buildWorldPulse({ top });
+  const tuning = params.economy.presentation.tuning;
 
   return {
-    surfaced,
-    urgent,
-    pressure,
-    counts: {
-      surfaced: surfacedCount,
-      active: activeCount,
+    actionable: {
+      activeCount,
+      surfacedCount,
+      activeTop,
+      surfacedTop,
+      activeText: actionableActiveText,
+      surfacedText: actionableSurfacedText,
     },
-    topPressure: top
-      ? {
-          pressureId: top.pressureId,
-          archetype: top.archetype,
-          intensity: top.intensity,
-        }
-      : null,
-    urgentTop,
+    worldPulse,
+    recentOutcomes: {
+      items: recentItems,
+      text: recentItems[0]?.text ?? "최근 사건 변화는 잠잠하다.",
+    },
     debug: {
       liveQuestCount: params.economy.budget.used.livePool,
       budget: params.economy.budget,
       softQuota: params.economy.softQuota,
+      tuning,
+      averageUrgency: tuning.averageUrgency,
+      activeVsSurfacedRatio: tuning.activeVsSurfacedRatio,
+      topPressureIntensity: top?.intensity ?? 0,
     },
   };
 }
@@ -1294,6 +1757,270 @@ function enforceHardLiveCap(params: {
     budgetBlocked = true;
   }
   return budgetBlocked;
+}
+
+function averageUrgency(quests: QuestState[]): number {
+  const live = quests.filter((quest) => isLiveLifecycle(quest.lifecycle));
+  if (live.length === 0) {
+    return 0;
+  }
+  const total = live.reduce((sum, quest) => sum + quest.urgency, 0);
+  return clampInt(Math.round(total / live.length), 0, 100);
+}
+
+function activeVsSurfacedRatio(quests: QuestState[]): number {
+  const activeCount = quests.filter((quest) => quest.lifecycle === "active" || quest.lifecycle === "stalled").length;
+  const surfacedCount = quests.filter((quest) => quest.lifecycle === "surfaced").length;
+  if (activeCount === 0) {
+    return 0;
+  }
+  if (surfacedCount === 0) {
+    return 1;
+  }
+  return clampUnit(activeCount / surfacedCount);
+}
+
+function quotaSaturation(params: {
+  softQuota: QuestSoftQuotaState;
+}): QuestTuningSample["quotaSaturation"] {
+  const locationTop = params.softQuota.usageByLocation[0]?.count ?? 0;
+  const pressureTop = params.softQuota.usageByPressure[0]?.count ?? 0;
+  const archetypeTop = params.softQuota.usageByArchetype[0]?.count ?? 0;
+  return {
+    location: clampUnit(locationTop / Math.max(1, params.softQuota.caps.perLocation)),
+    pressure: clampUnit(pressureTop / Math.max(1, params.softQuota.caps.perPressure)),
+    archetype: clampUnit(archetypeTop / Math.max(1, params.softQuota.caps.perArchetype)),
+  };
+}
+
+function budgetUtilization(budget: QuestBudgetState): QuestTuningSample["budgetUtilization"] {
+  return {
+    live: clampUnit(budget.used.livePool / Math.max(1, budget.caps.livePool)),
+    world: clampUnit(budget.used.world / Math.max(1, budget.caps.world)),
+    attention: clampUnit(budget.used.attention / Math.max(1, budget.caps.attention)),
+    narrative: clampUnit(budget.used.narrative / Math.max(1, budget.caps.narrative)),
+  };
+}
+
+function tuningSampleFromState(params: {
+  nowIso: string;
+  state: QuestEconomyState;
+  transitions: TransitionAccumulator;
+}): QuestTuningSample {
+  const successorCount = params.transitions.transitions.filter((entry) => entry.reason === "mutated_to_successor").length;
+  return {
+    tsIso: params.nowIso,
+    surfacingRate: clampUnit(params.transitions.surfacedNow / Math.max(1, params.state.budget.caps.livePool)),
+    expirationRate: clampUnit(params.transitions.expiredDeleted / Math.max(1, params.state.budget.caps.livePool)),
+    mutationRate: clampUnit(params.transitions.mutatedNow / Math.max(1, params.state.budget.caps.livePool)),
+    successorRate: clampUnit(successorCount / Math.max(1, params.transitions.failedNow + params.transitions.mutatedNow)),
+    budgetUtilization: budgetUtilization(params.state.budget),
+    quotaSaturation: quotaSaturation({
+      softQuota: params.state.softQuota,
+    }),
+    averageUrgency: averageUrgency(params.state.quests),
+    activeVsSurfacedRatio: activeVsSurfacedRatio(params.state.quests),
+  };
+}
+
+function mergeTelemetryRing(params: {
+  previous: QuestPresentationState;
+  sample: QuestTuningSample;
+}): QuestTuningSample[] {
+  return [...params.previous.telemetryRing, params.sample].slice(-QUEST_TUNING_RING_MAX);
+}
+
+function averageSamples(samples: QuestTuningSample[]): QuestTuningSnapshot {
+  if (samples.length === 0) {
+    return emptyTuningSnapshot();
+  }
+
+  const sum = {
+    surfacingRate: 0,
+    expirationRate: 0,
+    mutationRate: 0,
+    successorRate: 0,
+    budgetLive: 0,
+    budgetWorld: 0,
+    budgetAttention: 0,
+    budgetNarrative: 0,
+    quotaLocation: 0,
+    quotaPressure: 0,
+    quotaArchetype: 0,
+    averageUrgency: 0,
+    activeVsSurfacedRatio: 0,
+  };
+
+  for (const sample of samples) {
+    sum.surfacingRate += sample.surfacingRate;
+    sum.expirationRate += sample.expirationRate;
+    sum.mutationRate += sample.mutationRate;
+    sum.successorRate += sample.successorRate;
+    sum.budgetLive += sample.budgetUtilization.live;
+    sum.budgetWorld += sample.budgetUtilization.world;
+    sum.budgetAttention += sample.budgetUtilization.attention;
+    sum.budgetNarrative += sample.budgetUtilization.narrative;
+    sum.quotaLocation += sample.quotaSaturation.location;
+    sum.quotaPressure += sample.quotaSaturation.pressure;
+    sum.quotaArchetype += sample.quotaSaturation.archetype;
+    sum.averageUrgency += sample.averageUrgency;
+    sum.activeVsSurfacedRatio += sample.activeVsSurfacedRatio;
+  }
+
+  const count = samples.length;
+  return {
+    sampleCount: count,
+    surfacingRate: clampUnit(sum.surfacingRate / count),
+    expirationRate: clampUnit(sum.expirationRate / count),
+    mutationRate: clampUnit(sum.mutationRate / count),
+    successorRate: clampUnit(sum.successorRate / count),
+    budgetUtilization: {
+      live: clampUnit(sum.budgetLive / count),
+      world: clampUnit(sum.budgetWorld / count),
+      attention: clampUnit(sum.budgetAttention / count),
+      narrative: clampUnit(sum.budgetNarrative / count),
+    },
+    quotaSaturation: {
+      location: clampUnit(sum.quotaLocation / count),
+      pressure: clampUnit(sum.quotaPressure / count),
+      archetype: clampUnit(sum.quotaArchetype / count),
+    },
+    averageUrgency: clampInt(Math.round(sum.averageUrgency / count), 0, 100),
+    activeVsSurfacedRatio: clampUnit(sum.activeVsSurfacedRatio / count),
+  };
+}
+
+function transitionOutcomeKind(entry: QuestLifecycleTransition): QuestRecentOutcomeKind | null {
+  if (entry.to === "deleted") {
+    return "expired";
+  }
+  if (entry.to === "resolved") {
+    return "resolved";
+  }
+  if (entry.to === "failed" && entry.reason === "mutated_to_successor") {
+    return "mutated";
+  }
+  if (entry.to === "failed") {
+    return "failed";
+  }
+  return null;
+}
+
+function recentOutcomeText(params: {
+  kind: QuestRecentOutcomeKind;
+  archetype: PressureArchetype;
+  locationId: string | null;
+}): string {
+  const place = locationText(params.locationId);
+  const pressure = pressureArchetypeText(params.archetype);
+
+  if (params.kind === "expired") {
+    return `${place}에서 포착된 ${pressure} 기회가 상황 변화로 사라졌다.`;
+  }
+  if (params.kind === "mutated") {
+    return `${place} ${pressure} 현안의 양상이 바뀌어 새로운 갈래가 열렸다.`;
+  }
+  if (params.kind === "resolved") {
+    return `${place} ${pressure} 현안 하나가 정리되었다.`;
+  }
+  return `${place}에서 추적하던 ${pressure} 대응이 막혀 다른 접근이 필요해졌다.`;
+}
+
+function updateRecentOutcomes(params: {
+  previous: QuestPresentationState;
+  transitions: QuestLifecycleTransition[];
+  quests: QuestState[];
+  nowIso: string;
+}): QuestRecentOutcome[] {
+  const questById = new Map(params.quests.map((quest) => [quest.questId, quest]));
+  const added: QuestRecentOutcome[] = [];
+  for (const transition of params.transitions) {
+    const kind = transitionOutcomeKind(transition);
+    if (!kind) {
+      continue;
+    }
+    const quest = questById.get(transition.questId);
+    const archetype = quest?.archetype ?? "public_order";
+    const locationId = quest?.locationId ?? null;
+    added.push({
+      tsIso: params.nowIso,
+      kind,
+      questId: transition.questId,
+      locationId,
+      archetype,
+      reasonCode: transition.reason,
+      text: recentOutcomeText({
+        kind,
+        archetype,
+        locationId,
+      }),
+    });
+  }
+
+  if (added.length === 0) {
+    return params.previous.recentOutcomes.slice(0, MAX_RECENT_OUTCOMES);
+  }
+
+  const merged = [...added, ...params.previous.recentOutcomes];
+  const deduped = new Map<string, QuestRecentOutcome>();
+  for (const entry of merged) {
+    const key = `${entry.questId}:${entry.kind}:${entry.reasonCode}`;
+    if (!deduped.has(key)) {
+      deduped.set(key, entry);
+    }
+  }
+  return Array.from(deduped.values()).slice(0, MAX_RECENT_OUTCOMES);
+}
+
+function updatePresentationState(params: {
+  state: QuestEconomyState;
+  locationId: string | null;
+  transitions: TransitionAccumulator;
+  nowIso: string;
+}): QuestPresentationState {
+  const previous = params.state.presentation;
+  const derivedSlots = deriveHookSlots({
+    economy: params.state,
+    locationId: params.locationId,
+  });
+
+  const previousLlmByKey = new Map(
+    previous.hookSlots.map((slot) => [`${slot.questId}:${slot.lifecycle}`, slot.llmShortText]),
+  );
+
+  const hookSlots = derivedSlots
+    .map((slot) => {
+      const key = `${slot.questId}:${slot.lifecycle}`;
+      return {
+        ...slot,
+        llmShortText: previousLlmByKey.get(key) ?? null,
+      };
+    })
+    .slice(0, MAX_HOOK_SLOTS);
+
+  const recentOutcomes = updateRecentOutcomes({
+    previous,
+    transitions: params.transitions.transitions,
+    quests: params.state.quests,
+    nowIso: params.nowIso,
+  });
+
+  const sample = tuningSampleFromState({
+    nowIso: params.nowIso,
+    state: params.state,
+    transitions: params.transitions,
+  });
+  const telemetryRing = mergeTelemetryRing({
+    previous,
+    sample,
+  });
+
+  return {
+    recentOutcomes,
+    hookSlots,
+    telemetryRing,
+    tuning: averageSamples(telemetryRing),
+  };
 }
 
 export function runQuestEconomyTick(input: QuestEconomyTickInput): QuestEconomyTickResult {
@@ -1682,14 +2409,30 @@ export function runQuestEconomyTick(input: QuestEconomyTickInput): QuestEconomyT
   state = pruneEconomy(state);
   state = recalculateBudgetAndQuota(state);
 
-  const qualitative = buildQuestEconomyQualitativeSummary({
+  state = {
+    ...state,
+    presentation: updatePresentationState({
+      state,
+      locationId: input.locationId,
+      transitions,
+      nowIso,
+    }),
+  };
+
+  const panelSummary = buildQuestEconomyQualitativeSummary({
     economy: state,
     locationId: input.locationId,
   });
 
   const summary: QuestEconomyTickSummary = {
     pressureAdvancedCount,
-    pressureTop: qualitative.topPressure,
+    pressureTop: panelSummary.worldPulse.topPressure
+      ? {
+          pressureId: panelSummary.worldPulse.topPressure.pressureId,
+          archetype: panelSummary.worldPulse.topPressure.archetype,
+          intensity: panelSummary.worldPulse.topPressure.intensity,
+        }
+      : null,
     transitionCount: transitions.transitions.length,
     transitions: transitions.transitions,
     spawnedSeeds,
@@ -1700,7 +2443,8 @@ export function runQuestEconomyTick(input: QuestEconomyTickInput): QuestEconomyT
     archivedNow: transitions.archivedNow,
     budget: state.budget,
     softQuota: state.softQuota,
-    qualitative,
+    panelSummary,
+    tuningSnapshot: state.presentation.tuning,
     debug: {
       severeQuotaBlocks,
       budgetBlocked,

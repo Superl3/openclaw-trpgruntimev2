@@ -46,6 +46,15 @@
 - quest economy는 raw temporal 내부를 직접 보지 않고 `QuestTemporalSignal` bridge 입력만 사용합니다.
 - 기본 패널은 정성 요약을 보여주고, raw budget/quota 수치는 `debugRuntimeSignals=true`에서만 노출됩니다.
 
+## 2.5) Rich surfacing + tuning 메모 (Checkpoint 6B)
+
+- 퀘스트 패널 요약을 actionable / world pulse / recent outcomes 3층으로 분리했습니다.
+- active와 surfaced를 분리 노출합니다 (active top 1, surfaced top 최대 2).
+- recent lifecycle 변화는 내부 상태 코드 대신 플레이어용 자연어 문구로 표시합니다.
+- `hookSlot.llmShortText`는 선택 필드/계약만 추가했고, 이번 단계에서 실제 LLM 호출 경로는 사용하지 않습니다.
+- 튜닝 텔레메트리는 bounded ring+snapshot으로 유지합니다 (`surfacing/expiration/mutation/successor rate`, budget utilization, quota saturation, urgency ratio).
+- raw tuning/budget/quota 값은 `debugRuntimeSignals=true`에서만 노출됩니다.
+
 ## 2.1) World-data-driven 동작
 
 - 런타임 프롬프트 훅의 하드코딩된 설정/시나리오 주입 로직은 제거되었습니다.
