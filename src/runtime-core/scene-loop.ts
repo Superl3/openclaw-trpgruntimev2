@@ -96,10 +96,14 @@ export type IntentInertiaState = {
 };
 
 export type AnalyzerMemoryState = {
+  /**
+   * Bounded ephemeral analyzer cache. This is NOT deterministic source-of-truth.
+   */
   recentFreeInputs: string[];
   recentResolvedActions: string[];
   recentClassifications: ActionFeasibility[];
   lastIntentSignals: string[];
+  expiresAtIso: string | null;
 };
 
 export type DeterministicSceneLoopState = {
@@ -136,6 +140,7 @@ export type DeterministicActionResolution = {
 };
 
 const DEFAULT_SCENE_ID = "scene-bootstrap";
+export const DEFAULT_ANALYZER_MEMORY_TTL_SEC = 900;
 
 const BEAT_OBJECTIVES = [
   "현장을 파악한다.",
@@ -253,6 +258,22 @@ function addSecondsToIso(baseIso: string, deltaSec: number): string {
   const parsed = Date.parse(baseIso);
   const baseline = Number.isFinite(parsed) ? parsed : Date.now();
   return new Date(baseline + deltaSec * 1_000).toISOString();
+}
+
+function hasIsoExpired(expiresAtIso: string | null, nowIso: string): boolean {
+  if (!expiresAtIso) {
+    return false;
+  }
+  const expiresAt = Date.parse(expiresAtIso);
+  const now = Date.parse(nowIso);
+  if (!Number.isFinite(expiresAt) || !Number.isFinite(now)) {
+    return false;
+  }
+  return expiresAt <= now;
+}
+
+function nextAnalyzerMemoryExpiry(nowIso: string, ttlSec = DEFAULT_ANALYZER_MEMORY_TTL_SEC): string {
+  return addSecondsToIso(nowIso, Math.max(60, Math.trunc(ttlSec)));
 }
 
 function normalizeActionId(actionId: string): DeterministicActionId {
@@ -578,6 +599,7 @@ export function createInitialDeterministicSceneLoop(params: {
       recentResolvedActions: [],
       recentClassifications: [],
       lastIntentSignals: [],
+      expiresAtIso: nextAnalyzerMemoryExpiry(params.nowIso),
     },
     actionPalette: [],
   };
@@ -676,7 +698,7 @@ export function ensureDeterministicSceneLoopState(value: unknown, params: {
   };
 
   const analyzerMemoryObj = toRecord(root.analyzerMemory);
-  const analyzerMemory: AnalyzerMemoryState = {
+  const analyzerMemoryRaw: AnalyzerMemoryState = {
     recentFreeInputs: Array.isArray(analyzerMemoryObj.recentFreeInputs)
       ? analyzerMemoryObj.recentFreeInputs.filter((entry): entry is string => typeof entry === "string").slice(-8)
       : [],
@@ -694,7 +716,21 @@ export function ensureDeterministicSceneLoopState(value: unknown, params: {
     lastIntentSignals: Array.isArray(analyzerMemoryObj.lastIntentSignals)
       ? analyzerMemoryObj.lastIntentSignals.filter((entry): entry is string => typeof entry === "string").slice(-8)
       : [],
+    expiresAtIso: readString(analyzerMemoryObj.expiresAtIso) || null,
   };
+
+  const analyzerMemory: AnalyzerMemoryState = hasIsoExpired(analyzerMemoryRaw.expiresAtIso, params.nowIso)
+    ? {
+        recentFreeInputs: [],
+        recentResolvedActions: [],
+        recentClassifications: [],
+        lastIntentSignals: [],
+        expiresAtIso: nextAnalyzerMemoryExpiry(params.nowIso),
+      }
+    : {
+        ...analyzerMemoryRaw,
+        expiresAtIso: analyzerMemoryRaw.expiresAtIso ?? nextAnalyzerMemoryExpiry(params.nowIso),
+      };
 
   const exchangeObj = toRecord(root.exchange);
   const exchange: ExchangeState | null = Object.keys(exchangeObj).length
@@ -971,7 +1007,10 @@ export function resolveDeterministicSceneAction(input: DeterministicActionInput)
     ongoingAction,
     behavioralDrift: current.behavioralDrift,
     intentInertia: current.intentInertia,
-    analyzerMemory: current.analyzerMemory,
+    analyzerMemory: {
+      ...current.analyzerMemory,
+      expiresAtIso: current.analyzerMemory.expiresAtIso ?? nextAnalyzerMemoryExpiry(input.nowIso),
+    },
     actionPalette: [],
   };
 

@@ -42,6 +42,7 @@ import {
   type DeterministicActionId,
   resolveDeterministicSceneAction,
 } from "./scene-loop.js";
+import { appendTraceEvent, createTraceEvent, ensureTraceState } from "./trace.js";
 import {
   RUNTIME_SCHEMA_VERSION,
   type EndSessionResult,
@@ -78,6 +79,8 @@ type RuntimeEngineDependencies = {
   intentAnalyzer: IntentAnalyzer;
   personaDriftAnalyzer: PersonaDriftAnalyzer;
   sceneRenderer: SceneRenderer;
+  traceMaxEvents?: number;
+  analyzerMemoryTtlSec?: number;
   clock?: Clock;
   idGenerator?: IdGenerator;
 };
@@ -94,6 +97,12 @@ function nextUiVersion(value: number): number {
   return Math.trunc(value) + 1;
 }
 
+function nextActionSeq(currentActionSeq: number, legacyTurnIndex: number): number {
+  const canonical = Number.isFinite(currentActionSeq) ? Math.trunc(currentActionSeq) : 0;
+  const legacy = Number.isFinite(legacyTurnIndex) ? Math.trunc(legacyTurnIndex) : 0;
+  return Math.max(canonical, legacy) + 1;
+}
+
 class Checkpoint0RuntimeEngine implements RuntimeEngine {
   private readonly store: StateStore;
   private readonly intentAnalyzer: IntentAnalyzer;
@@ -101,12 +110,20 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
   private readonly sceneRenderer: SceneRenderer;
   private readonly clock: Clock;
   private readonly idGenerator: IdGenerator;
+  private readonly traceMaxEvents: number;
+  private readonly analyzerMemoryTtlSec: number;
 
   constructor(deps: RuntimeEngineDependencies) {
     this.store = deps.store;
     this.intentAnalyzer = deps.intentAnalyzer;
     this.personaDriftAnalyzer = deps.personaDriftAnalyzer;
     this.sceneRenderer = deps.sceneRenderer;
+    this.traceMaxEvents = Number.isFinite(deps.traceMaxEvents as number)
+      ? Math.max(20, Math.min(500, Math.trunc(deps.traceMaxEvents as number)))
+      : 120;
+    this.analyzerMemoryTtlSec = Number.isFinite(deps.analyzerMemoryTtlSec as number)
+      ? Math.max(60, Math.min(86_400, Math.trunc(deps.analyzerMemoryTtlSec as number)))
+      : 900;
     this.clock = deps.clock ?? new SystemClock();
     this.idGenerator = deps.idGenerator ?? new RuntimeIdGenerator();
   }
@@ -117,11 +134,34 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
       nowIso,
     });
 
+    const actionSeq = Math.max(
+      0,
+      Number.isFinite((session as Record<string, unknown>).actionSeq as number)
+        ? Math.trunc((session as Record<string, unknown>).actionSeq as number)
+        : 0,
+      Number.isFinite((session as Record<string, unknown>).turnIndex as number)
+        ? Math.trunc((session as Record<string, unknown>).turnIndex as number)
+        : 0,
+    );
+
+    const committedDispatchIds =
+      session.panelDispatch && Array.isArray(session.panelDispatch.committedDispatchIds)
+        ? session.panelDispatch.committedDispatchIds.filter((entry): entry is string => typeof entry === "string").slice(-32)
+        : [];
+
+    const pending = session.panelDispatch?.pending ?? null;
+
     const sceneId = loop.scene.sceneId;
-    return {
+    const normalized: SessionState = {
       ...session,
       sceneId,
+      actionSeq,
+      turnIndex: actionSeq,
       deterministicLoop: loop,
+      panelDispatch: {
+        pending,
+        committedDispatchIds,
+      },
       panels: {
         fixed: {
           ...session.panels.fixed,
@@ -137,6 +177,8 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
         },
       },
     };
+
+    return ensureTraceState(normalized);
   }
 
   private createSessionSkeleton(input: {
@@ -159,10 +201,19 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
       status: "active",
       sceneId: deterministicLoop.scene.sceneId,
       uiVersion: 1,
+      actionSeq: 0,
       turnIndex: 0,
       lastActionId: null,
       lastActionSummary: null,
       deterministicLoop,
+      panelDispatch: {
+        pending: null,
+        committedDispatchIds: [],
+      },
+      trace: {
+        maxEvents: this.traceMaxEvents,
+        events: [],
+      },
       panels: {
         fixed: {
           panelId: "fixed",
@@ -226,23 +277,47 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
     const existingSession = await this.store.readActiveSessionByChannel(channelKey);
     if (existingSession) {
       const normalizedExisting = this.normalizeSessionLoop(existingSession, nowIso);
-      const endedSession: SessionState = {
+      const endedSessionBase: SessionState = {
         ...normalizedExisting,
         status: "ended",
         updatedAt: nowIso,
         endedAt: nowIso,
       };
+      const endedSession = appendTraceEvent(
+        endedSessionBase,
+        createTraceEvent({
+          lane: "engine",
+          type: "session.end",
+          tsIso: nowIso,
+          data: {
+            reason: "new-session-replaced-active",
+          },
+        }),
+      );
       await this.store.upsertSession(endedSession);
       await this.store.deleteRoutesForSession(normalizedExisting.sessionId);
     }
 
-    const session = this.createSessionSkeleton({
+    const sessionBase = this.createSessionSkeleton({
       sessionId: this.idGenerator.newSessionId(),
       channelKey,
       ownerId: readNonEmptyString(input.ownerId, "owner:unknown"),
       sceneId: readNonEmptyString(input.initialSceneId, DEFAULT_SCENE_ID),
       nowIso,
     });
+
+    const session = appendTraceEvent(
+      sessionBase,
+      createTraceEvent({
+        lane: "engine",
+        type: "session.new",
+        tsIso: nowIso,
+        data: {
+          sceneId: sessionBase.sceneId,
+          ownerId: sessionBase.ownerId,
+        },
+      }),
+    );
 
     await this.store.upsertSession(session);
     const routes = await this.registerDefaultPanelRoutes(session);
@@ -268,7 +343,7 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
     const session = this.normalizeSessionLoop(rawSession, nowIso);
     const uiVersion = nextUiVersion(session.uiVersion);
 
-    const nextSession: SessionState = {
+    const nextSessionBase: SessionState = {
       ...session,
       uiVersion,
       updatedAt: nowIso,
@@ -287,6 +362,19 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
         },
       },
     };
+
+    const nextSession = appendTraceEvent(
+      nextSessionBase,
+      createTraceEvent({
+        lane: "engine",
+        type: "session.resume",
+        tsIso: nowIso,
+        data: {
+          previousUiVersion: session.uiVersion,
+          nextUiVersion: uiVersion,
+        },
+      }),
+    );
 
     await this.store.upsertSession(nextSession);
     await this.store.deleteRoutesForSession(nextSession.sessionId);
@@ -341,12 +429,24 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
 
     const nowIso = this.clock.nowIso();
     const session = this.normalizeSessionLoop(rawSession, nowIso);
-    const endedSession: SessionState = {
+    const endedSessionBase: SessionState = {
       ...session,
       status: "ended",
       updatedAt: nowIso,
       endedAt: nowIso,
     };
+
+    const endedSession = appendTraceEvent(
+      endedSessionBase,
+      createTraceEvent({
+        lane: "engine",
+        type: "session.end",
+        tsIso: nowIso,
+        data: {
+          reason: readNonEmptyString(input.reason, "session-end-command"),
+        },
+      }),
+    );
 
     await this.store.upsertSession(endedSession);
     const removedRouteCount = await this.store.deleteRoutesForSession(session.sessionId);
@@ -391,15 +491,33 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
 
   async processSceneAction(input: ProcessSceneActionInput): Promise<ProcessSceneActionResult> {
     const nowIso = this.clock.nowIso();
-    const session = this.normalizeSessionLoop(input.session, nowIso);
+    const sessionBase = this.normalizeSessionLoop(input.session, nowIso);
     const routeActionId = readNonEmptyString(input.routeActionId, "action.unknown");
     const freeInput = readNonEmptyString(input.freeInput, "");
     const isFreeSentenceInput = routeActionId === PANEL_MODAL_SUBMIT_ACTION_ID && freeInput.length > 0;
+
+    let session = appendTraceEvent(
+      sessionBase,
+      createTraceEvent({
+        lane: "engine",
+        type: "interaction.received",
+        tsIso: nowIso,
+        data: {
+          routeActionId,
+          hasFreeInput: isFreeSentenceInput,
+          uiVersion: sessionBase.uiVersion,
+          sceneId: sessionBase.sceneId,
+        },
+      }),
+    );
 
     let selectedActionId: DeterministicActionId = "action.unknown";
     let selectedSource: "deterministic" | "analyzer" = "deterministic";
     let selectedConfidence = 1;
     let intentSignals: string[] = [];
+    let selectedAnalyzerWeight = 0;
+    let selectedFallbackStrategy: "none" | "keep_previous" | "scene_safe_default" | "abstain" = "none";
+    let preResolvedClaimUntrusted = false;
 
     if (isFreeSentenceInput) {
       const deterministicActionId = deterministicActionFromFreeInput(freeInput);
@@ -417,6 +535,23 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
         intentOutput = null;
       }
 
+      if (!intentOutput) {
+        session = appendTraceEvent(
+          session,
+          createTraceEvent({
+            lane: "analyzer",
+            type: "analyzer.intent.fallback",
+            tsIso: nowIso,
+            severity: "warn",
+            code: "intent_output_invalid",
+            recoverable: true,
+            data: {
+              deterministicActionId,
+            },
+          }),
+        );
+      }
+
       const selected = selectStructuredActionIntent({
         deterministicActionId,
         availableActions,
@@ -427,7 +562,35 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
       selectedActionId = readNonEmptyString(selected.actionId, "action.unknown") as DeterministicActionId;
       selectedSource = selected.source;
       selectedConfidence = selected.confidence;
+      selectedAnalyzerWeight = selected.analyzerWeight;
+      selectedFallbackStrategy = selected.fallbackStrategy;
+      preResolvedClaimUntrusted = selected.preResolvedClaimUntrusted;
       intentSignals = selected.analyzerOutput?.extractedSignals ?? [];
+
+      session = appendTraceEvent(
+        session,
+        createTraceEvent({
+          lane: "analyzer",
+          type:
+            selectedSource === "analyzer"
+              ? "analyzer.intent.used"
+              : selectedFallbackStrategy === "none"
+                ? "analyzer.intent.used"
+                : "analyzer.intent.fallback",
+          tsIso: nowIso,
+          severity: preResolvedClaimUntrusted ? "warn" : "info",
+          code: preResolvedClaimUntrusted ? "pre_resolved_claim_untrusted" : undefined,
+          recoverable: true,
+          data: {
+            selectedActionId,
+            selectedSource,
+            selectedConfidence,
+            analyzerWeight: selectedAnalyzerWeight,
+            fallbackStrategy: selectedFallbackStrategy,
+            preResolvedClaimUntrusted,
+          },
+        }),
+      );
     }
 
     const resolution = resolveDeterministicSceneAction({
@@ -456,6 +619,8 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
         resolvedActionId: resolution.resolvedActionId,
         classification: resolution.classification,
         intentSignals,
+        nowIso,
+        ttlSec: this.analyzerMemoryTtlSec,
       });
 
       const driftInput = buildPersonaDriftAnalyzerInput({
@@ -464,6 +629,7 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
           sceneId: nextLoop.scene.sceneId,
           deterministicLoop: nextLoop,
         },
+        nowIso,
       });
 
       let driftOutput: PersonaDriftAnalyzerOutput | null = null;
@@ -473,6 +639,22 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
       } catch {
         driftOutput = null;
       }
+
+      session = appendTraceEvent(
+        session,
+        createTraceEvent({
+          lane: "analyzer",
+          type: driftOutput ? "analyzer.drift.used" : "analyzer.drift.fallback",
+          tsIso: nowIso,
+          severity: driftOutput ? "info" : "warn",
+          code: driftOutput ? undefined : "drift_output_invalid",
+          recoverable: true,
+          data: {
+            confidence: driftOutput?.confidence ?? 0,
+            dominantSignals: driftOutput?.dominantSignals ?? [],
+          },
+        }),
+      );
 
       nextLoop.behavioralDrift = accumulateBehavioralDrift({
         current: nextLoop.behavioralDrift,
@@ -489,15 +671,40 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
     }
 
     const sceneId = nextLoop.scene.sceneId;
+    const sceneTransitioned = session.sceneId !== sceneId;
     const confidenceSuffix = isFreeSentenceInput
       ? ` · intent_conf=${selectedConfidence.toFixed(2)} · source=${selectedSource}`
       : "";
     const summary = `${feasibilityLabel(resolution.classification)} · +${String(resolution.deltaTimeSec)}s · ${resolution.resultSummary}${confidenceSuffix}`;
 
+    session = appendTraceEvent(
+      session,
+      createTraceEvent({
+        lane: "engine",
+        type: "engine.action.resolved",
+        tsIso: nowIso,
+        data: {
+          inputActionId: routeActionId,
+          resolvedActionId: resolution.resolvedActionId,
+          classification: resolution.classification,
+          deltaTimeSec: resolution.deltaTimeSec,
+          selectedSource,
+          selectedConfidence,
+          analyzerWeight: selectedAnalyzerWeight,
+          fallbackStrategy: selectedFallbackStrategy,
+          preResolvedClaimUntrusted,
+          sceneTransitioned,
+        },
+      }),
+    );
+
+    const actionSeq = nextActionSeq(session.actionSeq, session.turnIndex);
+
     const nextSession: SessionState = {
       ...session,
       sceneId,
-      turnIndex: Math.max(0, Math.trunc(session.turnIndex)) + 1,
+      actionSeq,
+      turnIndex: actionSeq,
       lastActionId: resolution.resolvedActionId,
       lastActionSummary: summary,
       deterministicLoop: nextLoop,

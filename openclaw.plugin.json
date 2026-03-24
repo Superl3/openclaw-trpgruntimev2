@@ -41,6 +41,32 @@
         },
         "default": [],
         "description": "Only these agent ids may execute tools. Empty array allows all agents."
+      },
+      "traceMaxEvents": {
+        "type": "integer",
+        "minimum": 20,
+        "maximum": 500,
+        "default": 120,
+        "description": "Maximum retained runtime trace events per session."
+      },
+      "panelDispatchTtlSec": {
+        "type": "integer",
+        "minimum": 30,
+        "maximum": 3600,
+        "default": 180,
+        "description": "Seconds before prepared panel dispatch is treated as expired."
+      },
+      "analyzerMemoryTtlSec": {
+        "type": "integer",
+        "minimum": 60,
+        "maximum": 86400,
+        "default": 900,
+        "description": "TTL for analyzer memory cache; cache is non-authoritative."
+      },
+      "debugRuntimeSignals": {
+        "type": "boolean",
+        "default": false,
+        "description": "Show raw drift/debug runtime signals in panel UI."
       }
     }
   },
@@ -58,6 +84,26 @@
     "allowedAgentIds": {
       "label": "Allowed Agent IDs",
       "help": "Restrict tool execution to dedicated agents. Leave empty to allow all agents.",
+      "advanced": true
+    },
+    "traceMaxEvents": {
+      "label": "Trace Max Events",
+      "help": "Keep runtime trace bounded per session.",
+      "advanced": true
+    },
+    "panelDispatchTtlSec": {
+      "label": "Panel Dispatch TTL (sec)",
+      "help": "Prepared dispatch expires after this window.",
+      "advanced": true
+    },
+    "analyzerMemoryTtlSec": {
+      "label": "Analyzer Memory TTL (sec)",
+      "help": "Analyzer cache TTL; does not affect deterministic source-of-truth.",
+      "advanced": true
+    },
+    "debugRuntimeSignals": {
+      "label": "Debug Runtime Signals",
+      "help": "Enable raw drift/debug values in Sub UI.",
       "advanced": true
     }
   }

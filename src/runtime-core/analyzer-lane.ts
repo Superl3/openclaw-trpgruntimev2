@@ -17,7 +17,7 @@ import type {
   DeterministicActionId,
   IntentInertiaState,
 } from "./scene-loop.js";
-import { mapFreeInputToActionDeterministic } from "./scene-loop.js";
+import { mapFreeInputToActionDeterministic, DEFAULT_ANALYZER_MEMORY_TTL_SEC } from "./scene-loop.js";
 import type { SessionState } from "./types.js";
 
 const INTENT_CONFIDENCE_LOW = 0.45;
@@ -38,6 +38,9 @@ export type StructuredIntentSelection = {
   actionId: string;
   source: "deterministic" | "analyzer";
   confidence: number;
+  analyzerWeight: number;
+  fallbackStrategy: "none" | "keep_previous" | "scene_safe_default" | "abstain";
+  preResolvedClaimUntrusted: boolean;
   analyzerOutput: IntentAnalyzerOutput | null;
 };
 
@@ -70,6 +73,44 @@ function pushSignal(out: string[], value: string): void {
     return;
   }
   out.push(normalized);
+}
+
+function addSecondsToIso(baseIso: string, deltaSec: number): string {
+  const base = Date.parse(baseIso);
+  const now = Number.isFinite(base) ? base : Date.now();
+  return new Date(now + deltaSec * 1_000).toISOString();
+}
+
+function chooseConservativeFallback(availableActions: string[], lastMappedActionId: string | null): {
+  actionId: string;
+  strategy: "keep_previous" | "scene_safe_default" | "abstain";
+} {
+  const available = new Set(availableActions);
+  if (lastMappedActionId && available.has(lastMappedActionId)) {
+    return {
+      actionId: lastMappedActionId,
+      strategy: "keep_previous",
+    };
+  }
+
+  if (available.has("action.wait")) {
+    return {
+      actionId: "action.wait",
+      strategy: "scene_safe_default",
+    };
+  }
+
+  if (available.has("action.observe")) {
+    return {
+      actionId: "action.observe",
+      strategy: "scene_safe_default",
+    };
+  }
+
+  return {
+    actionId: "action.unknown",
+    strategy: "abstain",
+  };
 }
 
 function promptEnvelope(task: string, input: unknown): string {
@@ -138,10 +179,6 @@ function scoreActionCandidates(text: string, allowedActions: string[]): Array<{ 
     if (deterministic !== "action.unknown" && allowedActions.includes(deterministic)) {
       addScore(deterministic, 0.55);
     }
-  }
-
-  if (scores.size === 0 && allowedActions.length > 0) {
-    addScore(allowedActions[0] as string, 0.3);
   }
 
   return Array.from(scores.entries())
@@ -263,15 +300,24 @@ export function buildIntentAnalyzerInput(params: {
   };
 }
 
-export function buildPersonaDriftAnalyzerInput(params: { session: SessionState }): PersonaDriftAnalyzerInput {
+export function buildPersonaDriftAnalyzerInput(params: { session: SessionState; nowIso?: string }): PersonaDriftAnalyzerInput {
   const loop = params.session.deterministicLoop;
+  const nowIso = params.nowIso ?? new Date().toISOString();
+  const expiresAt = loop.analyzerMemory.expiresAtIso ? Date.parse(loop.analyzerMemory.expiresAtIso) : NaN;
+  const now = Date.parse(nowIso);
+  const cacheExpired = Number.isFinite(expiresAt) && Number.isFinite(now) ? expiresAt <= now : false;
+
+  const recentFreeInputs = cacheExpired ? [] : loop.analyzerMemory.recentFreeInputs.slice(-8);
+  const recentResolvedActions = cacheExpired ? [] : loop.analyzerMemory.recentResolvedActions.slice(-8);
+  const recentClassifications = cacheExpired ? [] : loop.analyzerMemory.recentClassifications.slice(-8);
+
   return {
     contractVersion: LLM_CONTRACT_VERSION,
     sessionId: params.session.sessionId,
     sceneId: params.session.sceneId,
-    recentFreeInputs: loop.analyzerMemory.recentFreeInputs.slice(-8),
-    recentResolvedActions: loop.analyzerMemory.recentResolvedActions.slice(-8),
-    recentClassifications: loop.analyzerMemory.recentClassifications.slice(-8),
+    recentFreeInputs,
+    recentResolvedActions,
+    recentClassifications,
     currentBehavioralDrift: loop.behavioralDrift.drift,
     coreIdentityRef: loop.behavioralDrift.coreIdentity,
   };
@@ -299,9 +345,15 @@ export function selectStructuredActionIntent(params: {
   }
 
   const analyzer = params.analyzerOutput;
-  const analyzerWeight = analyzer
+  let analyzerWeight = analyzer
     ? clamp(((analyzer.confidence - INTENT_CONFIDENCE_LOW) / (1 - INTENT_CONFIDENCE_LOW)) * 0.55, 0, 0.55)
     : 0;
+
+  // preResolvedClaim is warning-only. It cannot authorize success, so we cap analyzer influence.
+  const preResolvedClaimUntrusted = analyzer?.preResolvedClaim === true;
+  if (preResolvedClaimUntrusted) {
+    analyzerWeight = Math.min(analyzerWeight, 0.15);
+  }
 
   if (analyzer && analyzerWeight > 0) {
     for (const candidate of analyzer.candidateActions) {
@@ -319,19 +371,30 @@ export function selectStructuredActionIntent(params: {
     actionScores.set(params.inertia.lastMappedActionId, prev + inertiaBonus);
   }
 
-  let selectedActionId = deterministicCandidate ?? (params.availableActions[0] ?? "action.unknown");
+  const conservative = chooseConservativeFallback(params.availableActions, params.inertia.lastMappedActionId);
+  let selectedActionId = deterministicCandidate ?? conservative.actionId;
   let selectedScore = actionScores.get(selectedActionId) ?? 0;
+  let fallbackStrategy: StructuredIntentSelection["fallbackStrategy"] = conservative.strategy;
 
   for (const [actionId, score] of actionScores.entries()) {
     if (score > selectedScore) {
       selectedActionId = actionId;
       selectedScore = score;
+      fallbackStrategy = "none";
     }
+  }
+
+  const analyzerLowConfidence = !analyzer || analyzer.confidence < INTENT_CONFIDENCE_LOW;
+  if (!deterministicCandidate && analyzerLowConfidence) {
+    selectedActionId = conservative.actionId;
+    selectedScore = Math.max(selectedScore, 0.28);
+    fallbackStrategy = conservative.strategy;
   }
 
   if (deterministicCandidate && selectedScore < 0.42) {
     selectedActionId = deterministicCandidate;
     selectedScore = actionScores.get(deterministicCandidate) ?? 0.7;
+    fallbackStrategy = "none";
   }
 
   const source: "deterministic" | "analyzer" =
@@ -345,6 +408,9 @@ export function selectStructuredActionIntent(params: {
     actionId: selectedActionId,
     source,
     confidence,
+    analyzerWeight,
+    fallbackStrategy,
+    preResolvedClaimUntrusted,
     analyzerOutput: analyzer,
   };
 }
@@ -463,27 +529,34 @@ export function rememberFreeInputTrace(params: {
     recentResolvedActions: string[];
     recentClassifications: ActionFeasibility[];
     lastIntentSignals: string[];
+    expiresAtIso: string | null;
   };
   freeInput: string;
   resolvedActionId: string;
   classification: ActionFeasibility;
   intentSignals: string[];
+  nowIso: string;
+  ttlSec?: number;
 }): {
   recentFreeInputs: string[];
   recentResolvedActions: string[];
   recentClassifications: ActionFeasibility[];
   lastIntentSignals: string[];
+  expiresAtIso: string | null;
 } {
   const nextInputs = [...params.current.recentFreeInputs, readString(params.freeInput)].filter(Boolean).slice(-8);
   const nextActions = [...params.current.recentResolvedActions, params.resolvedActionId].filter(Boolean).slice(-8);
   const nextClassifications = [...params.current.recentClassifications, params.classification].slice(-8);
   const lastIntentSignals = params.intentSignals.slice(0, 8);
+  const ttlSec = Math.max(60, Math.trunc(params.ttlSec ?? DEFAULT_ANALYZER_MEMORY_TTL_SEC));
+  const expiresAtIso = addSecondsToIso(params.nowIso, ttlSec);
 
   return {
     recentFreeInputs: nextInputs,
     recentResolvedActions: nextActions,
     recentClassifications: nextClassifications,
     lastIntentSignals,
+    expiresAtIso,
   };
 }
 

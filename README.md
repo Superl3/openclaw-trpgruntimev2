@@ -12,6 +12,7 @@ Structured TRPG runtime plugin for OpenClaw.
 - `trpg_state_compact` - lifecycle compaction dry-run/audited apply planner
 - `trpg_session_new` / `trpg_session_resume` / `trpg_session_end` - session panel lifecycle
 - `trpg_panel_interact` / `trpg_panel_message_commit` - owner-guarded panel callback + message metadata sync
+- Runtime hardening: bounded session trace, stale interaction codes, and `dispatchId`-based panel commit safety
 
 All tools return JSON-shaped output (`details`) and JSON text in `content`.
 
@@ -77,6 +78,7 @@ These are minimal post-install examples with safe defaults:
 
 - `plugins.entries.trpg-runtime.config.allowPatchApply=false`
 - `plugins.entries.trpg-runtime.config.allowedAgentIds=[]` (plugin-only) or `["trpg"]` (dedicated agent)
+- `plugins.entries.trpg-runtime.config.debugRuntimeSignals=false` (raw drift signals hidden by default)
 
 ## Bundled TRPG agent
 

@@ -16,6 +16,7 @@ type PanelRenderInput = {
   routes: InteractionRouteRecord[];
   mode: PanelMessageMode;
   errorHint?: string;
+  debugRuntimeSignals?: boolean;
 };
 
 export const PANEL_MODAL_SUBMIT_ACTION_ID = "action.free_input.submit";
@@ -92,7 +93,17 @@ function mainSectionText(session: SessionState): string {
   return lines.join("\n");
 }
 
-function subSectionText(session: SessionState): string {
+function driftQualitativeLabel(value: number): string {
+  if (value >= 0.35) {
+    return "상승";
+  }
+  if (value <= -0.35) {
+    return "하락";
+  }
+  return "안정";
+}
+
+function subSectionText(session: SessionState, debugRuntimeSignals: boolean): string {
   const loop = session.deterministicLoop;
   const lines = ["**Sub UI**"];
 
@@ -127,8 +138,14 @@ function subSectionText(session: SessionState): string {
 
   const drift = loop.behavioralDrift.drift;
   lines.push(
-    `behavioral_drift: warm=${drift.warmth.toFixed(2)} bold=${drift.boldness.toFixed(2)} caution=${drift.caution.toFixed(2)} altruism=${drift.altruism.toFixed(2)} aggression=${drift.aggression.toFixed(2)} humor=${drift.humor.toFixed(2)}`,
+    `행동 성향 추세: warm=${driftQualitativeLabel(drift.warmth)} bold=${driftQualitativeLabel(drift.boldness)} caution=${driftQualitativeLabel(drift.caution)} altruism=${driftQualitativeLabel(drift.altruism)} aggression=${driftQualitativeLabel(drift.aggression)} humor=${driftQualitativeLabel(drift.humor)}`,
   );
+
+  if (debugRuntimeSignals) {
+    lines.push(
+      `debug.behavioral_drift.raw: warm=${drift.warmth.toFixed(2)} bold=${drift.boldness.toFixed(2)} caution=${drift.caution.toFixed(2)} altruism=${drift.altruism.toFixed(2)} aggression=${drift.aggression.toFixed(2)} humor=${drift.humor.toFixed(2)}`,
+    );
+  }
 
   return lines.join("\n");
 }
@@ -199,6 +216,7 @@ export function actionLabel(actionId: string, freeInput?: string): string {
 export function buildCheckpoint1Panel(input: PanelRenderInput): PanelRenderOutput {
   const routeByAction = routeMapByAction(input.routes);
   const ended = input.session.status === "ended";
+  const debugRuntimeSignals = input.debugRuntimeSignals === true;
   const visiblePalette = input.session.deterministicLoop.actionPalette
     .filter((entry) => entry.showInButtons)
     .slice(0, 4);
@@ -225,7 +243,7 @@ export function buildCheckpoint1Panel(input: PanelRenderInput): PanelRenderOutpu
   const blocks: Array<Record<string, unknown>> = [
     { type: "text", text: fixedSectionText(input.session) },
     { type: "text", text: mainSectionText(input.session) },
-    { type: "text", text: subSectionText(input.session) },
+    { type: "text", text: subSectionText(input.session, debugRuntimeSignals) },
   ];
 
   if (buttons.length > 0) {

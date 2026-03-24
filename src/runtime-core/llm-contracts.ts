@@ -41,8 +41,14 @@ export type IntentAnalyzerOutput = {
   extractedSignals: string[];
   candidateActions: IntentActionCandidate[];
   riskSignals: string[];
+  /**
+   * Untrusted warning flag. Engines MUST NOT treat this as proof of success.
+   */
   preResolvedClaim: boolean;
 };
+
+export const PRE_RESOLVED_CLAIM_POLICY =
+  "warning-only:preResolvedClaim never authorizes success and cannot override deterministic engine rules" as const;
 
 export type PersonaDriftAnalyzerInput = {
   contractVersion: typeof LLM_CONTRACT_VERSION;

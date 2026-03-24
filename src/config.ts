@@ -8,6 +8,10 @@ export type TrpgRuntimeConfig = {
   maxFilesPerQuery: number;
   maxOperationsPerPatch: number;
   allowedAgentIds: string[];
+  traceMaxEvents: number;
+  panelDispatchTtlSec: number;
+  analyzerMemoryTtlSec: number;
+  debugRuntimeSignals: boolean;
 };
 
 const DEFAULT_CONFIG: TrpgRuntimeConfig = {
@@ -17,6 +21,10 @@ const DEFAULT_CONFIG: TrpgRuntimeConfig = {
   maxFilesPerQuery: 40,
   maxOperationsPerPatch: 64,
   allowedAgentIds: [],
+  traceMaxEvents: 120,
+  panelDispatchTtlSec: 180,
+  analyzerMemoryTtlSec: 900,
+  debugRuntimeSignals: false,
 };
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -87,6 +95,22 @@ export function parseTrpgRuntimeConfig(raw: unknown): TrpgRuntimeConfig {
       "maxOperationsPerPatch",
     ),
     allowedAgentIds: readStringArray(obj.allowedAgentIds, DEFAULT_CONFIG.allowedAgentIds),
+    traceMaxEvents: readInteger(obj.traceMaxEvents, DEFAULT_CONFIG.traceMaxEvents, 20, 500, "traceMaxEvents"),
+    panelDispatchTtlSec: readInteger(
+      obj.panelDispatchTtlSec,
+      DEFAULT_CONFIG.panelDispatchTtlSec,
+      30,
+      3600,
+      "panelDispatchTtlSec",
+    ),
+    analyzerMemoryTtlSec: readInteger(
+      obj.analyzerMemoryTtlSec,
+      DEFAULT_CONFIG.analyzerMemoryTtlSec,
+      60,
+      86_400,
+      "analyzerMemoryTtlSec",
+    ),
+    debugRuntimeSignals: typeof obj.debugRuntimeSignals === "boolean" ? obj.debugRuntimeSignals : false,
   };
 }
 

@@ -20,6 +20,16 @@
 11. `plugins.entries.trpg-runtime.config.allowedAgentIds` 기반 에이전트 실행 제한.
 12. world root 해석/패치 작업에 대한 경로 및 쓰기 가드.
 
+## 2.2) Runtime hardening 메모
+
+- `trpg_panel_message_commit`는 최신 `panelDispatch`의 `dispatchId`를 함께 전달해야 합니다.
+- 동일 `dispatchId`로 중복 commit 시 idempotent 처리됩니다.
+- stale/expired interaction은 `errorCode`(예: `stale_ui_version`, `route_expired`)와 `/trpg resume` 복구 힌트를 반환합니다.
+- analyzer lane은 분류기 역할만 수행하고, 최종 판정은 deterministic engine이 담당합니다.
+- `preResolvedClaim`는 경고 플래그일 뿐 성공 근거가 아닙니다.
+- analyzerMemory는 bounded TTL 캐시이며 deterministic source-of-truth가 아닙니다.
+- 기본 UX에서는 raw drift 수치를 숨기고, 디버깅 시에만 `debugRuntimeSignals=true`를 사용하세요.
+
 ## 2.1) World-data-driven 동작
 
 - 런타임 프롬프트 훅의 하드코딩된 설정/시나리오 주입 로직은 제거되었습니다.

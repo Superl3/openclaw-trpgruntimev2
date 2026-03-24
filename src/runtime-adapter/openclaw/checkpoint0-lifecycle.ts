@@ -1,4 +1,5 @@
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import type { OpenClawPluginApi, OpenClawPluginToolContext } from "openclaw/plugin-sdk/core";
 import {
   assertAgentAllowed,
@@ -16,6 +17,7 @@ import {
   type PanelMessageMode,
 } from "../../runtime-core/panel-mvp.js";
 import { ensureDeterministicSceneLoopState } from "../../runtime-core/scene-loop.js";
+import { appendTraceEvent, createTraceEvent, ensureTraceState } from "../../runtime-core/trace.js";
 import { JsonFileStateStore } from "../../runtime-store/file-state-store.js";
 import type { InteractionRouteRecord, SessionState } from "../../runtime-core/types.js";
 
@@ -74,6 +76,7 @@ const PANEL_MESSAGE_COMMIT_PARAMETERS = {
   properties: {
     sessionId: { type: "string" },
     actorId: { type: "string" },
+    dispatchId: { type: "string" },
     messageId: { type: "string" },
     channelMessageRef: { type: "string" },
     uiVersion: { type: "integer" },
@@ -87,6 +90,23 @@ function jsonToolResult(payload: unknown) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
     details: payload,
+  };
+}
+
+function runtimeError(params: {
+  command?: string;
+  errorCode: string;
+  message: string;
+  recoverable?: boolean;
+  recoveryHint?: string;
+}): Record<string, unknown> {
+  return {
+    ok: false,
+    command: params.command,
+    errorCode: params.errorCode,
+    error: params.message,
+    recoverable: params.recoverable ?? true,
+    recoveryHint: params.recoveryHint,
   };
 }
 
@@ -166,17 +186,29 @@ function normalizeSession(session: SessionState): SessionState {
   });
   const sceneId = deterministicLoop.scene.sceneId;
   const ownerId = readString((session as Record<string, unknown>).ownerId) || "owner:unknown";
+  const actionSeq = Math.max(
+    0,
+    readInteger((session as Record<string, unknown>).actionSeq) ?? 0,
+    readInteger((session as Record<string, unknown>).turnIndex) ?? 0,
+  );
   const turnIndex = readInteger((session as Record<string, unknown>).turnIndex) ?? 0;
   const lastActionId = readString((session as Record<string, unknown>).lastActionId) || null;
   const lastActionSummary = readString((session as Record<string, unknown>).lastActionSummary) || null;
-  return {
+  const normalized: SessionState = {
     ...session,
     sceneId,
     ownerId,
-    turnIndex,
+    actionSeq,
+    turnIndex: actionSeq || turnIndex,
     lastActionId,
     lastActionSummary,
     deterministicLoop,
+    panelDispatch: {
+      pending: session.panelDispatch?.pending ?? null,
+      committedDispatchIds: Array.isArray(session.panelDispatch?.committedDispatchIds)
+        ? session.panelDispatch.committedDispatchIds.filter((entry): entry is string => typeof entry === "string").slice(-32)
+        : [],
+    },
     panels: {
       fixed: {
         ...session.panels.fixed,
@@ -192,6 +224,8 @@ function normalizeSession(session: SessionState): SessionState {
       },
     },
   };
+
+  return ensureTraceState(normalized);
 }
 
 function createGate(params: {
@@ -222,7 +256,7 @@ function createGate(params: {
   };
 }
 
-function createRuntimeContext(worldRoot: string) {
+function createRuntimeContext(worldRoot: string, cfg: TrpgRuntimeConfig) {
   const storeRoot = path.resolve(worldRoot, CHECKPOINT0_STORE_RELATIVE_PATH);
   const store = new JsonFileStateStore(storeRoot);
   const engine = createCheckpoint0RuntimeEngine({
@@ -230,6 +264,8 @@ function createRuntimeContext(worldRoot: string) {
     intentAnalyzer: new RuleBasedIntentAnalyzer(),
     personaDriftAnalyzer: new RuleBasedPersonaDriftAnalyzer(),
     sceneRenderer: new NoopSceneRenderer(),
+    traceMaxEvents: cfg.traceMaxEvents,
+    analyzerMemoryTtlSec: cfg.analyzerMemoryTtlSec,
   });
   return {
     storeRoot,
@@ -312,6 +348,72 @@ async function syncMessageMetadata(params: {
   return next;
 }
 
+function markDispatchExpired(session: SessionState, nowIso: string): SessionState {
+  if (!session.panelDispatch.pending) {
+    return session;
+  }
+
+  const pending = session.panelDispatch.pending;
+  const next = {
+    ...session,
+    panelDispatch: {
+      ...session.panelDispatch,
+      pending: {
+        ...pending,
+        status: "expired" as const,
+      },
+    },
+  };
+
+  return appendTraceEvent(
+    next,
+    createTraceEvent({
+      lane: "adapter",
+      type: "panel.commit.expired",
+      tsIso: nowIso,
+      severity: "warn",
+      recoverable: true,
+      code: "dispatch_expired",
+      data: {
+        dispatchId: pending.dispatchId,
+        expiresAtIso: pending.expiresAtIso,
+      },
+    }),
+  );
+}
+
+function markDispatchCommitted(params: {
+  session: SessionState;
+  dispatchId: string;
+  messageId: string | null;
+  nowIso: string;
+}): SessionState {
+  const previousIds = params.session.panelDispatch.committedDispatchIds.slice(-31);
+  const committedDispatchIds = [...previousIds, params.dispatchId];
+
+  const pending = params.session.panelDispatch.pending;
+  const next = {
+    ...params.session,
+    panelDispatch: {
+      pending: null,
+      committedDispatchIds,
+    },
+  };
+
+  return appendTraceEvent(
+    next,
+    createTraceEvent({
+      lane: "adapter",
+      type: "panel.commit.success",
+      tsIso: params.nowIso,
+      data: {
+        dispatchId: params.dispatchId,
+        messageId: params.messageId,
+      },
+    }),
+  );
+}
+
 function assertOwner(session: SessionState, actorId: string): { ok: true } | { ok: false; error: string } {
   if (!actorId) {
     return {
@@ -337,27 +439,89 @@ function assertOwner(session: SessionState, actorId: string): { ok: true } | { o
   return { ok: true };
 }
 
-function panelDispatchPayload(params: {
+function createDispatchId(): string {
+  return `disp-${randomUUID()}`;
+}
+
+function isPendingDispatchExpired(session: SessionState, nowIso: string): boolean {
+  const pending = session.panelDispatch.pending;
+  if (!pending || pending.status !== "prepared") {
+    return false;
+  }
+  const expiresAt = Date.parse(pending.expiresAtIso);
+  const now = Date.parse(nowIso);
+  if (!Number.isFinite(expiresAt) || !Number.isFinite(now)) {
+    return false;
+  }
+  return expiresAt <= now;
+}
+
+function hasCommittedDispatch(session: SessionState, dispatchId: string): boolean {
+  return session.panelDispatch.committedDispatchIds.includes(dispatchId);
+}
+
+type PreparedPanelDispatch = {
+  session: SessionState;
+  payload: Record<string, unknown>;
+};
+
+function preparePanelDispatch(params: {
   session: SessionState;
   routes: InteractionRouteRecord[];
+  nowIso: string;
   mode?: PanelMessageMode;
   errorHint?: string;
-}) {
+  dispatchTtlSec: number;
+  debugRuntimeSignals: boolean;
+}): PreparedPanelDispatch {
   const mode: PanelMessageMode =
     params.mode ?? (params.session.panels.main.messageId ? "edit" : "send");
   const loop = params.session.deterministicLoop;
   const availableButtons = collectPanelRouteActionIds(params.session).filter(
     (actionId) => actionId !== "action.free_input.submit",
   );
+  const dispatchId = createDispatchId();
+  const expiresAtIso = new Date(Date.parse(params.nowIso) + Math.max(30, params.dispatchTtlSec) * 1_000).toISOString();
 
   const panel = buildCheckpoint1Panel({
     session: params.session,
     routes: params.routes,
     mode,
     errorHint: params.errorHint,
+    debugRuntimeSignals: params.debugRuntimeSignals,
   });
 
-  return {
+  const preparedSession = appendTraceEvent(
+    {
+      ...params.session,
+      panelDispatch: {
+        pending: {
+          dispatchId,
+          preparedAtIso: params.nowIso,
+          expiresAtIso,
+          uiVersion: params.session.uiVersion,
+          sceneId: params.session.sceneId,
+          mode,
+          status: "prepared",
+          messageId: params.session.panels.main.messageId,
+        },
+        committedDispatchIds: params.session.panelDispatch.committedDispatchIds.slice(-32),
+      },
+    },
+    createTraceEvent({
+      lane: "adapter",
+      type: "panel.dispatch.prepared",
+      tsIso: params.nowIso,
+      data: {
+        dispatchId,
+        mode,
+        uiVersion: params.session.uiVersion,
+        sceneId: params.session.sceneId,
+      },
+    }),
+  );
+
+  const payload = {
     sourceOfTruth: "state-store",
     panel: {
       fixed: {
@@ -370,7 +534,8 @@ function panelDispatchPayload(params: {
         worldElapsedSec: loop.time.worldElapsedSec,
       },
       main: {
-        turnIndex: params.session.turnIndex,
+        actionSeq: params.session.actionSeq,
+        legacyTurnIndex: params.session.turnIndex,
         lastActionSummary: params.session.lastActionSummary,
         beatId: loop.beat.beatId,
         exchangeId: loop.exchange?.exchangeId ?? null,
@@ -386,6 +551,7 @@ function panelDispatchPayload(params: {
     },
     panelDispatch: {
       action: panel.mode,
+      dispatchId,
       message: panel.message,
       messageId: panel.messageId,
       components: panel.components,
@@ -396,9 +562,15 @@ function panelDispatchPayload(params: {
         sessionId: params.session.sessionId,
         uiVersion: params.session.uiVersion,
         sceneId: params.session.sceneId,
+        dispatchId,
         messageId: "<discord_message_id>",
       },
     },
+  };
+
+  return {
+    session: preparedSession,
+    payload,
   };
 }
 
@@ -449,25 +621,31 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
           const ownerId = resolveOwnerId(input, ctx);
           const sceneId = readString(input.sceneId);
 
-          const runtime = createRuntimeContext(gate.worldRoot);
+          const runtime = createRuntimeContext(gate.worldRoot, cfg);
           const result = await runtime.engine.startNewSession({
             channelKey,
             ownerId,
             initialSceneId: sceneId || undefined,
           });
           const session = normalizeSession(result.session);
+          const nowIso = new Date().toISOString();
+          const prepared = preparePanelDispatch({
+            session,
+            routes: result.routes,
+            mode: "send",
+            nowIso,
+            dispatchTtlSec: cfg.panelDispatchTtlSec,
+            debugRuntimeSignals: cfg.debugRuntimeSignals,
+          });
+          await runtime.store.upsertSession(prepared.session);
 
           const payload = {
             ok: true,
             command: "/trpg new",
             storeRoot: runtime.storeRoot,
-            session,
+            session: prepared.session,
             routes: result.routes,
-            ...panelDispatchPayload({
-              session,
-              routes: result.routes,
-              mode: "send",
-            }),
+            ...prepared.payload,
           };
 
           return jsonToolResult(payload);
@@ -497,7 +675,7 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
 
         try {
           const input = toObject(params);
-          const runtime = createRuntimeContext(gate.worldRoot);
+          const runtime = createRuntimeContext(gate.worldRoot, cfg);
           const actorId = resolveActorId(input, ctx);
           const sessionId = readString(input.sessionId) || undefined;
           const channelKey = resolveChannelKey(input, ctx);
@@ -547,19 +725,26 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
           }
 
           const session = normalizeSession(resumed.session);
+          const nowIso = new Date().toISOString();
+          const prepared = preparePanelDispatch({
+            session,
+            routes: resumed.routes,
+            mode: session.panels.main.messageId ? "edit" : "send",
+            errorHint: forceRecreate ? "강제 재생성 모드: 새 메시지로 패널을 다시 올려야 한다." : undefined,
+            nowIso,
+            dispatchTtlSec: cfg.panelDispatchTtlSec,
+            debugRuntimeSignals: cfg.debugRuntimeSignals,
+          });
+          await runtime.store.upsertSession(prepared.session);
+
           const payload = {
             ok: true,
             command: "/trpg resume",
             storeRoot: runtime.storeRoot,
-            session,
+            session: prepared.session,
             recoveryPlan: resumed.recoveryPlan,
             routes: resumed.routes,
-            ...panelDispatchPayload({
-              session,
-              routes: resumed.routes,
-              mode: session.panels.main.messageId ? "edit" : "send",
-              errorHint: forceRecreate ? "강제 재생성 모드: 새 메시지로 패널을 다시 올려야 한다." : undefined,
-            }),
+            ...prepared.payload,
           };
 
           return jsonToolResult(payload);
@@ -589,7 +774,7 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
 
         try {
           const input = toObject(params);
-          const runtime = createRuntimeContext(gate.worldRoot);
+          const runtime = createRuntimeContext(gate.worldRoot, cfg);
           const actorId = resolveActorId(input, ctx);
           const sessionId = readString(input.sessionId) || undefined;
           const channelKey = resolveChannelKey(input, ctx);
@@ -632,17 +817,24 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
           }
 
           const session = normalizeSession(result.session);
+          const nowIso = new Date().toISOString();
+          const prepared = preparePanelDispatch({
+            session,
+            routes: [],
+            mode: session.panels.main.messageId ? "edit" : "send",
+            nowIso,
+            dispatchTtlSec: cfg.panelDispatchTtlSec,
+            debugRuntimeSignals: cfg.debugRuntimeSignals,
+          });
+          await runtime.store.upsertSession(prepared.session);
+
           const payload = {
             ok: true,
             command: "/trpg end",
             storeRoot: runtime.storeRoot,
-            session,
+            session: prepared.session,
             removedRouteCount: result.removedRouteCount,
-            ...panelDispatchPayload({
-              session,
-              routes: [],
-              mode: session.panels.main.messageId ? "edit" : "send",
-            }),
+            ...prepared.payload,
           };
 
           return jsonToolResult(payload);
@@ -673,9 +865,22 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
         try {
           const input = toObject(params);
           const actorId = resolveActorId(input, ctx);
-          const routeKey = resolveRouteInput(input);
+          let routeKey: { sessionId: string; uiVersion: number; sceneId: string; actionId: string };
+          try {
+            routeKey = resolveRouteInput(input);
+          } catch {
+            return jsonToolResult(
+              runtimeError({
+                command: "panel-interaction",
+                errorCode: "invalid_custom_id",
+                message: "Invalid interaction routing key.",
+                recoverable: true,
+                recoveryHint: "Run /trpg resume to regenerate interaction routes.",
+              }),
+            );
+          }
           const freeInput = readString(input.freeInput) || undefined;
-          const runtime = createRuntimeContext(gate.worldRoot);
+          const runtime = createRuntimeContext(gate.worldRoot, cfg);
 
           const routePreview = await runtime.engine.resolveInteractionRoute({
             ...routeKey,
@@ -683,36 +888,159 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
           });
 
           if (!routePreview) {
-            return jsonToolResult({
-              ok: false,
-              error: "Expired or invalid interaction route. Run /trpg resume to regenerate panel routes.",
-              brokenPanel: true,
-            });
+            return jsonToolResult(
+              runtimeError({
+                command: "panel-interaction",
+                errorCode: "route_expired",
+                message: "Expired or invalid interaction route.",
+                recoverable: true,
+                recoveryHint: "Run /trpg resume to regenerate panel routes.",
+              }),
+            );
           }
 
           const loadedSession = await runtime.store.readSession(routePreview.sessionId);
           if (!loadedSession) {
-            return jsonToolResult({
-              ok: false,
-              error: "Session not found for route key.",
-              brokenPanel: true,
-            });
+            return jsonToolResult(
+              runtimeError({
+                command: "panel-interaction",
+                errorCode: "session_missing",
+                message: "Session not found for route key.",
+                recoverable: true,
+                recoveryHint: "Run /trpg resume to recreate panel state.",
+              }),
+            );
           }
 
-          const session = normalizeSession(loadedSession);
+          let session = normalizeSession(loadedSession);
+          const nowIso = new Date().toISOString();
+          session = appendTraceEvent(
+            session,
+            createTraceEvent({
+              lane: "adapter",
+              type: "interaction.received",
+              tsIso: nowIso,
+              data: {
+                routeKey,
+                actorId,
+              },
+            }),
+          );
+
+          if (isPendingDispatchExpired(session, nowIso)) {
+            session = markDispatchExpired(session, nowIso);
+            await runtime.store.upsertSession(session);
+          }
+
+          if (routePreview.uiVersion !== session.uiVersion) {
+            session = appendTraceEvent(
+              session,
+              createTraceEvent({
+                lane: "adapter",
+                type: "interaction.rejected",
+                tsIso: nowIso,
+                severity: "warn",
+                code: "stale_ui_version",
+                recoverable: true,
+                data: {
+                  routeUiVersion: routePreview.uiVersion,
+                  sessionUiVersion: session.uiVersion,
+                },
+              }),
+            );
+            await runtime.store.upsertSession(session);
+            return jsonToolResult(
+              runtimeError({
+                command: "panel-interaction",
+                errorCode: "stale_ui_version",
+                message: "Interaction is stale because uiVersion no longer matches session state.",
+                recoverable: true,
+                recoveryHint: "Run /trpg resume to refresh panel buttons.",
+              }),
+            );
+          }
+
+          if (routePreview.sceneId !== session.sceneId) {
+            session = appendTraceEvent(
+              session,
+              createTraceEvent({
+                lane: "adapter",
+                type: "interaction.rejected",
+                tsIso: nowIso,
+                severity: "warn",
+                code: "stale_scene",
+                recoverable: true,
+                data: {
+                  routeSceneId: routePreview.sceneId,
+                  sessionSceneId: session.sceneId,
+                },
+              }),
+            );
+            await runtime.store.upsertSession(session);
+            return jsonToolResult(
+              runtimeError({
+                command: "panel-interaction",
+                errorCode: "stale_scene",
+                message: "Interaction scene key is stale.",
+                recoverable: true,
+                recoveryHint: "Run /trpg resume to regenerate action routes.",
+              }),
+            );
+          }
+
           const ownerCheck = assertOwner(session, actorId);
           if (!ownerCheck.ok) {
-            return jsonToolResult({
-              ok: false,
-              error: ownerCheck.error,
-            });
+            session = appendTraceEvent(
+              session,
+              createTraceEvent({
+                lane: "adapter",
+                type: "interaction.rejected",
+                tsIso: nowIso,
+                severity: "warn",
+                code: "owner_mismatch",
+                recoverable: false,
+                data: {
+                  actorId,
+                  ownerId: session.ownerId,
+                },
+              }),
+            );
+            await runtime.store.upsertSession(session);
+            return jsonToolResult(
+              runtimeError({
+                command: "panel-interaction",
+                errorCode: "owner_mismatch",
+                message: ownerCheck.error,
+                recoverable: false,
+              }),
+            );
           }
 
           if (session.status !== "active") {
-            return jsonToolResult({
-              ok: false,
-              error: "Session is not active. Run /trpg new to start again.",
-            });
+            session = appendTraceEvent(
+              session,
+              createTraceEvent({
+                lane: "adapter",
+                type: "interaction.rejected",
+                tsIso: nowIso,
+                severity: "warn",
+                code: "session_ended",
+                recoverable: true,
+                data: {
+                  status: session.status,
+                },
+              }),
+            );
+            await runtime.store.upsertSession(session);
+            return jsonToolResult(
+              runtimeError({
+                command: "panel-interaction",
+                errorCode: "session_ended",
+                message: "Session is not active.",
+                recoverable: true,
+                recoveryHint: "Run /trpg new to start another session.",
+              }),
+            );
           }
 
           const route = await runtime.engine.resolveInteractionRoute({
@@ -720,12 +1048,45 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
             consume: true,
           });
           if (!route) {
-            return jsonToolResult({
-              ok: false,
-              error: "Interaction route was already consumed. Run /trpg resume to refresh panel buttons.",
-              brokenPanel: true,
-            });
+            session = appendTraceEvent(
+              session,
+              createTraceEvent({
+                lane: "adapter",
+                type: "interaction.rejected",
+                tsIso: nowIso,
+                severity: "warn",
+                code: "route_consumed",
+                recoverable: true,
+                data: {
+                  routeKey,
+                },
+              }),
+            );
+            await runtime.store.upsertSession(session);
+            return jsonToolResult(
+              runtimeError({
+                command: "panel-interaction",
+                errorCode: "route_consumed",
+                message: "Interaction route was already consumed.",
+                recoverable: true,
+                recoveryHint: "Run /trpg resume to refresh panel buttons.",
+              }),
+            );
           }
+
+          session = appendTraceEvent(
+            session,
+            createTraceEvent({
+              lane: "adapter",
+              type: "interaction.consumed",
+              tsIso: nowIso,
+              data: {
+                actionId: route.actionId,
+                uiVersion: route.uiVersion,
+                sceneId: route.sceneId,
+              },
+            }),
+          );
 
           const processed = await runtime.engine.processSceneAction({
             session,
@@ -737,33 +1098,42 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
 
           const resumed = await runtime.engine.resumeSession({ sessionId: updated.sessionId });
           if (!resumed) {
-            return jsonToolResult({
-              ok: false,
-              error: "Interaction succeeded but panel refresh failed. Run /trpg resume.",
-              brokenPanel: true,
-            });
+            return jsonToolResult(
+              runtimeError({
+                command: "panel-interaction",
+                errorCode: "panel_refresh_failed",
+                message: "Interaction succeeded but panel refresh failed.",
+                recoverable: true,
+                recoveryHint: "Run /trpg resume.",
+              }),
+            );
           }
 
           const nextSession = normalizeSession(resumed.session);
           const mode: PanelMessageMode = nextSession.panels.main.messageId ? "edit" : "send";
+          const prepared = preparePanelDispatch({
+            session: nextSession,
+            routes: resumed.routes,
+            mode,
+            errorHint:
+              mode === "send"
+                ? "기존 messageId가 없어서 새 패널 전송이 필요하다. 이후 trpg_panel_message_commit을 호출하라."
+                : undefined,
+            nowIso,
+            dispatchTtlSec: cfg.panelDispatchTtlSec,
+            debugRuntimeSignals: cfg.debugRuntimeSignals,
+          });
+          await runtime.store.upsertSession(prepared.session);
 
           return jsonToolResult({
             ok: true,
             command: "panel-interaction",
             consumedRoute: route,
             storeRoot: runtime.storeRoot,
-            session: nextSession,
+            session: prepared.session,
             resolution: processed.resolution,
             routes: resumed.routes,
-            ...panelDispatchPayload({
-              session: nextSession,
-              routes: resumed.routes,
-              mode,
-              errorHint:
-                mode === "send"
-                  ? "기존 messageId가 없어서 새 패널 전송이 필요하다. 이후 trpg_panel_message_commit을 호출하라."
-                  : undefined,
-            }),
+            ...prepared.payload,
           });
         } catch (error) {
           return jsonToolResult({
@@ -790,44 +1160,164 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
 
         try {
           const input = toObject(params);
-          const runtime = createRuntimeContext(gate.worldRoot);
+          const runtime = createRuntimeContext(gate.worldRoot, cfg);
           const sessionId = readString(input.sessionId);
           const actorId = resolveActorId(input, ctx);
+          const dispatchId = readString(input.dispatchId);
           const clear = readBoolean(input.clear, false);
           const messageId = clear ? null : readString(input.messageId);
           const channelMessageRef = readString(input.channelMessageRef) || undefined;
           const uiVersion = readInteger(input.uiVersion) ?? undefined;
           const sceneId = readString(input.sceneId) || undefined;
+          const nowIso = new Date().toISOString();
 
           if (!sessionId) {
-            return jsonToolResult({
-              ok: false,
-              error: "sessionId is required.",
-            });
+            return jsonToolResult(
+              runtimeError({
+                command: "panel-message-commit",
+                errorCode: "invalid_request",
+                message: "sessionId is required.",
+                recoverable: false,
+              }),
+            );
           }
 
           if (!clear && !messageId) {
-            return jsonToolResult({
-              ok: false,
-              error: "messageId is required unless clear=true.",
-            });
+            return jsonToolResult(
+              runtimeError({
+                command: "panel-message-commit",
+                errorCode: "invalid_request",
+                message: "messageId is required unless clear=true.",
+                recoverable: false,
+              }),
+            );
           }
 
           const existing = await runtime.store.readSession(sessionId);
           if (!existing) {
+            return jsonToolResult(
+              runtimeError({
+                command: "panel-message-commit",
+                errorCode: "session_missing",
+                message: "Session not found.",
+                recoverable: true,
+                recoveryHint: "Run /trpg resume or /trpg new.",
+              }),
+            );
+          }
+
+          let session = normalizeSession(existing);
+          const ownerCheck = assertOwner(session, actorId);
+          if (!ownerCheck.ok) {
+            session = appendTraceEvent(
+              session,
+              createTraceEvent({
+                lane: "adapter",
+                type: "panel.commit.failed",
+                tsIso: nowIso,
+                severity: "warn",
+                code: "owner_mismatch",
+                recoverable: false,
+                data: {
+                  actorId,
+                  ownerId: session.ownerId,
+                },
+              }),
+            );
+            await runtime.store.upsertSession(session);
+            return jsonToolResult(
+              runtimeError({
+                command: "panel-message-commit",
+                errorCode: "owner_mismatch",
+                message: ownerCheck.error,
+                recoverable: false,
+              }),
+            );
+          }
+
+          if (dispatchId && hasCommittedDispatch(session, dispatchId)) {
             return jsonToolResult({
-              ok: false,
-              error: "Session not found.",
+              ok: true,
+              command: "panel-message-commit",
+              idempotent: true,
+              dispatchId,
+              storeRoot: runtime.storeRoot,
+              sourceOfTruth: "state-store",
+              session,
             });
           }
 
-          const session = normalizeSession(existing);
-          const ownerCheck = assertOwner(session, actorId);
-          if (!ownerCheck.ok) {
-            return jsonToolResult({
-              ok: false,
-              error: ownerCheck.error,
-            });
+          if (isPendingDispatchExpired(session, nowIso)) {
+            session = markDispatchExpired(session, nowIso);
+            await runtime.store.upsertSession(session);
+          }
+
+          const pending = session.panelDispatch.pending;
+          if (pending && pending.status === "expired") {
+            return jsonToolResult(
+              runtimeError({
+                command: "panel-message-commit",
+                errorCode: "dispatch_expired",
+                message: "Pending panel dispatch is expired.",
+                recoverable: true,
+                recoveryHint: "Run /trpg resume to prepare fresh dispatch.",
+              }),
+            );
+          }
+
+          if (pending && !dispatchId) {
+            session = appendTraceEvent(
+              session,
+              createTraceEvent({
+                lane: "adapter",
+                type: "panel.commit.failed",
+                tsIso: nowIso,
+                severity: "warn",
+                code: "dispatch_required",
+                recoverable: true,
+                data: {
+                  pendingDispatchId: pending.dispatchId,
+                },
+              }),
+            );
+            await runtime.store.upsertSession(session);
+            return jsonToolResult(
+              runtimeError({
+                command: "panel-message-commit",
+                errorCode: "dispatch_required",
+                message: "dispatchId is required while a pending panel dispatch exists.",
+                recoverable: true,
+                recoveryHint: "Use panelCommitTemplate params from latest dispatch payload.",
+              }),
+            );
+          }
+
+          if (dispatchId && pending && pending.dispatchId !== dispatchId) {
+            session = appendTraceEvent(
+              session,
+              createTraceEvent({
+                lane: "adapter",
+                type: "panel.commit.failed",
+                tsIso: nowIso,
+                severity: "warn",
+                code: "dispatch_mismatch",
+                recoverable: true,
+                data: {
+                  dispatchId,
+                  pendingDispatchId: pending.dispatchId,
+                },
+              }),
+            );
+            await runtime.store.upsertSession(session);
+            return jsonToolResult(
+              runtimeError({
+                command: "panel-message-commit",
+                errorCode: "dispatch_mismatch",
+                message: "dispatchId does not match pending panel dispatch.",
+                recoverable: true,
+                recoveryHint: "Use latest dispatch payload or run /trpg resume.",
+              }),
+            );
           }
 
           const synced = await syncMessageMetadata({
@@ -840,18 +1330,46 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
           });
 
           if (!synced) {
-            return jsonToolResult({
-              ok: false,
-              error: "Session disappeared while syncing metadata.",
-            });
+            return jsonToolResult(
+              runtimeError({
+                command: "panel-message-commit",
+                errorCode: "session_missing",
+                message: "Session disappeared while syncing metadata.",
+                recoverable: true,
+                recoveryHint: "Run /trpg resume.",
+              }),
+            );
           }
+
+          const committed = dispatchId
+            ? markDispatchCommitted({
+                session: normalizeSession(synced),
+                dispatchId,
+                messageId,
+                nowIso,
+              })
+            : appendTraceEvent(
+                normalizeSession(synced),
+                createTraceEvent({
+                  lane: "adapter",
+                  type: "panel.commit.success",
+                  tsIso: nowIso,
+                  data: {
+                    dispatchId: null,
+                    messageId,
+                  },
+                }),
+              );
+
+          await runtime.store.upsertSession(committed);
 
           return jsonToolResult({
             ok: true,
             command: "panel-message-commit",
+            dispatchId: dispatchId || null,
             storeRoot: runtime.storeRoot,
             sourceOfTruth: "state-store",
-            session: synced,
+            session: committed,
           });
         } catch (error) {
           return jsonToolResult({

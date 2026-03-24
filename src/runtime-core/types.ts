@@ -15,6 +15,57 @@ export type PanelMetadata = {
   lastRenderedAt: string | null;
 };
 
+export type RuntimeTraceEventType =
+  | "session.new"
+  | "session.resume"
+  | "session.end"
+  | "interaction.received"
+  | "interaction.rejected"
+  | "interaction.consumed"
+  | "analyzer.intent.used"
+  | "analyzer.intent.fallback"
+  | "analyzer.intent.rejected"
+  | "analyzer.drift.used"
+  | "analyzer.drift.fallback"
+  | "analyzer.drift.rejected"
+  | "panel.dispatch.prepared"
+  | "panel.commit.success"
+  | "panel.commit.failed"
+  | "panel.commit.expired"
+  | "engine.action.resolved";
+
+export type RuntimeTraceEvent = {
+  traceId: string;
+  tsIso: string;
+  lane: "adapter" | "engine" | "analyzer" | "store";
+  type: RuntimeTraceEventType;
+  severity: "info" | "warn" | "error";
+  code?: string;
+  recoverable?: boolean;
+  data: Record<string, unknown>;
+};
+
+export type RuntimeTraceState = {
+  maxEvents: number;
+  events: RuntimeTraceEvent[];
+};
+
+export type PendingPanelDispatchState = {
+  dispatchId: string;
+  preparedAtIso: string;
+  expiresAtIso: string;
+  uiVersion: number;
+  sceneId: string;
+  mode: "send" | "edit";
+  status: "prepared" | "committed" | "expired" | "failed";
+  messageId: string | null;
+};
+
+export type PanelDispatchState = {
+  pending: PendingPanelDispatchState | null;
+  committedDispatchIds: string[];
+};
+
 export type SessionState = {
   schemaVersion: typeof RUNTIME_SCHEMA_VERSION;
   sessionId: string;
@@ -23,10 +74,16 @@ export type SessionState = {
   status: SessionStatus;
   sceneId: string;
   uiVersion: number;
+  actionSeq: number;
+  /**
+   * @deprecated Compatibility-only legacy field; use actionSeq.
+   */
   turnIndex: number;
   lastActionId: string | null;
   lastActionSummary: string | null;
   deterministicLoop: DeterministicSceneLoopState;
+  panelDispatch: PanelDispatchState;
+  trace: RuntimeTraceState;
   panels: Record<PanelId, PanelMetadata>;
   createdAt: string;
   updatedAt: string;

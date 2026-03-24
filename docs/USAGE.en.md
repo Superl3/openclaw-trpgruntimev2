@@ -20,6 +20,16 @@ Use it from `~/.openclaw/extensions/trpg-runtime` either as a plugin-only overla
 11. Agent-level gate through `plugins.entries.trpg-runtime.config.allowedAgentIds`.
 12. Path/write safety guards around world-root resolution and patch operations.
 
+## 2.2) Runtime hardening notes
+
+- `trpg_panel_message_commit` should use `dispatchId` from latest `panelDispatch` payload.
+- Duplicate commit with same `dispatchId` is idempotent.
+- Stale/expired interaction returns standardized `errorCode` values (for example `stale_ui_version`, `route_expired`) with resume hints.
+- Analyzer lane remains classifier-only; deterministic engine still performs final action adjudication.
+- `preResolvedClaim` is warning-only and never treated as success proof.
+- Analyzer memory is bounded TTL cache, not deterministic source-of-truth.
+- Raw drift values are hidden in default UX; set `debugRuntimeSignals=true` only for debugging.
+
 ## 2.1) World-data-driven behavior
 
 - Hardcoded setting/scenario content has been removed from runtime prompt hooks.
