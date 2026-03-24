@@ -3773,7 +3773,6 @@ const trpgRuntimePlugin = {
         const persistenceState = applyScenePersistenceDefaults({
           sceneParsed: sceneStateRoot,
           latestAction,
-          prompt: event.prompt,
         });
         if (persistenceState.changed) {
           const renderedSceneState = renderStructuredContent(sceneStateLoaded.format, sceneStateRoot);

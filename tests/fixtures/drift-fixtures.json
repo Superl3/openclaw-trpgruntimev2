@@ -1,0 +1,18 @@
+{
+  "fixtures": [
+    {
+      "name": "warmth-altruism",
+      "recentFreeInputs": [
+        "I help them and thank everyone.",
+        "Let us support the injured person first."
+      ]
+    },
+    {
+      "name": "boldness-aggression",
+      "recentFreeInputs": [
+        "I rush and force the gate.",
+        "I threaten the guard to move now."
+      ]
+    }
+  ]
+}

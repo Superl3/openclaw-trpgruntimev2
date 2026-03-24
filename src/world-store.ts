@@ -177,29 +177,28 @@ async function listFilesRecursive(rootDir: string, maxFiles: number): Promise<st
 
   while (queue.length > 0 && out.length < maxFiles) {
     const current = queue.shift() as string;
-    let entries: Awaited<ReturnType<typeof fs.readdir>>;
     try {
-      entries = await fs.readdir(current, { withFileTypes: true });
+      const entries = await fs.readdir(current, { withFileTypes: true, encoding: "utf8" });
+
+      for (const entry of entries) {
+        if (out.length >= maxFiles) {
+          break;
+        }
+        const absolute = path.join(current, entry.name);
+        if (entry.isDirectory()) {
+          queue.push(absolute);
+          continue;
+        }
+        if (!entry.isFile()) {
+          continue;
+        }
+        if (!READABLE_EXTENSIONS.has(extLower(absolute))) {
+          continue;
+        }
+        out.push(absolute);
+      }
     } catch {
       continue;
-    }
-
-    for (const entry of entries) {
-      if (out.length >= maxFiles) {
-        break;
-      }
-      const absolute = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        queue.push(absolute);
-        continue;
-      }
-      if (!entry.isFile()) {
-        continue;
-      }
-      if (!READABLE_EXTENSIONS.has(extLower(absolute))) {
-        continue;
-      }
-      out.push(absolute);
     }
   }
 

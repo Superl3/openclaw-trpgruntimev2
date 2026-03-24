@@ -1,0 +1,19 @@
+{
+  "fixtures": [
+    {
+      "name": "observe-command",
+      "text": "I inspect the floor for tracks.",
+      "expectedAction": "action.observe"
+    },
+    {
+      "name": "rush-command",
+      "text": "I force my way through and rush in now.",
+      "expectedAction": "action.rush"
+    },
+    {
+      "name": "ambiguous-low-confidence",
+      "text": "hmm maybe",
+      "expectedAction": "action.observe"
+    }
+  ]
+}
