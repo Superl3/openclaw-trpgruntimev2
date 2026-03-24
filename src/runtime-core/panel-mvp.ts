@@ -180,11 +180,15 @@ function subSectionText(session: SessionState, debugRuntimeSignals: boolean): st
   }
 
   if (debugRuntimeSignals) {
+    const hookDebug = questSummary.debug.hookText;
     lines.push(
       `debug.behavioral_drift.raw: warm=${drift.warmth.toFixed(2)} bold=${drift.boldness.toFixed(2)} caution=${drift.caution.toFixed(2)} altruism=${drift.altruism.toFixed(2)} aggression=${drift.aggression.toFixed(2)} humor=${drift.humor.toFixed(2)}`,
     );
     lines.push(
       `debug.temporal.raw: location=${temporalSummary.debug.locationId ?? "none"} memory=${String(temporalSummary.debug.memoryCount)} max_familiarity=${String(temporalSummary.debug.maxFamiliarity)} max_freshness=${String(temporalSummary.debug.maxFreshness)} traces=${String(temporalSummary.debug.activeTraceCount)} max_trace=${String(temporalSummary.debug.maxTraceIntensity)} location_state=${temporalSummary.debug.locationState ? `tension=${String(temporalSummary.debug.locationState.tension)} alertness=${String(temporalSummary.debug.locationState.alertness)} accessibility=${String(temporalSummary.debug.locationState.accessibility)}` : "none"}`,
+    );
+    lines.push(
+      `debug.quest_hook_text.raw: attempted=${String(hookDebug.generationAttempted)} result=${hookDebug.result} reason=${hookDebug.reason ?? "none"} cache_hit=${String(hookDebug.cacheHitCount)} cache_miss=${String(hookDebug.cacheMissCount)} slots=${hookDebug.slotMeta.length > 0 ? hookDebug.slotMeta.map((entry) => `${entry.slotType}:${entry.slotKey}:${entry.source}:${entry.cacheHit ? "hit" : "miss"}${entry.skipReason ? `:${entry.skipReason}` : ""}`).join(" / ") : "none"}`,
     );
     lines.push(
       `debug.quest_tuning.raw: surfacing_rate=${questSummary.debug.tuning.surfacingRate.toFixed(2)} expiration_rate=${questSummary.debug.tuning.expirationRate.toFixed(2)} mutation_rate=${questSummary.debug.tuning.mutationRate.toFixed(2)} successor_rate=${questSummary.debug.tuning.successorRate.toFixed(2)} avg_urgency=${String(questSummary.debug.tuning.averageUrgency)} active_vs_surfaced=${questSummary.debug.tuning.activeVsSurfacedRatio.toFixed(2)} budget_util=live:${questSummary.debug.tuning.budgetUtilization.live.toFixed(2)}/world:${questSummary.debug.tuning.budgetUtilization.world.toFixed(2)}/attention:${questSummary.debug.tuning.budgetUtilization.attention.toFixed(2)}/narrative:${questSummary.debug.tuning.budgetUtilization.narrative.toFixed(2)} quota_sat=loc:${questSummary.debug.tuning.quotaSaturation.location.toFixed(2)}/pressure:${questSummary.debug.tuning.quotaSaturation.pressure.toFixed(2)}/archetype:${questSummary.debug.tuning.quotaSaturation.archetype.toFixed(2)}`,

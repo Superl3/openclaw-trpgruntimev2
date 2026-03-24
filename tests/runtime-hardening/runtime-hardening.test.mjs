@@ -30,12 +30,18 @@ async function loadModules() {
 
   const analyzer = await importFromOut("src/runtime-core/analyzer-lane.js");
   const sceneLoop = await importFromOut("src/runtime-core/scene-loop.js");
+  const questEconomy = await importFromOut("src/runtime-core/quest-economy.js");
   const panel = await importFromOut("src/runtime-core/panel-mvp.js");
+  const runtimeEngine = await importFromOut("src/runtime-core/runtime-engine.js");
+  const noopLane = await importFromOut("src/runtime-core/noop-lane.js");
   const pluginModule = await importFromOut("index.js");
   return {
     analyzer,
     sceneLoop,
+    questEconomy,
     panel,
+    runtimeEngine,
+    noopLane,
     plugin: pluginModule.default,
   };
 }
@@ -97,6 +103,114 @@ function makeSession(sceneLoopModule, nowIso) {
     updatedAt: nowIso,
     endedAt: null,
   };
+}
+
+function createMemoryStore() {
+  const sessions = new Map();
+  const routes = new Map();
+  const routeKey = (key) => `${key.sessionId}:${key.uiVersion}:${key.sceneId}:${key.actionId}`;
+
+  return {
+    async readSession(sessionId) {
+      return sessions.get(sessionId) ?? null;
+    },
+    async readActiveSessionByChannel(channelKey) {
+      for (const session of sessions.values()) {
+        if (session.channelKey === channelKey && session.status === "active") {
+          return session;
+        }
+      }
+      return null;
+    },
+    async upsertSession(session) {
+      sessions.set(session.sessionId, session);
+    },
+    async upsertInteractionRoute(route) {
+      routes.set(routeKey(route), route);
+    },
+    async readInteractionRoute(key) {
+      return routes.get(routeKey(key)) ?? null;
+    },
+    async consumeInteractionRoute(key, consumedAt) {
+      const current = routes.get(routeKey(key));
+      if (!current) {
+        return null;
+      }
+      const consumed = {
+        ...current,
+        consumedAt,
+      };
+      routes.set(routeKey(key), consumed);
+      return consumed;
+    },
+    async deleteRoutesForSession(sessionId) {
+      let removed = 0;
+      for (const [key] of routes.entries()) {
+        if (key.startsWith(`${sessionId}:`)) {
+          routes.delete(key);
+          removed += 1;
+        }
+      }
+      return removed;
+    },
+    async listRoutesForSession(sessionId, uiVersion) {
+      const listed = [];
+      for (const route of routes.values()) {
+        if (route.sessionId !== sessionId) {
+          continue;
+        }
+        if (typeof uiVersion === "number" && route.uiVersion !== uiVersion) {
+          continue;
+        }
+        listed.push(route);
+      }
+      return listed;
+    },
+  };
+}
+
+function makeHookReadySession(sceneLoopModule, questEconomyModule, nowIso, urgency = 72) {
+  const loop = sceneLoopModule.createInitialDeterministicSceneLoop({
+    sceneId: "scene-hook-runtime",
+    nowIso,
+  });
+  loop.scene.locationId = "loc-hook-runtime";
+
+  const economy = questEconomyModule.ensureQuestEconomyState(undefined, nowIso);
+  const pressure = economy.worldPressures[0];
+  economy.quests = [
+    {
+      questId: "quest-hook-runtime-001",
+      pressureId: pressure.pressureId,
+      archetype: pressure.archetype,
+      lifecycle: "surfaced",
+      locationId: "loc-hook-runtime",
+      urgency,
+      progress: 0,
+      surfacedAtIso: nowIso,
+      startedAtIso: null,
+      deadlineAtIso: null,
+      expiresAtIso: "2026-03-24T00:30:00.000Z",
+      lastAdvancedAtIso: nowIso,
+      parentQuestId: null,
+      successorQuestId: null,
+      terminalReason: null,
+      cost: { world: 2, attention: 2, narrative: 1 },
+      hookType: "witness",
+      mutationCount: 0,
+      lastMutationAtIso: null,
+      stallCount: 0,
+    },
+  ];
+  loop.questEconomy = economy;
+
+  const session = makeSession(sceneLoopModule, nowIso);
+  session.sceneId = loop.scene.sceneId;
+  session.deterministicLoop = loop;
+  session.panels.fixed.sceneId = loop.scene.sceneId;
+  session.panels.main.sceneId = loop.scene.sceneId;
+  session.panels.sub.sceneId = loop.scene.sceneId;
+  return session;
 }
 
 const modulesPromise = loadModules();
@@ -210,6 +324,229 @@ test("default panel hides raw drift and debug panel shows raw drift", async () =
   assert.equal(debugText.includes("debug.behavioral_drift.raw"), true);
   assert.equal(normalText.includes("debug.quest_tuning.raw"), false);
   assert.equal(debugText.includes("debug.quest_tuning.raw"), true);
+});
+
+test("hook lane renderer error falls back without breaking action resolution", async () => {
+  const { analyzer, noopLane, questEconomy, runtimeEngine, sceneLoop } = await modulesPromise;
+  const nowIso = "2026-03-24T00:00:00.000Z";
+  const session = makeHookReadySession(sceneLoop, questEconomy, nowIso, 80);
+
+  const engine = runtimeEngine.createCheckpoint0RuntimeEngine({
+    store: createMemoryStore(),
+    intentAnalyzer: new analyzer.RuleBasedIntentAnalyzer(),
+    personaDriftAnalyzer: new analyzer.RuleBasedPersonaDriftAnalyzer(),
+    sceneRenderer: new noopLane.NoopSceneRenderer(),
+    questHookTextRenderer: {
+      render: async () => {
+        throw new Error("hook renderer failure");
+      },
+    },
+    richHookTextEnabled: true,
+    hookTextTimeoutMs: 200,
+    hookTextCacheTtlSec: 300,
+  });
+
+  const processed = await engine.processSceneAction({
+    session,
+    routeActionId: "action.wait",
+  });
+
+  assert.ok(processed.session);
+  const hookTrace = processed.session.trace.events.find((entry) => entry.type === "engine.quest.hook_text");
+  assert.ok(hookTrace);
+  assert.equal(hookTrace.data.generationAttempted, true);
+  assert.equal(hookTrace.data.result, "fallback");
+  assert.equal(hookTrace.data.reason, "renderer_error");
+});
+
+test("hook lane timeout falls back immediately with deterministic panel output", async () => {
+  const { analyzer, noopLane, panel, questEconomy, runtimeEngine, sceneLoop } = await modulesPromise;
+  const nowIso = "2026-03-24T00:00:00.000Z";
+  const session = makeHookReadySession(sceneLoop, questEconomy, nowIso, 78);
+
+  const engine = runtimeEngine.createCheckpoint0RuntimeEngine({
+    store: createMemoryStore(),
+    intentAnalyzer: new analyzer.RuleBasedIntentAnalyzer(),
+    personaDriftAnalyzer: new analyzer.RuleBasedPersonaDriftAnalyzer(),
+    sceneRenderer: new noopLane.NoopSceneRenderer(),
+    questHookTextRenderer: {
+      render: async () => new Promise(() => {}),
+    },
+    richHookTextEnabled: true,
+    hookTextTimeoutMs: 80,
+    hookTextCacheTtlSec: 300,
+  });
+
+  const processed = await engine.processSceneAction({
+    session,
+    routeActionId: "action.wait",
+  });
+
+  const hookTrace = processed.session.trace.events.find((entry) => entry.type === "engine.quest.hook_text");
+  assert.ok(hookTrace);
+  assert.equal(hookTrace.data.result, "fallback");
+  assert.equal(hookTrace.data.reason, "renderer_timeout");
+
+  const panelOut = panel.buildCheckpoint1Panel({
+    session: processed.session,
+    routes: [],
+    mode: "send",
+  });
+  const panelText = JSON.stringify(panelOut.components);
+  assert.ok(panelText.includes("활성 과제:") || panelText.includes("접촉 기회:"));
+});
+
+test("hook text cache hit skips regeneration on next action", async () => {
+  const { analyzer, noopLane, questEconomy, runtimeEngine, sceneLoop } = await modulesPromise;
+  const nowIso = "2026-03-24T00:00:00.000Z";
+  const session = makeHookReadySession(sceneLoop, questEconomy, nowIso, 90);
+
+  let renderCallCount = 0;
+  const engine = runtimeEngine.createCheckpoint0RuntimeEngine({
+    store: createMemoryStore(),
+    intentAnalyzer: new analyzer.RuleBasedIntentAnalyzer(),
+    personaDriftAnalyzer: new analyzer.RuleBasedPersonaDriftAnalyzer(),
+    sceneRenderer: new noopLane.NoopSceneRenderer(),
+    questHookTextRenderer: {
+      render: async (input) => {
+        renderCallCount += 1;
+        return {
+          contractVersion: 1,
+          overrides: input.slots.map((slot) => ({
+            slotKey: slot.slotKey,
+            shortText: "짧은 후크",
+          })),
+        };
+      },
+    },
+    richHookTextEnabled: true,
+    hookTextTimeoutMs: 120,
+    hookTextCacheTtlSec: 600,
+  });
+
+  const first = await engine.processSceneAction({
+    session,
+    routeActionId: "action.wait",
+  });
+  const firstSlot = first.session.deterministicLoop.questEconomy.presentation.hookSlots[0];
+  const firstWorldPulseSlot = first.session.deterministicLoop.questEconomy.presentation.worldPulseSlot;
+  assert.ok(firstSlot?.llmShortText || firstWorldPulseSlot?.llmShortText);
+  assert.equal(renderCallCount, 1);
+
+  const second = await engine.processSceneAction({
+    session: first.session,
+    routeActionId: "action.wait",
+  });
+  assert.equal(renderCallCount, 1);
+  const secondHookTrace = second.session.trace.events
+    .filter((entry) => entry.type === "engine.quest.hook_text")
+    .at(-1);
+  assert.ok(secondHookTrace);
+  assert.equal(secondHookTrace.data.reason, "cache_hit_only");
+});
+
+test("worldPulse slotType override applies through shared hook lane", async () => {
+  const { analyzer, noopLane, questEconomy, runtimeEngine, sceneLoop } = await modulesPromise;
+  const nowIso = "2026-03-24T00:00:00.000Z";
+  const session = makeHookReadySession(sceneLoop, questEconomy, nowIso, 88);
+
+  let seenWorldPulseInput = false;
+  const engine = runtimeEngine.createCheckpoint0RuntimeEngine({
+    store: createMemoryStore(),
+    intentAnalyzer: new analyzer.RuleBasedIntentAnalyzer(),
+    personaDriftAnalyzer: new analyzer.RuleBasedPersonaDriftAnalyzer(),
+    sceneRenderer: new noopLane.NoopSceneRenderer(),
+    questHookTextRenderer: {
+      render: async (input) => {
+        const worldPulseSlot = input.slots.find((slot) => slot.slotType === "worldPulse");
+        seenWorldPulseInput = Boolean(worldPulseSlot);
+        return {
+          contractVersion: 1,
+          overrides: worldPulseSlot
+            ? [
+                {
+                  slotKey: worldPulseSlot.slotKey,
+                  shortText: "도시의 압력이 다시 꿈틀거린다.",
+                },
+              ]
+            : [],
+        };
+      },
+    },
+    richHookTextEnabled: true,
+    hookTextTimeoutMs: 150,
+    hookTextCacheTtlSec: 600,
+  });
+
+  const processed = await engine.processSceneAction({
+    session,
+    routeActionId: "action.wait",
+  });
+
+  assert.equal(seenWorldPulseInput, true);
+  const worldPulseSlot = processed.session.deterministicLoop.questEconomy.presentation.worldPulseSlot;
+  assert.ok(worldPulseSlot?.llmShortText);
+  const hookTrace = processed.session.trace.events.find((entry) => entry.type === "engine.quest.hook_text");
+  assert.ok(hookTrace);
+  const slotMetaText = JSON.stringify(hookTrace.data.slotMeta);
+  assert.equal(slotMetaText.includes("worldPulse"), true);
+});
+
+test("deterministic quest lifecycle and budgets remain identical with hook lane on or off", async () => {
+  const { analyzer, noopLane, questEconomy, runtimeEngine, sceneLoop } = await modulesPromise;
+  const nowIso = "2026-03-24T00:00:00.000Z";
+  const baseSession = makeHookReadySession(sceneLoop, questEconomy, nowIso, 85);
+  const actions = ["action.wait", "action.observe", "action.wait", "action.move"];
+
+  const engineOff = runtimeEngine.createCheckpoint0RuntimeEngine({
+    store: createMemoryStore(),
+    intentAnalyzer: new analyzer.RuleBasedIntentAnalyzer(),
+    personaDriftAnalyzer: new analyzer.RuleBasedPersonaDriftAnalyzer(),
+    sceneRenderer: new noopLane.NoopSceneRenderer(),
+    richHookTextEnabled: false,
+  });
+
+  const engineOn = runtimeEngine.createCheckpoint0RuntimeEngine({
+    store: createMemoryStore(),
+    intentAnalyzer: new analyzer.RuleBasedIntentAnalyzer(),
+    personaDriftAnalyzer: new analyzer.RuleBasedPersonaDriftAnalyzer(),
+    sceneRenderer: new noopLane.NoopSceneRenderer(),
+    questHookTextRenderer: {
+      render: async (input) => ({
+        contractVersion: 1,
+        overrides: input.slots.map((slot) => ({ slotKey: slot.slotKey, shortText: "짧은 후크" })).slice(0, 1),
+      }),
+    },
+    richHookTextEnabled: true,
+    hookTextTimeoutMs: 120,
+    hookTextCacheTtlSec: 600,
+  });
+
+  const run = async (engine, seedSession) => {
+    let current = seedSession;
+    for (const actionId of actions) {
+      const processed = await engine.processSceneAction({
+        session: current,
+        routeActionId: actionId,
+      });
+      current = processed.session;
+    }
+    return current.deterministicLoop.questEconomy;
+  };
+
+  const offEconomy = await run(engineOff, structuredClone(baseSession));
+  const onEconomy = await run(engineOn, structuredClone(baseSession));
+
+  const projectDeterministic = (economy) => ({
+    version: economy.version,
+    worldPressures: economy.worldPressures,
+    quests: economy.quests,
+    budget: economy.budget,
+    softQuota: economy.softQuota,
+    nextQuestSeq: economy.nextQuestSeq,
+  });
+
+  assert.deepEqual(projectDeterministic(onEconomy), projectDeterministic(offEconomy));
 });
 
 test("dispatch commit idempotent and stale interaction gives standardized error", async () => {

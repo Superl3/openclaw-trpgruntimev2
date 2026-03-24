@@ -7,7 +7,8 @@
   "scripts": {
     "build": "node -e \"console.log('trpg-runtime-v2: no build step required (TS loaded via jiti).')\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "smoke:manifest": "node -e \"const fs=require('fs');const m=JSON.parse(fs.readFileSync('openclaw.plugin.json','utf8'));if(!m.id||!m.configSchema){throw new Error('manifest invalid')}console.log('manifest ok:',m.id)\""
+    "smoke:manifest": "node -e \"const fs=require('fs');const m=JSON.parse(fs.readFileSync('openclaw.plugin.json','utf8'));if(!m.id||!m.configSchema){throw new Error('manifest invalid')}console.log('manifest ok:',m.id)\"",
+    "seed:validate": "node ./scripts/validate-world-seed.mjs"
   },
   "dependencies": {
     "yaml": "^2.8.2"

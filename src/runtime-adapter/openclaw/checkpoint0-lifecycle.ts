@@ -7,9 +7,11 @@ import {
   resolveWorldRootForContext,
   type TrpgRuntimeConfig,
 } from "../../config.js";
+import type { RuntimeBootstrapLoadResult } from "../../runtime-core/contracts.js";
 import { createCheckpoint0RuntimeEngine } from "../../runtime-core/runtime-engine.js";
 import { RuleBasedIntentAnalyzer, RuleBasedPersonaDriftAnalyzer } from "../../runtime-core/analyzer-lane.js";
-import { NoopSceneRenderer } from "../../runtime-core/noop-lane.js";
+import { RuleBasedQuestHookTextRenderer } from "../../runtime-core/hook-lane.js";
+import { NoopQuestHookTextRenderer, NoopSceneRenderer } from "../../runtime-core/noop-lane.js";
 import {
   buildCheckpoint1Panel,
   collectPanelRouteActionIds,
@@ -19,11 +21,24 @@ import {
 import { buildQuestEconomyQualitativeSummary } from "../../runtime-core/quest-economy.js";
 import { buildTemporalQualitativeSummary } from "../../runtime-core/temporal-systems.js";
 import { ensureDeterministicSceneLoopState } from "../../runtime-core/scene-loop.js";
+import { buildRuntimeBootstrapInput, validateWorldSeed } from "../../runtime-core/world-seed.js";
 import { appendTraceEvent, createTraceEvent, ensureTraceState } from "../../runtime-core/trace.js";
 import { JsonFileStateStore } from "../../runtime-store/file-state-store.js";
-import type { InteractionRouteRecord, SessionState } from "../../runtime-core/types.js";
+import { ensureRuntimeMetadata, type InteractionRouteRecord, type SessionState } from "../../runtime-core/types.js";
+import { loadStructuredWorldFile } from "../../world-store.js";
 
 const CHECKPOINT0_STORE_RELATIVE_PATH = "state/runtime-core";
+const WORLD_SEED_CANDIDATE_PATHS = [
+  "canon/world-seed.yaml",
+  "canon/world-seed.yml",
+  "canon/world-seed.json",
+  "state/world-seed.yaml",
+  "state/world-seed.yml",
+  "state/world-seed.json",
+  "state/world-seeds.yaml",
+  "state/world-seeds.yml",
+  "state/world-seeds.json",
+] as const;
 
 const SESSION_NEW_PARAMETERS = {
   type: "object",
@@ -139,6 +154,75 @@ function readInteger(value: unknown): number | null {
   return null;
 }
 
+function toSeedDiagnostics(
+  issues: Array<{ code: string; message: string; path: string; severity: "warn" | "error" }>,
+  sourcePath: string,
+): RuntimeBootstrapLoadResult["diagnostics"] {
+  return issues.slice(0, 24).map((issue) => ({
+    code: issue.code,
+    message: issue.message,
+    path: issue.path ? `${sourcePath}${issue.path}` : sourcePath,
+    severity: issue.severity,
+  }));
+}
+
+async function loadRuntimeBootstrapFromWorldSeed(params: {
+  worldRoot: string;
+  cfg: TrpgRuntimeConfig;
+}): Promise<RuntimeBootstrapLoadResult> {
+  for (const candidatePath of WORLD_SEED_CANDIDATE_PATHS) {
+    let loaded;
+    try {
+      loaded = await loadStructuredWorldFile(params.worldRoot, candidatePath, {
+        allowMissing: true,
+        maxReadBytes: params.cfg.maxReadBytes,
+      });
+    } catch (error) {
+      return {
+        status: "error",
+        sourcePath: candidatePath,
+        bootstrap: null,
+        diagnostics: [
+          {
+            code: "world_seed_load_error",
+            message: error instanceof Error ? error.message : String(error),
+            path: candidatePath,
+            severity: "error",
+          },
+        ],
+      };
+    }
+
+    if (!loaded.exists) {
+      continue;
+    }
+
+    const validated = validateWorldSeed(loaded.parsed);
+    if (!validated.ok) {
+      return {
+        status: "invalid",
+        sourcePath: candidatePath,
+        bootstrap: null,
+        diagnostics: toSeedDiagnostics(validated.issues, candidatePath),
+      };
+    }
+
+    return {
+      status: "used",
+      sourcePath: candidatePath,
+      bootstrap: buildRuntimeBootstrapInput(validated.seed),
+      diagnostics: toSeedDiagnostics(validated.issues, candidatePath),
+    };
+  }
+
+  return {
+    status: "missing",
+    sourcePath: null,
+    bootstrap: null,
+    diagnostics: [],
+  };
+}
+
 function resolveChannelKey(params: Record<string, unknown>, ctx: OpenClawPluginToolContext): string {
   const fromParams = readString(params.channelKey);
   if (fromParams) {
@@ -186,6 +270,7 @@ function normalizeSession(session: SessionState): SessionState {
     sceneId: readString((session as Record<string, unknown>).sceneId) || "scene-bootstrap",
     nowIso,
   });
+  const runtimeMetadata = ensureRuntimeMetadata((session as Record<string, unknown>).runtimeMetadata);
   const sceneId = deterministicLoop.scene.sceneId;
   const ownerId = readString((session as Record<string, unknown>).ownerId) || "owner:unknown";
   const actionSeq = Math.max(
@@ -205,6 +290,7 @@ function normalizeSession(session: SessionState): SessionState {
     lastActionId,
     lastActionSummary,
     deterministicLoop,
+    runtimeMetadata,
     panelDispatch: {
       pending: session.panelDispatch?.pending ?? null,
       committedDispatchIds: Array.isArray(session.panelDispatch?.committedDispatchIds)
@@ -261,11 +347,18 @@ function createGate(params: {
 function createRuntimeContext(worldRoot: string, cfg: TrpgRuntimeConfig) {
   const storeRoot = path.resolve(worldRoot, CHECKPOINT0_STORE_RELATIVE_PATH);
   const store = new JsonFileStateStore(storeRoot);
+  const questHookTextRenderer = cfg.richHookTextEnabled
+    ? new RuleBasedQuestHookTextRenderer()
+    : new NoopQuestHookTextRenderer();
   const engine = createCheckpoint0RuntimeEngine({
     store,
     intentAnalyzer: new RuleBasedIntentAnalyzer(),
     personaDriftAnalyzer: new RuleBasedPersonaDriftAnalyzer(),
     sceneRenderer: new NoopSceneRenderer(),
+    questHookTextRenderer,
+    richHookTextEnabled: cfg.richHookTextEnabled,
+    hookTextTimeoutMs: cfg.hookTextTimeoutMs,
+    hookTextCacheTtlSec: cfg.hookTextCacheTtlSec,
     traceMaxEvents: cfg.traceMaxEvents,
     analyzerMemoryTtlSec: cfg.analyzerMemoryTtlSec,
   });
@@ -674,10 +767,16 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
           const sceneId = readString(input.sceneId);
 
           const runtime = createRuntimeContext(gate.worldRoot, cfg);
+          const seedBootstrap = await loadRuntimeBootstrapFromWorldSeed({
+            worldRoot: gate.worldRoot,
+            cfg,
+          });
           const result = await runtime.engine.startNewSession({
             channelKey,
             ownerId,
             initialSceneId: sceneId || undefined,
+            runtimeBootstrap: seedBootstrap.bootstrap,
+            runtimeBootstrapDiagnostics: seedBootstrap.diagnostics,
           });
           const session = normalizeSession(result.session);
           const nowIso = new Date().toISOString();
@@ -697,6 +796,12 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
             storeRoot: runtime.storeRoot,
             session: prepared.session,
             routes: result.routes,
+            seedBootstrap: {
+              status: seedBootstrap.status,
+              sourcePath: seedBootstrap.sourcePath,
+              used: seedBootstrap.status === "used",
+              diagnostics: seedBootstrap.diagnostics,
+            },
             ...prepared.payload,
           };
 

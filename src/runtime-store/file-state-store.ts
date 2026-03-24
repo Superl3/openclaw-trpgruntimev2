@@ -81,7 +81,26 @@ export class JsonFileStateStore implements StateStore {
     const tempPath = `${this.storeFilePath}.tmp-${randomUUID()}`;
     const body = `${JSON.stringify(snapshot, null, 2)}\n`;
     await fs.writeFile(tempPath, body, "utf8");
-    await fs.rename(tempPath, this.storeFilePath);
+
+    const retryableCodes = new Set(["EPERM", "EBUSY", "EACCES"]);
+    const maxRenameAttempts = 5;
+
+    for (let attempt = 1; attempt <= maxRenameAttempts; attempt += 1) {
+      try {
+        await fs.rename(tempPath, this.storeFilePath);
+        return;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code ?? "";
+        const retryable = retryableCodes.has(code);
+        if (!retryable || attempt >= maxRenameAttempts) {
+          await fs.rm(tempPath, { force: true });
+          throw error;
+        }
+        await new Promise((resolve) => {
+          setTimeout(resolve, 20 * attempt);
+        });
+      }
+    }
   }
 
   private async withWriteLock<T>(fn: (snapshot: StoreSnapshot) => Promise<T>): Promise<T> {

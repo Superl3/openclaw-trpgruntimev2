@@ -51,9 +51,35 @@
 - 퀘스트 패널 요약을 actionable / world pulse / recent outcomes 3층으로 분리했습니다.
 - active와 surfaced를 분리 노출합니다 (active top 1, surfaced top 최대 2).
 - recent lifecycle 변화는 내부 상태 코드 대신 플레이어용 자연어 문구로 표시합니다.
-- `hookSlot.llmShortText`는 선택 필드/계약만 추가했고, 이번 단계에서 실제 LLM 호출 경로는 사용하지 않습니다.
 - 튜닝 텔레메트리는 bounded ring+snapshot으로 유지합니다 (`surfacing/expiration/mutation/successor rate`, budget utilization, quota saturation, urgency ratio).
 - raw tuning/budget/quota 값은 `debugRuntimeSignals=true`에서만 노출됩니다.
+
+## 2.6) Optional rich hook lane 메모 (Checkpoint 6C)
+
+- actionable slot(활성 top 1 + surfaced 최대 2)과 좁은 `worldPulse` synthetic slot을 대상으로 optional hook text lane을 추가했습니다.
+- lane은 비권한(non-authoritative) 계층이며 lifecycle/budget/pressure 판정은 기존 deterministic engine이 유지합니다.
+- I/O 계약은 compact/bounded 형태입니다 (`slotKey` 중심 구조화 사실, override 최대 3개).
+- `llmShortText`는 단문 1줄 제한이며 `defaultText` 길이를 넘지 않도록 잘립니다.
+- cache는 source hash + TTL(`hookTextCacheTtlSec`) 기준으로 bounded 재사용되며 action당 생성 pass는 최대 1회입니다.
+- policy off/timeout/error/invalid output 시 즉시 deterministic `defaultText`로 fallback 합니다.
+- `worldPulse`는 deterministic 문구를 source-of-truth fallback으로 유지하며, rich text는 1줄 대체형으로만 표시됩니다(동시 표기 없음).
+- world pressure의 `archetype/trend/intensity` 계산은 이 lane에서 절대 변경하지 않습니다.
+- debug 모드(`debugRuntimeSignals=true`)에서만 `slotType`, `source`, `cacheHit/cacheMiss`, `skip/fallback reason` 메타데이터를 확인할 수 있고, trace에는 생성 텍스트 원문을 저장하지 않습니다.
+
+## 2.7) Canonical world seed 메모 (Checkpoint 7A)
+
+- canonical `WorldSeed`는 bootstrap scaffold 입력이며, 세션 중 mutable truth는 runtime state store가 유지합니다.
+- seed validation은 최소 스캐폴드 개수와 참조 무결성(location/pressure/faction/npc pool 교차 참조)을 강제합니다.
+- 새 세션 bootstrap 시 seed 조회 순서:
+  1. `world/canon/world-seed.yaml|yml|json`
+  2. `world/state/world-seed.yaml|yml|json`
+  3. `world/state/world-seeds.yaml|yml|json`
+- 유효 seed는 one-way `RuntimeBootstrapInput`으로 투영되어 pressure/location baseline 초기값에만 반영됩니다.
+- seed가 없거나 invalid면 structured diagnostics를 남기고 기존 deterministic default bootstrap으로 안전 fallback 합니다.
+- 세션 `runtimeMetadata`에 seed provenance(`worldId`, `schemaVersion`, `seedValue`, `seedFingerprint`)를 저장해 debug/resume 관찰성을 확보합니다.
+- `/trpg resume`는 seed 재적용이 아니라 저장된 runtime state를 우선 복구합니다.
+- 시작용 템플릿은 `examples/world-seed.template.yaml`에 있으며, `world/canon/world-seed.yaml`로 복사한 뒤 ID/baseline을 설정에 맞게 수정하세요.
+- 실행 전 preflight 검증(세션/부트스트랩 실행 없음): `node scripts/validate-world-seed.mjs world/canon/world-seed.yaml`.
 
 ## 2.1) World-data-driven 동작
 

@@ -564,8 +564,10 @@ test("panel clearly separates active and surfaced quest summaries", async () => 
   assert.ok(playerText.includes("퀘스트(진행):"));
   assert.ok(playerText.includes("퀘스트(기회):"));
   assert.equal(playerText.includes("debug.quest_tuning.raw"), false);
+  assert.equal(playerText.includes("debug.quest_hook_text.raw"), false);
   assert.equal(playerText.includes("budget_used=live"), false);
   assert.equal(debugText.includes("debug.quest_tuning.raw"), true);
+  assert.equal(debugText.includes("debug.quest_hook_text.raw"), true);
 });
 
 test("recent lifecycle changes appear as player-facing natural phrases", async () => {
@@ -662,6 +664,386 @@ test("telemetry ring and snapshot remain bounded", async () => {
   assert.ok(economy.presentation.tuning.sampleCount <= questEconomy.QUEST_TUNING_RING_MAX);
 });
 
+test("hook text overrides apply only to matching slots and expose debug metadata", async () => {
+  const { questEconomy } = await modulesPromise;
+  const nowIso = "2026-03-24T00:00:00.000Z";
+
+  let economy = questEconomy.ensureQuestEconomyState(undefined, nowIso);
+  const pressure = economy.worldPressures[0];
+  economy.quests = [
+    {
+      questId: "quest-hook-001",
+      pressureId: pressure.pressureId,
+      archetype: pressure.archetype,
+      lifecycle: "surfaced",
+      locationId: "loc-hook",
+      urgency: 72,
+      progress: 0,
+      surfacedAtIso: nowIso,
+      startedAtIso: null,
+      deadlineAtIso: null,
+      expiresAtIso: "2026-03-24T00:30:00.000Z",
+      lastAdvancedAtIso: nowIso,
+      parentQuestId: null,
+      successorQuestId: null,
+      terminalReason: null,
+      cost: { world: 2, attention: 2, narrative: 1 },
+      hookType: "witness",
+      mutationCount: 0,
+      lastMutationAtIso: null,
+      stallCount: 0,
+    },
+  ];
+
+  const tick = questEconomy.runQuestEconomyTick({
+    economy,
+    nowIso,
+    deltaTimeSec: 60,
+    sceneId: "scene-hook",
+    locationId: "loc-hook",
+    actionId: "action.wait",
+    classification: "possible",
+    temporalSignal: {
+      locationId: "loc-hook",
+      locationTension: 58,
+      locationAlertness: 44,
+      locationAccessibility: 60,
+      infoFreshness: 65,
+      memoryFamiliarity: 55,
+      residualTraceHeat: 20,
+      incidentCount: 1,
+    },
+  });
+
+  const slot = tick.nextEconomy.presentation.hookSlots[0];
+  assert.ok(slot);
+
+  const applied = questEconomy.applyQuestHookTextOverrides({
+    economy: tick.nextEconomy,
+    nowIso,
+    cacheTtlSec: 300,
+    overrides: [
+      {
+        slotKey: slot.slotKey,
+        shortText: `${slot.defaultText} 추가 설명은 잘려야 한다.`,
+      },
+      {
+        slotKey: "hook-unknown",
+        shortText: "무시되어야 함",
+      },
+    ],
+  });
+
+  const target = applied.nextEconomy.presentation.hookSlots.find((entry) => entry.slotKey === slot.slotKey);
+  assert.ok(target);
+  assert.ok(typeof target.llmShortText === "string" && target.llmShortText.length > 0);
+  assert.ok(target.llmShortText.length <= target.defaultText.length);
+  assert.ok(typeof target.llmSourceHash === "string" && target.llmSourceHash.length > 0);
+  assert.ok(typeof target.llmExpiresAtIso === "string" && target.llmExpiresAtIso.length > 0);
+  assert.equal(applied.appliedSlotKeys.includes(slot.slotKey), true);
+  assert.equal(applied.ignoredSlotKeys.includes("hook-unknown"), true);
+
+  const withDebug = questEconomy.setQuestHookTextDebugState({
+    economy: applied.nextEconomy,
+    nowIso,
+    generationAttempted: true,
+    result: "applied",
+    reason: null,
+    cacheHitCount: 0,
+    cacheMissCount: 1,
+    slotMeta: [
+      {
+        slotKey: slot.slotKey,
+        source: "llm",
+        cacheHit: false,
+        skipReason: null,
+      },
+    ],
+  });
+
+  const summary = questEconomy.buildQuestEconomyQualitativeSummary({
+    economy: withDebug,
+    locationId: "loc-hook",
+  });
+
+  assert.equal(summary.debug.hookText.result, "applied");
+  assert.equal(summary.debug.hookText.slotMeta[0].source, "llm");
+});
+
+test("worldPulse rich text applies as single-line replacement only", async () => {
+  const { panel, questEconomy, sceneLoop } = await modulesPromise;
+  const nowIso = "2026-03-24T00:00:00.000Z";
+
+  let economy = questEconomy.ensureQuestEconomyState(undefined, nowIso);
+  const tick = questEconomy.runQuestEconomyTick({
+    economy,
+    nowIso,
+    deltaTimeSec: 90,
+    sceneId: "scene-world-pulse",
+    locationId: "loc-world-pulse",
+    actionId: "action.wait",
+    classification: "possible",
+    temporalSignal: {
+      locationId: "loc-world-pulse",
+      locationTension: 62,
+      locationAlertness: 47,
+      locationAccessibility: 58,
+      infoFreshness: 64,
+      memoryFamiliarity: 41,
+      residualTraceHeat: 21,
+      incidentCount: 1,
+    },
+  });
+
+  const worldPulseSlot = tick.nextEconomy.presentation.worldPulseSlot;
+  assert.ok(worldPulseSlot);
+
+  const applied = questEconomy.applyQuestHookTextOverrides({
+    economy: tick.nextEconomy,
+    nowIso,
+    cacheTtlSec: 300,
+    overrides: [
+      {
+        slotKey: worldPulseSlot.slotKey,
+        shortText: `${worldPulseSlot.defaultText}\n추가 줄은 제거되어야 한다.`,
+      },
+    ],
+  });
+
+  const summary = questEconomy.buildQuestEconomyQualitativeSummary({
+    economy: applied.nextEconomy,
+    locationId: "loc-world-pulse",
+  });
+  const expected = worldPulseSlot.defaultText;
+  const expectedOneLine = expected.replace(/\s+/g, " ").trim();
+
+  assert.equal(typeof summary.worldPulse.llmShortText, "string");
+  assert.equal(summary.worldPulse.text, expectedOneLine);
+  assert.equal(summary.worldPulse.text.includes("\n"), false);
+
+  const loop = sceneLoop.createInitialDeterministicSceneLoop({
+    sceneId: "scene-world-pulse",
+    nowIso,
+  });
+  loop.scene.locationId = "loc-world-pulse";
+  loop.questEconomy = applied.nextEconomy;
+  const session = makeSession(sceneLoop, loop, nowIso);
+  const panelOut = panel.buildCheckpoint1Panel({
+    session,
+    routes: [],
+    mode: "send",
+  });
+  const panelText = JSON.stringify(panelOut.components);
+  assert.equal((panelText.match(/세계 동향:/g) ?? []).length, 1);
+
+  const debugPanelOut = panel.buildCheckpoint1Panel({
+    session,
+    routes: [],
+    mode: "send",
+    debugRuntimeSignals: true,
+  });
+  const debugText = JSON.stringify(debugPanelOut.components);
+  assert.equal(debugText.includes("worldPulse"), true);
+});
+
+test("worldPulse invalid or unknown output keeps deterministic fallback", async () => {
+  const { questEconomy } = await modulesPromise;
+  const nowIso = "2026-03-24T00:00:00.000Z";
+
+  const tick = questEconomy.runQuestEconomyTick({
+    economy: questEconomy.ensureQuestEconomyState(undefined, nowIso),
+    nowIso,
+    deltaTimeSec: 90,
+    sceneId: "scene-world-pulse-fallback",
+    locationId: "loc-world-pulse-fallback",
+    actionId: "action.observe",
+    classification: "possible",
+    temporalSignal: {
+      locationId: "loc-world-pulse-fallback",
+      locationTension: 48,
+      locationAlertness: 42,
+      locationAccessibility: 60,
+      infoFreshness: 62,
+      memoryFamiliarity: 44,
+      residualTraceHeat: 18,
+      incidentCount: 0,
+    },
+  });
+
+  const beforeSummary = questEconomy.buildQuestEconomyQualitativeSummary({
+    economy: tick.nextEconomy,
+    locationId: "loc-world-pulse-fallback",
+  });
+  const worldPulseSlot = tick.nextEconomy.presentation.worldPulseSlot;
+  assert.ok(worldPulseSlot);
+
+  const applied = questEconomy.applyQuestHookTextOverrides({
+    economy: tick.nextEconomy,
+    nowIso,
+    cacheTtlSec: 300,
+    overrides: [
+      {
+        slotKey: "hook-unknown",
+        shortText: "무시되어야 함",
+      },
+      {
+        slotKey: worldPulseSlot.slotKey,
+        shortText: "",
+      },
+    ],
+  });
+
+  const afterSummary = questEconomy.buildQuestEconomyQualitativeSummary({
+    economy: applied.nextEconomy,
+    locationId: "loc-world-pulse-fallback",
+  });
+
+  assert.equal(afterSummary.worldPulse.llmShortText, null);
+  assert.equal(afterSummary.worldPulse.text, beforeSummary.worldPulse.defaultText);
+  assert.equal(applied.ignoredSlotKeys.includes("hook-unknown"), true);
+});
+
+test("hook text cache invalidates by TTL and source hash", async () => {
+  const { questEconomy } = await modulesPromise;
+  const nowIso = "2026-03-24T00:00:00.000Z";
+
+  let economy = questEconomy.ensureQuestEconomyState(undefined, nowIso);
+  const pressure = economy.worldPressures[0];
+  economy.quests = [
+    {
+      questId: "quest-hook-cache-001",
+      pressureId: pressure.pressureId,
+      archetype: pressure.archetype,
+      lifecycle: "surfaced",
+      locationId: "loc-hook-cache",
+      urgency: 66,
+      progress: 0,
+      surfacedAtIso: nowIso,
+      startedAtIso: null,
+      deadlineAtIso: null,
+      expiresAtIso: "2026-03-24T00:30:00.000Z",
+      lastAdvancedAtIso: nowIso,
+      parentQuestId: null,
+      successorQuestId: null,
+      terminalReason: null,
+      cost: { world: 2, attention: 1, narrative: 1 },
+      hookType: "rumor",
+      mutationCount: 0,
+      lastMutationAtIso: null,
+      stallCount: 0,
+    },
+  ];
+
+  const tick = questEconomy.runQuestEconomyTick({
+    economy,
+    nowIso,
+    deltaTimeSec: 45,
+    sceneId: "scene-hook-cache",
+    locationId: "loc-hook-cache",
+    actionId: "action.observe",
+    classification: "possible",
+    temporalSignal: {
+      locationId: "loc-hook-cache",
+      locationTension: 50,
+      locationAlertness: 40,
+      locationAccessibility: 62,
+      infoFreshness: 62,
+      memoryFamiliarity: 48,
+      residualTraceHeat: 24,
+      incidentCount: 1,
+    },
+  });
+
+  const slot = tick.nextEconomy.presentation.hookSlots[0];
+  assert.ok(slot);
+
+  const applied = questEconomy.applyQuestHookTextOverrides({
+    economy: tick.nextEconomy,
+    nowIso,
+    cacheTtlSec: 120,
+    overrides: [
+      {
+        slotKey: slot.slotKey,
+        shortText: "짧은 후크",
+      },
+    ],
+  });
+
+  const cached = applied.nextEconomy.presentation.hookSlots.find((entry) => entry.slotKey === slot.slotKey);
+  assert.ok(cached);
+  assert.equal(questEconomy.isQuestHookTextCacheValid(cached, nowIso), true);
+
+  const expiredIso = new Date(Date.parse(nowIso) + 121 * 1000).toISOString();
+  assert.equal(questEconomy.isQuestHookTextCacheValid(cached, expiredIso), false);
+
+  const sourceChanged = {
+    ...cached,
+    defaultText: `${cached.defaultText} 변경`,
+  };
+  assert.equal(questEconomy.isQuestHookTextCacheValid(sourceChanged, nowIso), false);
+});
+
+test("worldPulse cache invalidates on trend/intensityBand/location hint changes", async () => {
+  const { questEconomy } = await modulesPromise;
+  const nowIso = "2026-03-24T00:00:00.000Z";
+
+  const tick = questEconomy.runQuestEconomyTick({
+    economy: questEconomy.ensureQuestEconomyState(undefined, nowIso),
+    nowIso,
+    deltaTimeSec: 60,
+    sceneId: "scene-world-pulse-cache",
+    locationId: "loc-world-a",
+    actionId: "action.wait",
+    classification: "possible",
+    temporalSignal: {
+      locationId: "loc-world-a",
+      locationTension: 60,
+      locationAlertness: 52,
+      locationAccessibility: 57,
+      infoFreshness: 63,
+      memoryFamiliarity: 42,
+      residualTraceHeat: 22,
+      incidentCount: 1,
+    },
+  });
+
+  const worldPulseSlot = tick.nextEconomy.presentation.worldPulseSlot;
+  assert.ok(worldPulseSlot);
+
+  const applied = questEconomy.applyQuestHookTextOverrides({
+    economy: tick.nextEconomy,
+    nowIso,
+    cacheTtlSec: 300,
+    overrides: [
+      {
+        slotKey: worldPulseSlot.slotKey,
+        shortText: "현장 긴장 신호가 꿈틀거린다.",
+      },
+    ],
+  });
+  const cachedWorldPulse = applied.nextEconomy.presentation.worldPulseSlot;
+  assert.ok(cachedWorldPulse);
+  assert.equal(questEconomy.isQuestHookTextCacheValid(cachedWorldPulse, nowIso), true);
+
+  const trendChanged = {
+    ...cachedWorldPulse,
+    defaultText: `${cachedWorldPulse.defaultText} 변동`,
+  };
+  assert.equal(questEconomy.isQuestHookTextCacheValid(trendChanged, nowIso), false);
+
+  const intensityBandChanged = {
+    ...cachedWorldPulse,
+    urgencyBand: cachedWorldPulse.urgencyBand === "critical" ? "high" : "critical",
+  };
+  assert.equal(questEconomy.isQuestHookTextCacheValid(intensityBandChanged, nowIso), false);
+
+  const locationHintChanged = {
+    ...cachedWorldPulse,
+    locationId: "loc-world-b",
+  };
+  assert.equal(questEconomy.isQuestHookTextCacheValid(locationHintChanged, nowIso), false);
+});
+
 test("quest trace events appear and resume preserves quest economy state", async () => {
   const { plugin } = await modulesPromise;
   const worldRoot = "/tmp/trpg-runtime-v2-quest-test-world";
@@ -702,6 +1084,7 @@ test("quest trace events appear and resume preserves quest economy state", async
   const traceTypes = current.session.trace.events.map((entry) => entry.type);
   assert.ok(traceTypes.includes("engine.pressure.advanced"));
   assert.ok(traceTypes.includes("engine.quest.lifecycle"));
+  assert.ok(traceTypes.includes("engine.quest.hook_text"));
   assert.ok(current.session.trace.events.length <= current.session.trace.maxEvents);
 
   const beforeResume = current.session.deterministicLoop.questEconomy;

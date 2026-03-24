@@ -11,6 +11,9 @@ export type TrpgRuntimeConfig = {
   traceMaxEvents: number;
   panelDispatchTtlSec: number;
   analyzerMemoryTtlSec: number;
+  richHookTextEnabled: boolean;
+  hookTextTimeoutMs: number;
+  hookTextCacheTtlSec: number;
   debugRuntimeSignals: boolean;
 };
 
@@ -24,6 +27,9 @@ const DEFAULT_CONFIG: TrpgRuntimeConfig = {
   traceMaxEvents: 120,
   panelDispatchTtlSec: 180,
   analyzerMemoryTtlSec: 900,
+  richHookTextEnabled: false,
+  hookTextTimeoutMs: 350,
+  hookTextCacheTtlSec: 900,
   debugRuntimeSignals: false,
 };
 
@@ -109,6 +115,15 @@ export function parseTrpgRuntimeConfig(raw: unknown): TrpgRuntimeConfig {
       60,
       86_400,
       "analyzerMemoryTtlSec",
+    ),
+    richHookTextEnabled: typeof obj.richHookTextEnabled === "boolean" ? obj.richHookTextEnabled : false,
+    hookTextTimeoutMs: readInteger(obj.hookTextTimeoutMs, DEFAULT_CONFIG.hookTextTimeoutMs, 80, 2_000, "hookTextTimeoutMs"),
+    hookTextCacheTtlSec: readInteger(
+      obj.hookTextCacheTtlSec,
+      DEFAULT_CONFIG.hookTextCacheTtlSec,
+      60,
+      7_200,
+      "hookTextCacheTtlSec",
     ),
     debugRuntimeSignals: typeof obj.debugRuntimeSignals === "boolean" ? obj.debugRuntimeSignals : false,
   };

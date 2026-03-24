@@ -133,6 +133,16 @@ export type TemporalPipelineResult = {
   summary: TemporalUpdateSummary;
 };
 
+export type TemporalBootstrapInput = {
+  locationBaselines?: Array<{
+    locationId: string;
+    tension: number;
+    alertness: number;
+    accessibility: number;
+    recentIncidents?: string[];
+  }>;
+};
+
 const MAX_LOCATION_STATES = 12;
 const MAX_NPC_MEMORY = 24;
 const MAX_INFO_FRESHNESS = 32;
@@ -263,6 +273,43 @@ function normalizeLocationTemporalState(value: unknown, nowIso: string): Locatio
   };
 }
 
+function normalizeLocationBaseline(value: unknown, nowIso: string): LocationTemporalState | null {
+  const node = toRecord(value);
+  const locationId = normalizeLocationId(node.locationId);
+  if (!locationId) {
+    return null;
+  }
+  const recentIncidents = Array.isArray(node.recentIncidents)
+    ? uniqStrings(node.recentIncidents.filter((entry): entry is string => typeof entry === "string"), MAX_INCIDENTS_PER_LOCATION)
+    : [];
+  return {
+    locationId,
+    tension: clampInt(readInt(node.tension, 35), 0, 100),
+    alertness: clampInt(readInt(node.alertness, 30), 0, 100),
+    accessibility: clampInt(readInt(node.accessibility, 70), 0, 100),
+    recentIncidents,
+    lastVisitedAtIso: null,
+    lastUpdatedAtIso: nowIso,
+  };
+}
+
+function normalizeBootstrapLocationStates(value: TemporalBootstrapInput["locationBaselines"], nowIso: string): LocationTemporalState[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const normalized = value
+    .map((entry) => normalizeLocationBaseline(entry, nowIso))
+    .filter((entry): entry is LocationTemporalState => entry !== null);
+  if (normalized.length === 0) {
+    return [];
+  }
+  const dedup = new Map<string, LocationTemporalState>();
+  for (const location of normalized) {
+    dedup.set(location.locationId, location);
+  }
+  return Array.from(dedup.values()).slice(0, MAX_LOCATION_STATES);
+}
+
 function normalizeNpcMemoryState(value: unknown, nowIso: string): NpcMemoryState | null {
   const node = toRecord(value);
   const npcId = readString(node.npcId);
@@ -391,18 +438,26 @@ function pruneTemporalState(state: TemporalRuntimeState): TemporalRuntimeState {
   };
 }
 
-export function ensureTemporalRuntimeState(value: unknown, nowIso: string): TemporalRuntimeState {
+export function ensureTemporalRuntimeState(
+  value: unknown,
+  nowIso: string,
+  bootstrap?: TemporalBootstrapInput,
+): TemporalRuntimeState {
   const root = toRecord(value);
   const locationStatesRaw = Array.isArray(root.locationStates) ? root.locationStates : [];
   const npcMemoryRaw = Array.isArray(root.npcMemory) ? root.npcMemory : [];
   const infoFreshnessRaw = Array.isArray(root.infoFreshness) ? root.infoFreshness : [];
   const residualTracesRaw = Array.isArray(root.residualTraces) ? root.residualTraces : [];
+  const bootstrapLocationStates = normalizeBootstrapLocationStates(bootstrap?.locationBaselines, nowIso);
 
   const normalized: TemporalRuntimeState = {
     version: 1,
-    locationStates: locationStatesRaw
-      .map((entry) => normalizeLocationTemporalState(entry, nowIso))
-      .filter((entry): entry is LocationTemporalState => entry !== null),
+    locationStates:
+      locationStatesRaw.length > 0
+        ? locationStatesRaw
+            .map((entry) => normalizeLocationTemporalState(entry, nowIso))
+            .filter((entry): entry is LocationTemporalState => entry !== null)
+        : bootstrapLocationStates,
     npcMemory: npcMemoryRaw
       .map((entry) => normalizeNpcMemoryState(entry, nowIso))
       .filter((entry): entry is NpcMemoryState => entry !== null),

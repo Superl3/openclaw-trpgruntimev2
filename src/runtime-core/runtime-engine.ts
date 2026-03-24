@@ -8,6 +8,7 @@ import type {
   ProcessSceneActionInput,
   ProcessSceneActionResult,
   PersonaDriftAnalyzer,
+  QuestHookTextRenderer,
   ResolveInteractionRouteInput,
   ResumeSessionInput,
   RuntimeEngine,
@@ -16,6 +17,9 @@ import type {
   StateStore,
 } from "./contracts.js";
 import type {
+  QuestHookTextInput,
+  QuestHookTextSlotType,
+  QuestHookTextOutput,
   IntentAnalyzerInput,
   IntentAnalyzerOutput,
   PersonaDriftAnalyzerInput,
@@ -23,6 +27,7 @@ import type {
   SceneRendererInput,
   SceneRendererOutput,
 } from "./llm-contracts.js";
+import { LLM_CONTRACT_VERSION, isQuestHookTextOutput } from "./llm-contracts.js";
 import {
   accumulateBehavioralDrift,
   buildIntentAnalyzerInput,
@@ -44,19 +49,41 @@ import {
 } from "./scene-loop.js";
 import { appendTraceEvent, createTraceEvent, ensureTraceState } from "./trace.js";
 import {
+  applyQuestHookTextOverrides,
+  buildQuestHookSlotSourceHash,
+  isQuestHookTextCacheValid,
+  setQuestHookTextDebugState,
+  WORLD_PULSE_HOOK_SLOT_KEY,
+} from "./quest-economy.js";
+import {
   RUNTIME_SCHEMA_VERSION,
   type EndSessionResult,
   type InteractionRouteRecord,
   type NewSessionResult,
   type PanelId,
   type PanelRecoveryInstruction,
+  type RuntimeBootstrapDiagnostic,
+  type RuntimeBootstrapInput,
+  type RuntimeMetadata,
   type ResumeSessionResult,
   type SessionState,
+  ensureRuntimeMetadata,
 } from "./types.js";
 
 const DEFAULT_SCENE_ID = "scene-bootstrap";
 
 const PANEL_IDS: PanelId[] = ["fixed", "main", "sub"];
+const DEFAULT_HOOK_TEXT_TIMEOUT_MS = 350;
+const DEFAULT_HOOK_TEXT_CACHE_TTL_SEC = 900;
+
+const NOOP_HOOK_TEXT_RENDERER: QuestHookTextRenderer = {
+  async render(): Promise<QuestHookTextOutput> {
+    return {
+      contractVersion: LLM_CONTRACT_VERSION,
+      overrides: [],
+    };
+  },
+};
 
 class SystemClock implements Clock {
   nowIso(): string {
@@ -79,6 +106,10 @@ type RuntimeEngineDependencies = {
   intentAnalyzer: IntentAnalyzer;
   personaDriftAnalyzer: PersonaDriftAnalyzer;
   sceneRenderer: SceneRenderer;
+  questHookTextRenderer?: QuestHookTextRenderer;
+  richHookTextEnabled?: boolean;
+  hookTextTimeoutMs?: number;
+  hookTextCacheTtlSec?: number;
   traceMaxEvents?: number;
   analyzerMemoryTtlSec?: number;
   clock?: Clock;
@@ -103,11 +134,80 @@ function nextActionSeq(currentActionSeq: number, legacyTurnIndex: number): numbe
   return Math.max(canonical, legacy) + 1;
 }
 
+function normalizeBootstrapDiagnostics(value: RuntimeBootstrapDiagnostic[] | undefined): RuntimeBootstrapDiagnostic[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const diagnostics: RuntimeBootstrapDiagnostic[] = [];
+  for (const entry of value) {
+    const code = typeof entry?.code === "string" ? entry.code.trim() : "";
+    const message = typeof entry?.message === "string" ? entry.message.trim() : "";
+    if (!code || !message) {
+      continue;
+    }
+    diagnostics.push({
+      code,
+      message,
+      path: typeof entry.path === "string" && entry.path.trim() ? entry.path.trim() : null,
+      severity: entry.severity === "info" || entry.severity === "warn" || entry.severity === "error" ? entry.severity : "warn",
+    });
+    if (diagnostics.length >= 24) {
+      break;
+    }
+  }
+  return diagnostics;
+}
+
+function buildRuntimeMetadata(params: {
+  runtimeBootstrap?: RuntimeBootstrapInput | null;
+  runtimeBootstrapDiagnostics?: RuntimeBootstrapDiagnostic[];
+}): RuntimeMetadata {
+  const diagnostics = normalizeBootstrapDiagnostics(params.runtimeBootstrapDiagnostics);
+  if (!params.runtimeBootstrap) {
+    return ensureRuntimeMetadata({
+      bootstrap: {
+        source: "default",
+        seed: null,
+        diagnostics,
+      },
+    });
+  }
+  return ensureRuntimeMetadata({
+    bootstrap: {
+      source: "worldSeed",
+      seed: {
+        worldId: params.runtimeBootstrap.worldId,
+        schemaVersion: params.runtimeBootstrap.schemaVersion,
+        seedValue: params.runtimeBootstrap.seedValue,
+        seedFingerprint: params.runtimeBootstrap.seedFingerprint,
+      },
+      diagnostics,
+    },
+  });
+}
+
+function pressureIntensityBand(value: number): "low" | "moderate" | "high" | "critical" {
+  if (!Number.isFinite(value) || value < 35) {
+    return "low";
+  }
+  if (value < 60) {
+    return "moderate";
+  }
+  if (value < 80) {
+    return "high";
+  }
+  return "critical";
+}
+
 class Checkpoint0RuntimeEngine implements RuntimeEngine {
   private readonly store: StateStore;
   private readonly intentAnalyzer: IntentAnalyzer;
   private readonly personaDriftAnalyzer: PersonaDriftAnalyzer;
   private readonly sceneRenderer: SceneRenderer;
+  private readonly questHookTextRenderer: QuestHookTextRenderer;
+  private readonly richHookTextEnabled: boolean;
+  private readonly hookTextTimeoutMs: number;
+  private readonly hookTextCacheTtlSec: number;
   private readonly clock: Clock;
   private readonly idGenerator: IdGenerator;
   private readonly traceMaxEvents: number;
@@ -118,6 +218,14 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
     this.intentAnalyzer = deps.intentAnalyzer;
     this.personaDriftAnalyzer = deps.personaDriftAnalyzer;
     this.sceneRenderer = deps.sceneRenderer;
+    this.questHookTextRenderer = deps.questHookTextRenderer ?? NOOP_HOOK_TEXT_RENDERER;
+    this.richHookTextEnabled = deps.richHookTextEnabled === true;
+    this.hookTextTimeoutMs = Number.isFinite(deps.hookTextTimeoutMs as number)
+      ? Math.max(80, Math.min(2_000, Math.trunc(deps.hookTextTimeoutMs as number)))
+      : DEFAULT_HOOK_TEXT_TIMEOUT_MS;
+    this.hookTextCacheTtlSec = Number.isFinite(deps.hookTextCacheTtlSec as number)
+      ? Math.max(60, Math.min(7_200, Math.trunc(deps.hookTextCacheTtlSec as number)))
+      : DEFAULT_HOOK_TEXT_CACHE_TTL_SEC;
     this.traceMaxEvents = Number.isFinite(deps.traceMaxEvents as number)
       ? Math.max(20, Math.min(500, Math.trunc(deps.traceMaxEvents as number)))
       : 120;
@@ -152,12 +260,14 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
     const pending = session.panelDispatch?.pending ?? null;
 
     const sceneId = loop.scene.sceneId;
+    const runtimeMetadata = ensureRuntimeMetadata((session as Record<string, unknown>).runtimeMetadata);
     const normalized: SessionState = {
       ...session,
       sceneId,
       actionSeq,
       turnIndex: actionSeq,
       deterministicLoop: loop,
+      runtimeMetadata,
       panelDispatch: {
         pending,
         committedDispatchIds,
@@ -181,16 +291,38 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
     return ensureTraceState(normalized);
   }
 
+  private async renderQuestHookTextWithTimeout(input: QuestHookTextInput): Promise<QuestHookTextOutput> {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("hook_text_timeout")), this.hookTextTimeoutMs);
+    });
+
+    try {
+      return await Promise.race([this.renderQuestHookText(input), timeout]);
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
+  }
+
   private createSessionSkeleton(input: {
     sessionId: string;
     channelKey: string;
     ownerId: string;
     sceneId: string;
     nowIso: string;
+    runtimeBootstrap?: RuntimeBootstrapInput | null;
+    runtimeBootstrapDiagnostics?: RuntimeBootstrapDiagnostic[];
   }): SessionState {
     const deterministicLoop = createInitialDeterministicSceneLoop({
       sceneId: input.sceneId,
       nowIso: input.nowIso,
+      bootstrap: input.runtimeBootstrap,
+    });
+    const runtimeMetadata = buildRuntimeMetadata({
+      runtimeBootstrap: input.runtimeBootstrap,
+      runtimeBootstrapDiagnostics: input.runtimeBootstrapDiagnostics,
     });
 
     return {
@@ -206,6 +338,7 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
       lastActionId: null,
       lastActionSummary: null,
       deterministicLoop,
+      runtimeMetadata,
       panelDispatch: {
         pending: null,
         committedDispatchIds: [],
@@ -304,6 +437,8 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
       ownerId: readNonEmptyString(input.ownerId, "owner:unknown"),
       sceneId: readNonEmptyString(input.initialSceneId, DEFAULT_SCENE_ID),
       nowIso,
+      runtimeBootstrap: input.runtimeBootstrap,
+      runtimeBootstrapDiagnostics: input.runtimeBootstrapDiagnostics,
     });
 
     const session = appendTraceEvent(
@@ -315,6 +450,11 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
         data: {
           sceneId: sessionBase.sceneId,
           ownerId: sessionBase.ownerId,
+          bootstrapSource: sessionBase.runtimeMetadata.bootstrap.source,
+          bootstrapSeedWorldId: sessionBase.runtimeMetadata.bootstrap.seed?.worldId ?? null,
+          bootstrapSeedVersion: sessionBase.runtimeMetadata.bootstrap.seed?.schemaVersion ?? null,
+          bootstrapSeedFingerprint: sessionBase.runtimeMetadata.bootstrap.seed?.seedFingerprint ?? null,
+          bootstrapDiagnosticsCount: sessionBase.runtimeMetadata.bootstrap.diagnostics.length,
         },
       }),
     );
@@ -670,6 +810,243 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
       });
     }
 
+    let hookTextGenerationAttempted = false;
+    let hookTextResult: "applied" | "fallback" | "skipped" = "skipped";
+    let hookTextReason: string | null = null;
+    let hookTextCacheHitCount = 0;
+    let hookTextCacheMissCount = 0;
+    let hookTextUpdatedCount = 0;
+    let hookTextSkippedByPolicy = false;
+    let hookTextSkippedByBudget = false;
+    let hookTextSlotMeta: Array<{
+      slotKey: string;
+      slotType: QuestHookTextSlotType;
+      source: "default" | "llm";
+      cacheHit: boolean;
+      skipReason: string | null;
+    }> = [];
+
+    const worldPulseSnapshot = resolution.questSummary.panelSummary.worldPulse;
+
+    const stripExpiredHookSlotCache = <T extends {
+      llmShortText: string | null;
+      llmSourceHash: string | null;
+      llmExpiresAtIso: string | null;
+    }>(slot: T): T => ({
+      ...slot,
+      llmShortText: null,
+      llmSourceHash: null,
+      llmExpiresAtIso: null,
+    });
+
+    const hookSlotsPruned = nextLoop.questEconomy.presentation.hookSlots.map((slot) => {
+      if (!slot.llmShortText && !slot.llmSourceHash && !slot.llmExpiresAtIso) {
+        return slot;
+      }
+      if (isQuestHookTextCacheValid(slot, nowIso)) {
+        return slot;
+      }
+      return stripExpiredHookSlotCache(slot);
+    });
+    const worldPulseSlotRaw = nextLoop.questEconomy.presentation.worldPulseSlot;
+    const worldPulseSlotPruned = worldPulseSlotRaw
+      ? !worldPulseSlotRaw.llmShortText && !worldPulseSlotRaw.llmSourceHash && !worldPulseSlotRaw.llmExpiresAtIso
+        ? worldPulseSlotRaw
+        : isQuestHookTextCacheValid(worldPulseSlotRaw, nowIso)
+          ? worldPulseSlotRaw
+          : stripExpiredHookSlotCache(worldPulseSlotRaw)
+      : null;
+    const hadPrunedSlots = hookSlotsPruned.some((slot, index) => slot !== nextLoop.questEconomy.presentation.hookSlots[index]);
+    const worldPulseSlotChanged = worldPulseSlotPruned !== worldPulseSlotRaw;
+    if (hadPrunedSlots || worldPulseSlotChanged) {
+      nextLoop.questEconomy = {
+        ...nextLoop.questEconomy,
+        presentation: {
+          ...nextLoop.questEconomy.presentation,
+          hookSlots: hookSlotsPruned,
+          worldPulseSlot: worldPulseSlotPruned,
+        },
+      };
+    }
+
+    const actionableHookSlots = nextLoop.questEconomy.presentation.hookSlots.slice(0, 3);
+    const worldPulseSlot = nextLoop.questEconomy.presentation.worldPulseSlot;
+    const cacheStates: Array<{
+      slot: (typeof actionableHookSlots)[number];
+      slotType: QuestHookTextSlotType;
+      cacheHit: boolean;
+    }> = actionableHookSlots.map((slot) => ({
+      slot,
+      slotType: "actionable",
+      cacheHit: isQuestHookTextCacheValid(slot, nowIso),
+    }));
+    if (worldPulseSlot) {
+      cacheStates.push({
+        slot: worldPulseSlot,
+        slotType: "worldPulse",
+        cacheHit: isQuestHookTextCacheValid(worldPulseSlot, nowIso),
+      });
+    }
+
+    const cacheHitBySlotKey = new Map(
+      cacheStates.filter((entry) => entry.cacheHit).map((entry) => [entry.slot.slotKey, true]),
+    );
+    const actionableMissSlots = cacheStates.filter((entry) => entry.slotType === "actionable" && !entry.cacheHit);
+    const worldPulseMissSlot = cacheStates.find((entry) => entry.slotType === "worldPulse" && !entry.cacheHit) ?? null;
+
+    const cacheMissCandidates: Array<{ slot: (typeof cacheStates)[number]["slot"]; slotType: QuestHookTextSlotType }> = [];
+    if (worldPulseMissSlot) {
+      cacheMissCandidates.push({
+        slot: worldPulseMissSlot.slot,
+        slotType: "worldPulse",
+      });
+    }
+    for (const miss of actionableMissSlots) {
+      if (cacheMissCandidates.length >= 3) {
+        break;
+      }
+      cacheMissCandidates.push({
+        slot: miss.slot,
+        slotType: "actionable",
+      });
+    }
+    const missedTotalCount = actionableMissSlots.length + (worldPulseMissSlot ? 1 : 0);
+    if (missedTotalCount > cacheMissCandidates.length) {
+      hookTextSkippedByBudget = true;
+    }
+    const cacheMissSlotKeys = new Set(cacheMissCandidates.map((entry) => entry.slot.slotKey));
+
+    hookTextCacheHitCount = cacheHitBySlotKey.size;
+    hookTextCacheMissCount = cacheMissCandidates.length;
+
+    let appliedSlotKeySet = new Set<string>();
+    if (!this.richHookTextEnabled) {
+      hookTextResult = "skipped";
+      hookTextReason = "skippedByPolicy";
+      hookTextSkippedByPolicy = true;
+      hookTextSkippedByBudget = false;
+    } else if (cacheStates.length === 0) {
+      hookTextResult = "skipped";
+      hookTextReason = "no_hook_slots";
+      hookTextSkippedByBudget = false;
+    } else if (cacheMissCandidates.length === 0) {
+      hookTextResult = "skipped";
+      hookTextReason = "cache_hit_only";
+      hookTextSkippedByBudget = false;
+    } else {
+      let remainingGenerationBudget = 1;
+      if (remainingGenerationBudget < 1) {
+        hookTextResult = "skipped";
+        hookTextReason = "skippedByBudget";
+        hookTextSkippedByBudget = true;
+      } else {
+        remainingGenerationBudget -= 1;
+        hookTextGenerationAttempted = true;
+        const hookTextInput: QuestHookTextInput = {
+          contractVersion: LLM_CONTRACT_VERSION,
+          sessionId: session.sessionId,
+          sceneId: nextLoop.scene.sceneId,
+          nowIso,
+          slots: cacheMissCandidates.map((entry) => {
+            if (entry.slotType === "worldPulse") {
+              return {
+                slotKey: entry.slot.slotKey,
+                slotType: "worldPulse" as const,
+                archetype: worldPulseSnapshot.topPressure?.archetype ?? "public_order",
+                trend: worldPulseSnapshot.topPressure?.trend ?? "steady",
+                intensityBand: pressureIntensityBand(worldPulseSnapshot.topPressure?.intensity ?? 0),
+                locationHint: nextLoop.scene.locationId,
+                defaultText: entry.slot.defaultText,
+                sourceHash: buildQuestHookSlotSourceHash(entry.slot),
+              };
+            }
+
+            return {
+              slotKey: entry.slot.slotKey,
+              slotType: "actionable" as const,
+              questId: entry.slot.questId,
+              lifecycle: entry.slot.lifecycle,
+              urgencyBand: entry.slot.urgencyBand,
+              hookType: entry.slot.hookType,
+              locationId: entry.slot.locationId,
+              defaultText: entry.slot.defaultText,
+              sourceHash: buildQuestHookSlotSourceHash(entry.slot),
+            };
+          }),
+        };
+
+        try {
+          const rendered = await this.renderQuestHookTextWithTimeout(hookTextInput);
+          const validated = isQuestHookTextOutput(rendered) ? rendered : null;
+          if (!validated) {
+            hookTextResult = "fallback";
+            hookTextReason = "renderer_invalid";
+          } else {
+            const applied = applyQuestHookTextOverrides({
+              economy: nextLoop.questEconomy,
+              overrides: validated.overrides,
+              nowIso,
+              cacheTtlSec: this.hookTextCacheTtlSec,
+            });
+            nextLoop.questEconomy = applied.nextEconomy;
+            hookTextUpdatedCount = applied.appliedSlotKeys.length;
+            appliedSlotKeySet = new Set(applied.appliedSlotKeys);
+
+            if (hookTextUpdatedCount > 0) {
+              hookTextResult = "applied";
+              hookTextReason = applied.ignoredSlotKeys.length > 0 ? "partial_ignored" : null;
+            } else {
+              hookTextResult = "fallback";
+              hookTextReason = validated.overrides.length === 0 ? "renderer_empty" : "no_matching_override";
+            }
+          }
+        } catch (error) {
+          hookTextResult = "fallback";
+          hookTextReason = error instanceof Error && error.message === "hook_text_timeout" ? "renderer_timeout" : "renderer_error";
+        }
+      }
+    }
+
+    const finalHookSlots = nextLoop.questEconomy.presentation.hookSlots.slice(0, 3);
+    const finalSlotRows: Array<{ slot: (typeof finalHookSlots)[number]; slotType: QuestHookTextSlotType }> = finalHookSlots.map((slot) => ({
+      slot,
+      slotType: "actionable",
+    }));
+    if (nextLoop.questEconomy.presentation.worldPulseSlot) {
+      finalSlotRows.push({
+        slot: nextLoop.questEconomy.presentation.worldPulseSlot,
+        slotType: "worldPulse",
+      });
+    }
+
+    hookTextSlotMeta = finalSlotRows.map((row) => {
+      const cacheHit = cacheHitBySlotKey.get(row.slot.slotKey) === true;
+      const applied = appliedSlotKeySet.has(row.slot.slotKey);
+      return {
+        slotKey: row.slot.slotKey,
+        slotType: row.slotType,
+        source: row.slot.llmShortText ? "llm" : "default",
+        cacheHit,
+        skipReason:
+          cacheHit || applied
+            ? null
+            : !cacheMissSlotKeys.has(row.slot.slotKey)
+              ? "skippedByBudget"
+              : hookTextReason ?? (hookTextResult === "skipped" ? "skipped" : null),
+      };
+    });
+
+    nextLoop.questEconomy = setQuestHookTextDebugState({
+      economy: nextLoop.questEconomy,
+      nowIso,
+      generationAttempted: hookTextGenerationAttempted,
+      result: hookTextResult,
+      reason: hookTextReason,
+      cacheHitCount: hookTextCacheHitCount,
+      cacheMissCount: hookTextCacheMissCount,
+      slotMeta: hookTextSlotMeta,
+    });
+
     const sceneId = nextLoop.scene.sceneId;
     const sceneTransitioned = session.sceneId !== sceneId;
     const confidenceSuffix = isFreeSentenceInput
@@ -779,6 +1156,30 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
       session,
       createTraceEvent({
         lane: "engine",
+        type: "engine.quest.hook_text",
+        tsIso: nowIso,
+        severity: hookTextResult === "fallback" ? "warn" : "info",
+        code: hookTextReason ?? undefined,
+        recoverable: true,
+        data: {
+          generationAttempted: hookTextGenerationAttempted,
+          result: hookTextResult,
+          reason: hookTextReason,
+          slotCount: cacheStates.length,
+          cacheHitCount: hookTextCacheHitCount,
+          cacheMissCount: hookTextCacheMissCount,
+          updatedCount: hookTextUpdatedCount,
+          skippedByPolicy: hookTextSkippedByPolicy,
+          skippedByBudget: hookTextSkippedByBudget,
+          slotMeta: hookTextSlotMeta,
+        },
+      }),
+    );
+
+    session = appendTraceEvent(
+      session,
+      createTraceEvent({
+        lane: "engine",
         type: "engine.action.resolved",
         tsIso: nowIso,
         data: {
@@ -839,6 +1240,10 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
 
   async analyzePersonaDrift(input: PersonaDriftAnalyzerInput): Promise<PersonaDriftAnalyzerOutput> {
     return this.personaDriftAnalyzer.analyze(input);
+  }
+
+  async renderQuestHookText(input: QuestHookTextInput): Promise<QuestHookTextOutput> {
+    return this.questHookTextRenderer.render(input);
   }
 
   async renderScene(input: SceneRendererInput): Promise<SceneRendererOutput> {

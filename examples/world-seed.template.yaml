@@ -1,0 +1,78 @@
+worldSeed:
+  schemaVersion: 1
+  worldId: harbor-reach
+  seedValue: harbor-reach-v1
+  createdAtIso: "2026-03-24T00:00:00.000Z"
+  generationProfile:
+    profileId: baseline
+    pressureScalePercent: 100
+    locationVolatility: mixed
+  locations:
+    - locationId: dock-ward
+      tags: [trade, waterfront]
+      baseline:
+        tension: 35
+        alertness: 30
+        accessibility: 72
+      pressureAffinityIds: [contraband-flow, harbor-fever]
+    - locationId: old-market
+      tags: [commerce, crowd]
+      baseline:
+        tension: 42
+        alertness: 38
+        accessibility: 66
+      pressureAffinityIds: [contraband-flow]
+    - locationId: iron-hill
+      tags: [fortified, guild]
+      baseline:
+        tension: 48
+        alertness: 44
+        accessibility: 54
+      pressureAffinityIds: [harbor-fever]
+  pressures:
+    - pressureId: contraband-flow
+      archetype: smuggling
+      intensity: 47
+      momentum: 2
+      cadenceSec: 180
+      targetLocationIds: [dock-ward, old-market]
+    - pressureId: harbor-fever
+      archetype: outbreak
+      intensity: 41
+      momentum: 1
+      cadenceSec: 240
+      targetLocationIds: [dock-ward, iron-hill]
+  factions:
+    - factionId: tide-union
+      homeLocationId: dock-ward
+      agendaTags: [shipping, leverage]
+      pressureBiasRefs: [contraband-flow]
+    - factionId: hill-wardens
+      homeLocationId: iron-hill
+      agendaTags: [order, quarantine]
+      pressureBiasRefs: [harbor-fever]
+  npcPool:
+    - npcArchetypeId: fixer-dockmaster
+      factionId: tide-union
+      locationAffinityIds: [dock-ward]
+      roleTags: [broker, logistics]
+    - npcArchetypeId: union-courier
+      factionId: tide-union
+      locationAffinityIds: [dock-ward, old-market]
+      roleTags: [runner, witness]
+    - npcArchetypeId: market-fence
+      factionId: tide-union
+      locationAffinityIds: [old-market]
+      roleTags: [merchant, smuggler]
+    - npcArchetypeId: warden-captain
+      factionId: hill-wardens
+      locationAffinityIds: [iron-hill]
+      roleTags: [commander, investigator]
+    - npcArchetypeId: quarantine-clerk
+      factionId: hill-wardens
+      locationAffinityIds: [iron-hill, dock-ward]
+      roleTags: [scribe, inspector]
+    - npcArchetypeId: street-medic
+      factionId: null
+      locationAffinityIds: [old-market, dock-ward]
+      roleTags: [healer, informant]

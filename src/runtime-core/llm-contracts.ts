@@ -89,6 +89,43 @@ export type SceneRendererOutput = {
   optionalActionHints: string[];
 };
 
+export type QuestHookTextSlotType = "actionable" | "worldPulse";
+
+export type QuestHookTextInputSlot = {
+  slotKey: string;
+  slotType: QuestHookTextSlotType;
+  defaultText: string;
+  sourceHash: string;
+  questId?: string;
+  lifecycle?: "active" | "stalled" | "surfaced";
+  urgencyBand?: "low" | "moderate" | "high" | "critical";
+  hookType?: "incident" | "rumor" | "witness" | "request";
+  locationId?: string | null;
+  archetype?: "smuggling" | "outbreak" | "power_struggle" | "artifact_race" | "public_order";
+  trend?: "rising" | "steady" | "cooling";
+  intensityBand?: "low" | "moderate" | "high" | "critical";
+  locationHint?: string | null;
+};
+
+export type QuestHookTextInput = {
+  contractVersion: typeof LLM_CONTRACT_VERSION;
+  sessionId: string;
+  sceneId: string;
+  nowIso: string;
+  locale?: string;
+  slots: QuestHookTextInputSlot[];
+};
+
+export type QuestHookTextOutputOverride = {
+  slotKey: string;
+  shortText: string;
+};
+
+export type QuestHookTextOutput = {
+  contractVersion: typeof LLM_CONTRACT_VERSION;
+  overrides: QuestHookTextOutputOverride[];
+};
+
 export const INTENT_ANALYZER_INPUT_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -266,6 +303,99 @@ export const PERSONA_DRIFT_OUTPUT_SCHEMA = {
   },
 } as const;
 
+export const QUEST_HOOK_TEXT_INPUT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["contractVersion", "sessionId", "sceneId", "nowIso", "slots"],
+  properties: {
+    contractVersion: { type: "integer", enum: [LLM_CONTRACT_VERSION] },
+    sessionId: { type: "string", minLength: 1, maxLength: 120 },
+    sceneId: { type: "string", minLength: 1, maxLength: 120 },
+    nowIso: { type: "string", minLength: 20, maxLength: 40 },
+    locale: { type: "string", minLength: 2, maxLength: 24 },
+    slots: {
+      type: "array",
+      maxItems: 3,
+      items: {
+        oneOf: [
+          {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "slotKey",
+              "slotType",
+              "questId",
+              "lifecycle",
+              "urgencyBand",
+              "hookType",
+              "locationId",
+              "defaultText",
+              "sourceHash",
+            ],
+            properties: {
+              slotKey: { type: "string", minLength: 1, maxLength: 80 },
+              slotType: { type: "string", enum: ["actionable"] },
+              questId: { type: "string", minLength: 1, maxLength: 80 },
+              lifecycle: { type: "string", enum: ["active", "stalled", "surfaced"] },
+              urgencyBand: { type: "string", enum: ["low", "moderate", "high", "critical"] },
+              hookType: { type: "string", enum: ["incident", "rumor", "witness", "request"] },
+              locationId: { type: ["string", "null"], minLength: 1, maxLength: 80 },
+              defaultText: { type: "string", minLength: 1, maxLength: 220 },
+              sourceHash: { type: "string", minLength: 4, maxLength: 40 },
+            },
+          },
+          {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "slotKey",
+              "slotType",
+              "archetype",
+              "trend",
+              "intensityBand",
+              "locationHint",
+              "defaultText",
+              "sourceHash",
+            ],
+            properties: {
+              slotKey: { type: "string", minLength: 1, maxLength: 80 },
+              slotType: { type: "string", enum: ["worldPulse"] },
+              archetype: { type: "string", enum: ["smuggling", "outbreak", "power_struggle", "artifact_race", "public_order"] },
+              trend: { type: "string", enum: ["rising", "steady", "cooling"] },
+              intensityBand: { type: "string", enum: ["low", "moderate", "high", "critical"] },
+              locationHint: { type: ["string", "null"], minLength: 1, maxLength: 80 },
+              defaultText: { type: "string", minLength: 1, maxLength: 220 },
+              sourceHash: { type: "string", minLength: 4, maxLength: 40 },
+            },
+          },
+        ],
+      },
+    },
+  },
+} as const;
+
+export const QUEST_HOOK_TEXT_OUTPUT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["contractVersion", "overrides"],
+  properties: {
+    contractVersion: { type: "integer", enum: [LLM_CONTRACT_VERSION] },
+    overrides: {
+      type: "array",
+      maxItems: 3,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["slotKey", "shortText"],
+        properties: {
+          slotKey: { type: "string", minLength: 1, maxLength: 80 },
+          shortText: { type: "string", minLength: 1, maxLength: 220 },
+        },
+      },
+    },
+  },
+} as const;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -342,4 +472,36 @@ export function isPersonaDriftAnalyzerOutput(value: unknown): value is PersonaDr
     isStringArray(value.dominantSignals) &&
     isStringArray(value.notes)
   );
+}
+
+function isQuestHookTextOutputOverride(value: unknown): value is QuestHookTextOutputOverride {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return typeof value.slotKey === "string" && value.slotKey.length > 0 && typeof value.shortText === "string" && value.shortText.length > 0;
+}
+
+export function isQuestHookTextOutput(value: unknown): value is QuestHookTextOutput {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const overrides = Array.isArray(value.overrides) ? value.overrides : null;
+  if (value.contractVersion !== LLM_CONTRACT_VERSION || overrides === null || overrides.length > 3) {
+    return false;
+  }
+
+  const seenKeys = new Set<string>();
+  for (const entry of overrides) {
+    if (!isQuestHookTextOutputOverride(entry)) {
+      return false;
+    }
+    const key = entry.slotKey.trim();
+    if (!key || seenKeys.has(key)) {
+      return false;
+    }
+    seenKeys.add(key);
+  }
+
+  return true;
 }

@@ -3,6 +3,8 @@ import type {
   IntentAnalyzerOutput,
   PersonaDriftAnalyzerInput,
   PersonaDriftAnalyzerOutput,
+  QuestHookTextInput,
+  QuestHookTextOutput,
   SceneRendererInput,
   SceneRendererOutput,
 } from "./llm-contracts.js";
@@ -11,6 +13,8 @@ import type {
   InteractionRouteKey,
   InteractionRouteRecord,
   NewSessionResult,
+  RuntimeBootstrapDiagnostic,
+  RuntimeBootstrapInput,
   ResumeSessionResult,
   SessionState,
 } from "./types.js";
@@ -26,6 +30,10 @@ export interface PersonaDriftAnalyzer {
 
 export interface SceneRenderer {
   render(input: SceneRendererInput): Promise<SceneRendererOutput>;
+}
+
+export interface QuestHookTextRenderer {
+  render(input: QuestHookTextInput): Promise<QuestHookTextOutput>;
 }
 
 export interface StateStore {
@@ -53,6 +61,17 @@ export type StartNewSessionInput = {
   channelKey: string;
   ownerId: string;
   initialSceneId?: string;
+  runtimeBootstrap?: RuntimeBootstrapInput | null;
+  runtimeBootstrapDiagnostics?: RuntimeBootstrapDiagnostic[];
+};
+
+export type RuntimeSeedLoadStatus = "used" | "missing" | "invalid" | "error";
+
+export type RuntimeBootstrapLoadResult = {
+  status: RuntimeSeedLoadStatus;
+  sourcePath: string | null;
+  bootstrap: RuntimeBootstrapInput | null;
+  diagnostics: RuntimeBootstrapDiagnostic[];
 };
 
 export type ResumeSessionInput = {
@@ -100,5 +119,6 @@ export interface RuntimeEngine {
 
   analyzeIntent(input: IntentAnalyzerInput): Promise<IntentAnalyzerOutput>;
   analyzePersonaDrift(input: PersonaDriftAnalyzerInput): Promise<PersonaDriftAnalyzerOutput>;
+  renderQuestHookText(input: QuestHookTextInput): Promise<QuestHookTextOutput>;
   renderScene(input: SceneRendererInput): Promise<SceneRendererOutput>;
 }

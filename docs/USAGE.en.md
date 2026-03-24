@@ -51,9 +51,35 @@ Use it from `~/.openclaw/extensions/trpg-runtime` either as a plugin-only overla
 - Quest panel summary is layered as actionable / world pulse / recent outcomes.
 - Active and surfaced opportunities are shown separately (active top 1, surfaced top up to 2).
 - Recent lifecycle outcomes are shown in player-facing natural phrases (no raw lifecycle code terms).
-- `hookSlot.llmShortText` is a reserved optional field only; no runtime LLM hook call path is used in this checkpoint.
 - Tuning telemetry is bounded via ring+snapshot (`surfacing/expiration/mutation/successor rates`, budget utilization, quota saturation, urgency ratio).
 - Raw tuning/budget/quota values remain debug-only behind `debugRuntimeSignals=true`.
+
+## 2.6) Optional rich hook lane notes (Checkpoint 6C)
+
+- Runtime adds an optional hook text lane for actionable slots (`active top 1 + surfaced top up to 2`) and a narrow `worldPulse` synthetic slot.
+- Lane is non-authoritative: lifecycle/budget/pressure adjudication remains deterministic engine responsibility.
+- Input/output contract is compact and bounded (`slotKey` + short structured facts, max 3 overrides).
+- `llmShortText` is constrained to one short line and is clipped to `defaultText` length.
+- Cache is bounded by source hash + TTL (`hookTextCacheTtlSec`); cache miss can trigger at most one generation pass per action.
+- On policy-off/timeout/error/invalid output, runtime immediately falls back to deterministic `defaultText`.
+- `worldPulse` keeps deterministic phrase as source-of-truth fallback; rich text is replacement-only (single line), never additive.
+- World pressure state itself is never mutated by this lane (`archetype/trend/intensity` computation stays deterministic).
+- Debug mode (`debugRuntimeSignals=true`) shows hook metadata (`slotType`, `source`, `cacheHit/cacheMiss`, `skip/fallback reason`) without storing generated text in trace.
+
+## 2.7) Canonical world seed notes (Checkpoint 7A)
+
+- Canonical `WorldSeed` is bootstrap scaffold only; runtime state remains mutable source-of-truth.
+- Seed validation enforces minimum scaffold and referential integrity (locations/pressures/factions/npc pool + cross-reference checks).
+- New session bootstrap seed lookup order:
+  1. `world/canon/world-seed.yaml|yml|json`
+  2. `world/state/world-seed.yaml|yml|json`
+  3. `world/state/world-seeds.yaml|yml|json`
+- Valid seed projects one-way `RuntimeBootstrapInput` (pressure/location baselines) into deterministic runtime initialization.
+- Missing or invalid seed returns structured diagnostics and safely falls back to existing defaults.
+- Session runtime metadata stores seed provenance (`worldId`, `schemaVersion`, `seedValue`, `seedFingerprint`) for debug/resume visibility.
+- Resume uses persisted runtime state first and does not re-bootstrap from seed.
+- Starter template is available at `examples/world-seed.template.yaml`; copy it to `world/canon/world-seed.yaml` and tailor IDs/baselines.
+- Preflight validation (no session/bootstrap execution): `node scripts/validate-world-seed.mjs world/canon/world-seed.yaml`.
 
 ## 2.1) World-data-driven behavior
 

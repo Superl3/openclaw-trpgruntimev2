@@ -16,6 +16,8 @@ Structured TRPG runtime plugin for OpenClaw.
 - Checkpoint 5 temporal core: deterministic memory/freshness/residual-trace/location drift driven by `delta_time`
 - Checkpoint 6 quest economy core: deterministic world pressure, bounded quest lifecycle, and budget/quota guardrails
 - Checkpoint 6B rich surfacing: active/surfaced/recent outcome panel projection with bounded tuning telemetry snapshot
+- Checkpoint 6C/6D optional rich hook lane: bounded actionable + worldPulse short text with deterministic fallback
+- Checkpoint 7A world seed bootstrap: validated canonical world seed scaffold + one-way runtime bootstrap projection
 
 All tools return JSON-shaped output (`details`) and JSON text in `content`.
 
@@ -25,6 +27,20 @@ All tools return JSON-shaped output (`details`) and JSON text in `content`.
 - Scene generation now depends on your world files only.
 - Define locations, intro scene data, and relationship edges in `world/` files (for example `canon/locations.yaml`, `state/current-scene.yaml`, and `state/relationships.yaml`).
 - If scene data is missing, runtime falls back to neutral guard text (for example current scene unknown) instead of injecting fixed lore.
+
+## World seed bootstrap (Checkpoint 7A)
+
+- Canonical world seed is bootstrap input, not live runtime source-of-truth.
+- Runtime mutable truth remains in state store (`deterministicLoop`, temporal/quest state, trace, panel/session metadata).
+- New session bootstrap seed lookup order:
+  1. `world/canon/world-seed.yaml|yml|json`
+  2. `world/state/world-seed.yaml|yml|json`
+  3. `world/state/world-seeds.yaml|yml|json`
+- Valid seed: runtime consumes projected pressure/location baselines and stores seed provenance (`worldId`, `schemaVersion`, `seedFingerprint`) in session metadata.
+- Missing/invalid seed: runtime reports structured diagnostics and safely falls back to existing deterministic defaults.
+- Resume flow keeps persisted runtime state; it does not re-bootstrap from seed unless a new session is created.
+- Starter template: copy `examples/world-seed.template.yaml` to `world/canon/world-seed.yaml` and edit ids/baselines for your setting.
+- Preflight validator (schema/invariant check only): `node scripts/validate-world-seed.mjs world/canon/world-seed.yaml`
 
 ## Safety model
 
@@ -81,6 +97,7 @@ These are minimal post-install examples with safe defaults:
 
 - `plugins.entries.trpg-runtime.config.allowPatchApply=false`
 - `plugins.entries.trpg-runtime.config.allowedAgentIds=[]` (plugin-only) or `["trpg"]` (dedicated agent)
+- `plugins.entries.trpg-runtime.config.richHookTextEnabled=false` (optional hook lane is off by default; when enabled it augments actionable hooks + worldPulse only)
 - `plugins.entries.trpg-runtime.config.debugRuntimeSignals=false` (raw drift signals hidden by default)
 
 ## Bundled TRPG agent

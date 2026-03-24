@@ -11,6 +11,7 @@ import {
   type QuestEconomyState,
   type QuestEconomyTickSummary,
 } from "./quest-economy.js";
+import type { RuntimeBootstrapInput } from "./types.js";
 
 export type ActionFeasibility = "possible" | "currently_impossible" | "reckless" | "impossible";
 
@@ -572,10 +573,12 @@ function updateBeat(params: {
 export function createInitialDeterministicSceneLoop(params: {
   sceneId: string;
   nowIso: string;
+  bootstrap?: RuntimeBootstrapInput | null;
 }): DeterministicSceneLoopState {
   const sceneId = readString(params.sceneId, DEFAULT_SCENE_ID);
   const sceneIndex = parseSceneIndex(sceneId);
   const coreIdentity = zeroBehavioralAxisVector();
+  const bootstrap = params.bootstrap ?? null;
 
   const seed: DeterministicSceneLoopState = {
     scene: {
@@ -621,8 +624,12 @@ export function createInitialDeterministicSceneLoop(params: {
       lastIntentSignals: [],
       expiresAtIso: nextAnalyzerMemoryExpiry(params.nowIso),
     },
-    temporal: ensureTemporalRuntimeState(undefined, params.nowIso),
-    questEconomy: ensureQuestEconomyState(undefined, params.nowIso),
+    temporal: ensureTemporalRuntimeState(undefined, params.nowIso, {
+      locationBaselines: bootstrap?.temporal.locationBaselines,
+    }),
+    questEconomy: ensureQuestEconomyState(undefined, params.nowIso, {
+      worldPressures: bootstrap?.questEconomy.worldPressures,
+    }),
     actionPalette: [],
   };
 

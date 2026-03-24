@@ -5,10 +5,17 @@ import {
   type IntentAnalyzerOutput,
   type PersonaDriftAnalyzerInput,
   type PersonaDriftAnalyzerOutput,
+  type QuestHookTextInput,
+  type QuestHookTextOutput,
   type SceneRendererInput,
   type SceneRendererOutput,
 } from "./llm-contracts.js";
-import type { IntentAnalyzer, PersonaDriftAnalyzer, SceneRenderer } from "./contracts.js";
+import type {
+  IntentAnalyzer,
+  PersonaDriftAnalyzer,
+  QuestHookTextRenderer,
+  SceneRenderer,
+} from "./contracts.js";
 
 function normalizeSignals(value: string): string[] {
   return value
@@ -63,6 +70,15 @@ export class NoopSceneRenderer implements SceneRenderer {
         sub: "Sub panel placeholder.",
       },
       optionalActionHints: [],
+    };
+  }
+}
+
+export class NoopQuestHookTextRenderer implements QuestHookTextRenderer {
+  async render(_input: QuestHookTextInput): Promise<QuestHookTextOutput> {
+    return {
+      contractVersion: LLM_CONTRACT_VERSION,
+      overrides: [],
     };
   }
 }

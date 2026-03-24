@@ -235,6 +235,6 @@ test("engine trace records temporal updates and resume keeps temporal state", as
   const temporalBeforeResume = interacted.session.deterministicLoop.temporal;
 
   const resumed = parse(await resumeTool.execute("resume", { sessionId: interacted.session.sessionId, actorId: "owner-1" }));
-  assert.equal(resumed.ok, true);
+  assert.equal(resumed.ok, true, JSON.stringify(resumed));
   assert.deepEqual(resumed.session.deterministicLoop.temporal, temporalBeforeResume);
 });

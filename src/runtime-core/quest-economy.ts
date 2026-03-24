@@ -128,6 +128,30 @@ export type QuestHookSlot = {
   hookType: QuestHookType;
   defaultText: string;
   llmShortText: string | null;
+  llmSourceHash: string | null;
+  llmExpiresAtIso: string | null;
+};
+
+export type QuestHookTextSource = "default" | "llm";
+
+export type QuestHookTextSlotType = "actionable" | "worldPulse";
+
+export type QuestHookTextDebugSlot = {
+  slotKey: string;
+  slotType: QuestHookTextSlotType;
+  source: QuestHookTextSource;
+  cacheHit: boolean;
+  skipReason: string | null;
+};
+
+export type QuestHookTextDebugState = {
+  lastEvaluatedAtIso: string | null;
+  generationAttempted: boolean;
+  result: "skipped" | "applied" | "fallback";
+  reason: string | null;
+  cacheHitCount: number;
+  cacheMissCount: number;
+  slotMeta: QuestHookTextDebugSlot[];
 };
 
 export type QuestTuningSnapshot = {
@@ -175,6 +199,8 @@ export type QuestTuningSample = {
 export type QuestPresentationState = {
   recentOutcomes: QuestRecentOutcome[];
   hookSlots: QuestHookSlot[];
+  worldPulseSlot: QuestHookSlot | null;
+  hookTextDebug: QuestHookTextDebugState;
   tuning: QuestTuningSnapshot;
   telemetryRing: QuestTuningSample[];
 };
@@ -195,6 +221,8 @@ export type QuestPanelSummary = {
       intensity: number;
       trend: "rising" | "steady" | "cooling";
     } | null;
+    defaultText: string;
+    llmShortText: string | null;
     text: string;
   };
   recentOutcomes: {
@@ -205,6 +233,7 @@ export type QuestPanelSummary = {
     liveQuestCount: number;
     budget: QuestBudgetState;
     softQuota: QuestSoftQuotaState;
+    hookText: QuestHookTextDebugState;
     tuning: QuestTuningSnapshot;
     averageUrgency: number;
     activeVsSurfacedRatio: number;
@@ -237,6 +266,17 @@ export type QuestEconomyTickSummary = {
   };
 };
 
+export type QuestHookTextOverride = {
+  slotKey: string;
+  shortText: string;
+};
+
+export type QuestHookTextOverrideApplyResult = {
+  nextEconomy: QuestEconomyState;
+  appliedSlotKeys: string[];
+  ignoredSlotKeys: string[];
+};
+
 export type QuestEconomyTickInput = {
   economy: QuestEconomyState | null | undefined;
   nowIso: string;
@@ -251,6 +291,18 @@ export type QuestEconomyTickInput = {
 export type QuestEconomyTickResult = {
   nextEconomy: QuestEconomyState;
   summary: QuestEconomyTickSummary;
+};
+
+export type QuestEconomyBootstrapInput = {
+  worldPressures?: Array<{
+    pressureId: string;
+    archetype: PressureArchetype;
+    intensity: number;
+    momentum: number;
+    cadenceSec: number;
+    targetLocations?: string[];
+    anchorCandidate?: boolean;
+  }>;
 };
 
 const DEFAULT_LIVE_POOL_CAP = 10;
@@ -269,7 +321,9 @@ const MAX_TRANSITIONS_RECORDED = 18;
 const MAX_USAGE_ROWS = 18;
 const MAX_RECENT_OUTCOMES = 4;
 const MAX_HOOK_SLOTS = 3;
+const MAX_HOOK_DEBUG_SLOTS = MAX_HOOK_SLOTS + 1;
 export const QUEST_TUNING_RING_MAX = 24;
+export const WORLD_PULSE_HOOK_SLOT_KEY = "hook-world-pulse";
 
 const SEED_EXPIRES_SEC = 2_100;
 const SURFACED_EXPIRES_SEC = 1_000;
@@ -361,6 +415,15 @@ function readIsoString(value: unknown, fallback: string): string {
   }
   const parsed = Date.parse(normalized);
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : fallback;
+}
+
+function readIsoNullable(value: unknown): string | null {
+  const normalized = readString(value);
+  if (!normalized) {
+    return null;
+  }
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
 }
 
 function isoNowOrFallback(nowIso: string): string {
@@ -545,6 +608,8 @@ function makeDefaultPresentationState(): QuestPresentationState {
   return {
     recentOutcomes: [],
     hookSlots: [],
+    worldPulseSlot: null,
+    hookTextDebug: emptyHookTextDebugState(),
     tuning: emptyTuningSnapshot(),
     telemetryRing: [],
   };
@@ -588,11 +653,50 @@ function makeDefaultPressures(nowIso: string): WorldPressureState[] {
   ];
 }
 
-function makeDefaultEconomy(nowIso: string): QuestEconomyState {
+function normalizeBootstrapPressure(value: unknown, nowIso: string): WorldPressureState | null {
+  const node = toRecord(value);
+  const pressureId = readString(node.pressureId);
+  if (!pressureId) {
+    return null;
+  }
+  return {
+    pressureId,
+    archetype: normalizeArchetype(node.archetype),
+    intensity: clampInt(readInt(node.intensity, 45), 0, 100),
+    momentum: clampInt(readInt(node.momentum, 0), -20, 20),
+    targetLocations: Array.isArray(node.targetLocations)
+      ? uniqStrings(node.targetLocations.filter((entry): entry is string => typeof entry === "string"), MAX_TARGET_LOCATIONS)
+      : [],
+    cadenceSec: clampInt(readInt(node.cadenceSec, 180), 60, 3600),
+    lastAdvancedAtIso: nowIso,
+    lastSeededAtIso: null,
+    anchorCandidate: readBoolean(node.anchorCandidate, false),
+  };
+}
+
+function normalizeBootstrapPressures(value: QuestEconomyBootstrapInput["worldPressures"], nowIso: string): WorldPressureState[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const normalized = value
+    .map((entry) => normalizeBootstrapPressure(entry, nowIso))
+    .filter((entry): entry is WorldPressureState => entry !== null);
+  if (normalized.length === 0) {
+    return [];
+  }
+  const dedup = new Map<string, WorldPressureState>();
+  for (const pressure of normalized) {
+    dedup.set(pressure.pressureId, pressure);
+  }
+  return Array.from(dedup.values()).slice(0, MAX_WORLD_PRESSURES);
+}
+
+function makeDefaultEconomy(nowIso: string, bootstrap?: QuestEconomyBootstrapInput): QuestEconomyState {
   const resolvedNow = isoNowOrFallback(nowIso);
+  const bootstrapPressures = normalizeBootstrapPressures(bootstrap?.worldPressures, resolvedNow);
   return {
     version: 1,
-    worldPressures: makeDefaultPressures(resolvedNow),
+    worldPressures: bootstrapPressures.length > 0 ? bootstrapPressures : makeDefaultPressures(resolvedNow),
     quests: [],
     budget: {
       caps: {
@@ -852,6 +956,116 @@ function clampUnit(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
+function hookTextSourceFromSlot(slot: QuestHookSlot): QuestHookTextSource {
+  return slot.llmShortText ? "llm" : "default";
+}
+
+function hookTextSlotTypeFromSlot(slot: QuestHookSlot): QuestHookTextSlotType {
+  return slot.slotKey === WORLD_PULSE_HOOK_SLOT_KEY ? "worldPulse" : "actionable";
+}
+
+function emptyHookTextDebugState(): QuestHookTextDebugState {
+  return {
+    lastEvaluatedAtIso: null,
+    generationAttempted: false,
+    result: "skipped",
+    reason: null,
+    cacheHitCount: 0,
+    cacheMissCount: 0,
+    slotMeta: [],
+  };
+}
+
+function hashFNV32(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+export function buildQuestHookSlotSourceHash(slot: QuestHookSlot): string {
+  return hashFNV32(
+    [
+      slot.slotKey,
+      slot.questId,
+      slot.lifecycle,
+      slot.urgencyBand,
+      slot.locationId ?? "none",
+      slot.hookType,
+      slot.defaultText,
+    ].join("|"),
+  );
+}
+
+function normalizeShortHookText(raw: string, defaultText: string): string | null {
+  const compact = raw.replace(/\s+/g, " ").trim();
+  if (!compact) {
+    return null;
+  }
+  const maxLength = Math.max(1, defaultText.length);
+  const sliced = compact.slice(0, maxLength).trim();
+  return sliced || null;
+}
+
+export function isQuestHookTextCacheValid(slot: QuestHookSlot, nowIso: string): boolean {
+  if (!slot.llmShortText || !slot.llmSourceHash || !slot.llmExpiresAtIso) {
+    return false;
+  }
+  if (slot.llmSourceHash !== buildQuestHookSlotSourceHash(slot)) {
+    return false;
+  }
+  const expiresAt = readIsoMillis(slot.llmExpiresAtIso);
+  const now = readIsoMillis(nowIso);
+  if (!Number.isFinite(expiresAt) || !Number.isFinite(now)) {
+    return false;
+  }
+  return expiresAt > now;
+}
+
+function sanitizeQuestHookSlotCache(slot: QuestHookSlot, nowIso: string): QuestHookSlot {
+  if (isQuestHookTextCacheValid(slot, nowIso)) {
+    return slot;
+  }
+  return {
+    ...slot,
+    llmShortText: null,
+    llmSourceHash: null,
+    llmExpiresAtIso: null,
+  };
+}
+
+function reconcileHookTextDebugState(
+  state: QuestHookTextDebugState,
+  params: {
+    hookSlots: QuestHookSlot[];
+    worldPulseSlot: QuestHookSlot | null;
+  },
+): QuestHookTextDebugState {
+  const previousMetaByKey = new Map(state.slotMeta.map((entry) => [entry.slotKey, entry]));
+  const candidates: QuestHookSlot[] = params.hookSlots.slice(0, MAX_HOOK_SLOTS);
+  if (params.worldPulseSlot) {
+    candidates.push(params.worldPulseSlot);
+  }
+
+  const slotMeta = candidates.slice(0, MAX_HOOK_DEBUG_SLOTS).map((slot) => {
+    const previous = previousMetaByKey.get(slot.slotKey);
+    return {
+      slotKey: slot.slotKey,
+      slotType: hookTextSlotTypeFromSlot(slot),
+      source: hookTextSourceFromSlot(slot),
+      cacheHit: previous?.cacheHit ?? false,
+      skipReason: previous?.skipReason ?? null,
+    };
+  });
+
+  return {
+    ...state,
+    slotMeta,
+  };
+}
+
 function normalizeUrgencyBand(value: unknown): QuestUrgencyBand {
   const normalized = readString(value);
   if (normalized === "low" || normalized === "moderate" || normalized === "high" || normalized === "critical") {
@@ -898,6 +1112,9 @@ function normalizeHookSlot(value: unknown): QuestHookSlot | null {
       ? lifecycleRaw
       : "surfaced";
 
+  const defaultText = readString(node.defaultText) || "접촉 가능한 기회가 있다.";
+  const llmShortText = normalizeShortHookText(readString(node.llmShortText), defaultText);
+
   return {
     slotKey,
     questId,
@@ -905,8 +1122,55 @@ function normalizeHookSlot(value: unknown): QuestHookSlot | null {
     urgencyBand: normalizeUrgencyBand(node.urgencyBand),
     locationId: readString(node.locationId) || null,
     hookType: normalizeHookType(node.hookType),
-    defaultText: readString(node.defaultText) || "접촉 가능한 기회가 있다.",
-    llmShortText: readString(node.llmShortText) || null,
+    defaultText,
+    llmShortText,
+    llmSourceHash: readString(node.llmSourceHash) || null,
+    llmExpiresAtIso: readIsoNullable(node.llmExpiresAtIso),
+  };
+}
+
+function normalizeHookTextDebugSlot(value: unknown): QuestHookTextDebugSlot | null {
+  const node = toRecord(value);
+  const slotKey = readString(node.slotKey);
+  if (!slotKey) {
+    return null;
+  }
+
+  const slotTypeRaw = readString(node.slotType);
+  const slotType: QuestHookTextSlotType = slotTypeRaw === "worldPulse" ? "worldPulse" : "actionable";
+  const sourceRaw = readString(node.source);
+  const source: QuestHookTextSource = sourceRaw === "llm" ? "llm" : "default";
+
+  return {
+    slotKey,
+    slotType,
+    source,
+    cacheHit: readBoolean(node.cacheHit, false),
+    skipReason: readString(node.skipReason) || null,
+  };
+}
+
+function normalizeHookTextDebugState(value: unknown): QuestHookTextDebugState {
+  const fallback = emptyHookTextDebugState();
+  const node = toRecord(value);
+  const slotMetaRaw = Array.isArray(node.slotMeta) ? node.slotMeta : [];
+  const slotMeta = slotMetaRaw
+    .map((entry) => normalizeHookTextDebugSlot(entry))
+    .filter((entry): entry is QuestHookTextDebugSlot => entry !== null)
+    .slice(0, MAX_HOOK_DEBUG_SLOTS);
+
+  const resultRaw = readString(node.result);
+  const result: QuestHookTextDebugState["result"] =
+    resultRaw === "applied" || resultRaw === "fallback" || resultRaw === "skipped" ? resultRaw : "skipped";
+
+  return {
+    lastEvaluatedAtIso: readIsoNullable(node.lastEvaluatedAtIso),
+    generationAttempted: readBoolean(node.generationAttempted, false),
+    result,
+    reason: readString(node.reason) || null,
+    cacheHitCount: Math.max(0, readInt(node.cacheHitCount, fallback.cacheHitCount)),
+    cacheMissCount: Math.max(0, readInt(node.cacheMissCount, fallback.cacheMissCount)),
+    slotMeta,
   };
 }
 
@@ -968,6 +1232,7 @@ function normalizePresentationState(value: unknown, fallbackNowIso: string): Que
 
   const recentOutcomesRaw = Array.isArray(root.recentOutcomes) ? root.recentOutcomes : [];
   const hookSlotsRaw = Array.isArray(root.hookSlots) ? root.hookSlots : [];
+  const worldPulseSlotRaw = normalizeHookSlot(root.worldPulseSlot);
   const ringRaw = Array.isArray(root.telemetryRing) ? root.telemetryRing : [];
 
   const recentOutcomes = recentOutcomesRaw
@@ -979,7 +1244,10 @@ function normalizePresentationState(value: unknown, fallbackNowIso: string): Que
   const hookSlots = hookSlotsRaw
     .map((entry) => normalizeHookSlot(entry))
     .filter((entry): entry is QuestHookSlot => entry !== null)
+    .map((slot) => sanitizeQuestHookSlotCache(slot, fallbackNowIso))
     .slice(0, MAX_HOOK_SLOTS);
+
+  const worldPulseSlot = worldPulseSlotRaw ? sanitizeQuestHookSlotCache(worldPulseSlotRaw, fallbackNowIso) : null;
 
   const telemetryRing = ringRaw
     .map((entry) => normalizeTuningSample(entry, fallbackNowIso))
@@ -990,6 +1258,11 @@ function normalizePresentationState(value: unknown, fallbackNowIso: string): Que
   return {
     recentOutcomes,
     hookSlots,
+    worldPulseSlot,
+    hookTextDebug: reconcileHookTextDebugState(normalizeHookTextDebugState(root.hookTextDebug), {
+      hookSlots,
+      worldPulseSlot,
+    }),
     tuning: normalizeTuningSnapshot(root.tuning, fallback.tuning),
     telemetryRing,
   };
@@ -1076,9 +1349,13 @@ function recalculateBudgetAndQuota(state: QuestEconomyState): QuestEconomyState 
   };
 }
 
-export function ensureQuestEconomyState(value: unknown, nowIso: string): QuestEconomyState {
+export function ensureQuestEconomyState(
+  value: unknown,
+  nowIso: string,
+  bootstrap?: QuestEconomyBootstrapInput,
+): QuestEconomyState {
   const resolvedNow = isoNowOrFallback(nowIso);
-  const fallback = makeDefaultEconomy(resolvedNow);
+  const fallback = makeDefaultEconomy(resolvedNow, bootstrap);
   const root = toRecord(value);
 
   const worldPressuresRaw = Array.isArray(root.worldPressures) ? root.worldPressures : [];
@@ -1107,12 +1384,24 @@ export function ensureQuestEconomyState(value: unknown, nowIso: string): QuestEc
   state = pruneEconomy(state);
   state = recalculateBudgetAndQuota(state);
   const telemetryRing = state.presentation.telemetryRing.slice(-QUEST_TUNING_RING_MAX);
+  const hookSlots = state.presentation.hookSlots
+    .slice(0, MAX_HOOK_SLOTS)
+    .map((slot) => sanitizeQuestHookSlotCache(slot, resolvedNow));
+  const worldPulseSlot = state.presentation.worldPulseSlot
+    ? sanitizeQuestHookSlotCache(state.presentation.worldPulseSlot, resolvedNow)
+    : null;
+  const hookTextDebug = reconcileHookTextDebugState(state.presentation.hookTextDebug, {
+    hookSlots,
+    worldPulseSlot,
+  });
   state = {
     ...state,
     presentation: {
       ...state.presentation,
       recentOutcomes: state.presentation.recentOutcomes.slice(0, MAX_RECENT_OUTCOMES),
-      hookSlots: state.presentation.hookSlots.slice(0, MAX_HOOK_SLOTS),
+      hookSlots,
+      worldPulseSlot,
+      hookTextDebug,
       telemetryRing,
       tuning: telemetryRing.length > 0 ? averageSamples(telemetryRing) : state.presentation.tuning,
     },
@@ -1261,6 +1550,8 @@ function buildHookSlotFromQuest(params: {
       urgencyBand: band,
     }),
     llmShortText: null,
+    llmSourceHash: null,
+    llmExpiresAtIso: null,
   };
 }
 
@@ -1313,18 +1604,45 @@ function deriveHookSlots(params: {
   return slots.slice(0, MAX_HOOK_SLOTS);
 }
 
+function buildWorldPulseSyntheticSlot(params: {
+  top: WorldPressureState | null;
+  locationId: string | null;
+  defaultText: string;
+}): QuestHookSlot {
+  const intensity = params.top?.intensity ?? 0;
+  return {
+    slotKey: WORLD_PULSE_HOOK_SLOT_KEY,
+    questId: params.top?.pressureId ?? "world-pulse:none",
+    lifecycle: "surfaced",
+    urgencyBand: urgencyBand(intensity),
+    locationId: params.locationId,
+    hookType: "incident",
+    defaultText: params.defaultText,
+    llmShortText: null,
+    llmSourceHash: null,
+    llmExpiresAtIso: null,
+  };
+}
+
 function buildWorldPulse(params: {
   top: WorldPressureState | null;
+  worldPulseSlot?: QuestHookSlot | null;
 }): QuestPanelSummary["worldPulse"] {
   if (!params.top) {
+    const defaultText = "세계 동향은 비교적 잠잠하다.";
+    const llmShortText = params.worldPulseSlot?.llmShortText ?? null;
     return {
       topPressure: null,
-      text: "세계 동향은 비교적 잠잠하다.",
+      defaultText,
+      llmShortText,
+      text: llmShortText ?? defaultText,
     };
   }
 
   const trend = pressureTrend(params.top);
   const archetypeText = pressureArchetypeText(params.top.archetype);
+  const defaultText = `${archetypeText} 압박이 ${pressureTrendText(trend)}다.`;
+  const llmShortText = params.worldPulseSlot?.llmShortText ?? null;
   return {
     topPressure: {
       pressureId: params.top.pressureId,
@@ -1332,7 +1650,9 @@ function buildWorldPulse(params: {
       intensity: params.top.intensity,
       trend,
     },
-    text: `${archetypeText} 압박이 ${pressureTrendText(trend)}다.`,
+    defaultText,
+    llmShortText,
+    text: llmShortText ?? defaultText,
   };
 }
 
@@ -1367,8 +1687,15 @@ export function buildQuestEconomyQualitativeSummary(params: {
     .sort((a, b) => scoreIsoDesc(a.tsIso, b.tsIso))
     .slice(0, MAX_RECENT_OUTCOMES);
 
-  const worldPulse = buildWorldPulse({ top });
+  const worldPulse = buildWorldPulse({
+    top,
+    worldPulseSlot: params.economy.presentation.worldPulseSlot,
+  });
   const tuning = params.economy.presentation.tuning;
+  const hookTextDebug = reconcileHookTextDebugState(params.economy.presentation.hookTextDebug, {
+    hookSlots,
+    worldPulseSlot: params.economy.presentation.worldPulseSlot,
+  });
 
   return {
     actionable: {
@@ -1388,6 +1715,7 @@ export function buildQuestEconomyQualitativeSummary(params: {
       liveQuestCount: params.economy.budget.used.livePool,
       budget: params.economy.budget,
       softQuota: params.economy.softQuota,
+      hookText: hookTextDebug,
       tuning,
       averageUrgency: tuning.averageUrgency,
       activeVsSurfacedRatio: tuning.activeVsSurfacedRatio,
@@ -1984,19 +2312,56 @@ function updatePresentationState(params: {
     locationId: params.locationId,
   });
 
-  const previousLlmByKey = new Map(
-    previous.hookSlots.map((slot) => [`${slot.questId}:${slot.lifecycle}`, slot.llmShortText]),
-  );
+  const previousSlotByKey = new Map(previous.hookSlots.map((slot) => [`${slot.questId}:${slot.lifecycle}`, slot]));
 
   const hookSlots = derivedSlots
     .map((slot) => {
       const key = `${slot.questId}:${slot.lifecycle}`;
+      const previousSlot = previousSlotByKey.get(key);
+      const sourceHash = buildQuestHookSlotSourceHash(slot);
+      const carryLlm =
+        previousSlot &&
+        previousSlot.llmShortText &&
+        previousSlot.llmSourceHash === sourceHash &&
+        previousSlot.llmExpiresAtIso &&
+        readIsoMillis(previousSlot.llmExpiresAtIso) > readIsoMillis(params.nowIso)
+          ? previousSlot.llmShortText
+          : null;
       return {
         ...slot,
-        llmShortText: previousLlmByKey.get(key) ?? null,
+        llmShortText: carryLlm,
+        llmSourceHash: carryLlm ? sourceHash : null,
+        llmExpiresAtIso: carryLlm ? previousSlot?.llmExpiresAtIso ?? null : null,
       };
     })
     .slice(0, MAX_HOOK_SLOTS);
+
+  const top = topPressure(params.state.worldPressures);
+  const worldPulseDefault = buildWorldPulse({ top }).defaultText;
+  const nextWorldPulseBase = buildWorldPulseSyntheticSlot({
+    top,
+    locationId: params.locationId,
+    defaultText: worldPulseDefault,
+  });
+  const worldPulseSourceHash = buildQuestHookSlotSourceHash(nextWorldPulseBase);
+  const previousWorldPulse = previous.worldPulseSlot;
+  const carryWorldPulseLlm =
+    previousWorldPulse &&
+    previousWorldPulse.llmShortText &&
+    previousWorldPulse.llmSourceHash === worldPulseSourceHash &&
+    previousWorldPulse.llmExpiresAtIso &&
+    readIsoMillis(previousWorldPulse.llmExpiresAtIso) > readIsoMillis(params.nowIso)
+      ? previousWorldPulse.llmShortText
+      : null;
+  const worldPulseSlot = sanitizeQuestHookSlotCache(
+    {
+      ...nextWorldPulseBase,
+      llmShortText: carryWorldPulseLlm,
+      llmSourceHash: carryWorldPulseLlm ? worldPulseSourceHash : null,
+      llmExpiresAtIso: carryWorldPulseLlm ? previousWorldPulse?.llmExpiresAtIso ?? null : null,
+    },
+    params.nowIso,
+  );
 
   const recentOutcomes = updateRecentOutcomes({
     previous,
@@ -2014,12 +2379,151 @@ function updatePresentationState(params: {
     previous,
     sample,
   });
+  const hookTextDebug = reconcileHookTextDebugState(previous.hookTextDebug, {
+    hookSlots,
+    worldPulseSlot,
+  });
 
   return {
     recentOutcomes,
     hookSlots,
+    worldPulseSlot,
+    hookTextDebug,
     telemetryRing,
     tuning: averageSamples(telemetryRing),
+  };
+}
+
+export function applyQuestHookTextOverrides(params: {
+  economy: QuestEconomyState;
+  overrides: QuestHookTextOverride[];
+  nowIso: string;
+  cacheTtlSec: number;
+}): QuestHookTextOverrideApplyResult {
+  const seen = new Set<string>();
+  const overridesByKey = new Map<string, string>();
+
+  for (const override of params.overrides) {
+    const slotKey = readString(override.slotKey);
+    const shortText = readString(override.shortText);
+    if (!slotKey || !shortText || seen.has(slotKey)) {
+      continue;
+    }
+    seen.add(slotKey);
+    overridesByKey.set(slotKey, shortText);
+    if (overridesByKey.size >= MAX_HOOK_SLOTS) {
+      break;
+    }
+  }
+
+  if (overridesByKey.size === 0) {
+    return {
+      nextEconomy: params.economy,
+      appliedSlotKeys: [],
+      ignoredSlotKeys: [],
+    };
+  }
+
+  const ttlSec = clampInt(Math.trunc(params.cacheTtlSec), 30, 7_200);
+  const appliedSlotKeys: string[] = [];
+  const ignoredSlotKeys: string[] = [];
+
+  const hookSlots = params.economy.presentation.hookSlots.slice(0, MAX_HOOK_SLOTS).map((slot) => {
+    const override = overridesByKey.get(slot.slotKey);
+    if (!override) {
+      return slot;
+    }
+    const normalized = normalizeShortHookText(override, slot.defaultText);
+    if (!normalized) {
+      ignoredSlotKeys.push(slot.slotKey);
+      return slot;
+    }
+    appliedSlotKeys.push(slot.slotKey);
+    return {
+      ...slot,
+      llmShortText: normalized,
+      llmSourceHash: buildQuestHookSlotSourceHash(slot),
+      llmExpiresAtIso: addSecondsToIso(params.nowIso, ttlSec),
+    };
+  });
+
+  const worldPulseSlotCurrent = params.economy.presentation.worldPulseSlot;
+  const worldPulseOverride = worldPulseSlotCurrent ? overridesByKey.get(worldPulseSlotCurrent.slotKey) : undefined;
+  let worldPulseSlot = worldPulseSlotCurrent;
+  if (worldPulseSlotCurrent && worldPulseOverride) {
+    const normalized = normalizeShortHookText(worldPulseOverride, worldPulseSlotCurrent.defaultText);
+    if (!normalized) {
+      ignoredSlotKeys.push(worldPulseSlotCurrent.slotKey);
+    } else {
+      appliedSlotKeys.push(worldPulseSlotCurrent.slotKey);
+      worldPulseSlot = {
+        ...worldPulseSlotCurrent,
+        llmShortText: normalized,
+        llmSourceHash: buildQuestHookSlotSourceHash(worldPulseSlotCurrent),
+        llmExpiresAtIso: addSecondsToIso(params.nowIso, ttlSec),
+      };
+    }
+  }
+
+  for (const slotKey of overridesByKey.keys()) {
+    if (!appliedSlotKeys.includes(slotKey) && !ignoredSlotKeys.includes(slotKey)) {
+      ignoredSlotKeys.push(slotKey);
+    }
+  }
+
+  return {
+    nextEconomy: {
+      ...params.economy,
+      presentation: {
+        ...params.economy.presentation,
+        hookSlots,
+        worldPulseSlot,
+      },
+    },
+    appliedSlotKeys,
+    ignoredSlotKeys,
+  };
+}
+
+export function setQuestHookTextDebugState(params: {
+  economy: QuestEconomyState;
+  nowIso: string;
+  generationAttempted: boolean;
+  result: QuestHookTextDebugState["result"];
+  reason: string | null;
+  cacheHitCount: number;
+  cacheMissCount: number;
+  slotMeta: QuestHookTextDebugSlot[];
+}): QuestEconomyState {
+  const slotMeta = params.slotMeta
+    .slice(0, MAX_HOOK_DEBUG_SLOTS)
+    .map((entry) => {
+      const slotType: QuestHookTextSlotType = entry.slotType === "worldPulse" ? "worldPulse" : "actionable";
+      const source: QuestHookTextSource = entry.source === "llm" ? "llm" : "default";
+      return {
+        slotKey: readString(entry.slotKey),
+        slotType,
+        source,
+        cacheHit: entry.cacheHit,
+        skipReason: readString(entry.skipReason) || null,
+      };
+    })
+    .filter((entry) => entry.slotKey.length > 0);
+
+  return {
+    ...params.economy,
+    presentation: {
+      ...params.economy.presentation,
+      hookTextDebug: {
+        lastEvaluatedAtIso: readIsoString(params.nowIso, new Date().toISOString()),
+        generationAttempted: params.generationAttempted,
+        result: params.result,
+        reason: readString(params.reason) || null,
+        cacheHitCount: Math.max(0, Math.trunc(params.cacheHitCount)),
+        cacheMissCount: Math.max(0, Math.trunc(params.cacheMissCount)),
+        slotMeta,
+      },
+    },
   };
 }
 

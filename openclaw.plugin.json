@@ -63,6 +63,25 @@
         "default": 900,
         "description": "TTL for analyzer memory cache; cache is non-authoritative."
       },
+      "richHookTextEnabled": {
+        "type": "boolean",
+        "default": false,
+        "description": "Enable optional short LLM-style hook text overrides for actionable quest slots. Deterministic state remains authoritative."
+      },
+      "hookTextTimeoutMs": {
+        "type": "integer",
+        "minimum": 80,
+        "maximum": 2000,
+        "default": 350,
+        "description": "Timeout for optional quest hook text generation. No retry; fallback is deterministic text."
+      },
+      "hookTextCacheTtlSec": {
+        "type": "integer",
+        "minimum": 60,
+        "maximum": 7200,
+        "default": 900,
+        "description": "TTL for bounded quest hook text cache entries."
+      },
       "debugRuntimeSignals": {
         "type": "boolean",
         "default": false,
@@ -99,6 +118,21 @@
     "analyzerMemoryTtlSec": {
       "label": "Analyzer Memory TTL (sec)",
       "help": "Analyzer cache TTL; does not affect deterministic source-of-truth.",
+      "advanced": true
+    },
+    "richHookTextEnabled": {
+      "label": "Rich Hook Text Enabled",
+      "help": "Optional short hook text lane for actionable slots only. Fallback remains deterministic.",
+      "advanced": true
+    },
+    "hookTextTimeoutMs": {
+      "label": "Hook Text Timeout (ms)",
+      "help": "Short timeout for optional hook text generation. No retry.",
+      "advanced": true
+    },
+    "hookTextCacheTtlSec": {
+      "label": "Hook Text Cache TTL (sec)",
+      "help": "Bounded TTL for hook text cache reuse.",
       "advanced": true
     },
     "debugRuntimeSignals": {
