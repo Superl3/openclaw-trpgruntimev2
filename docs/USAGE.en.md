@@ -15,8 +15,10 @@ Use it from `~/.openclaw/extensions/trpg-runtime` either as a plugin-only overla
 6. `trpg_dice_roll` for deterministic and traceable dice output.
 7. `trpg_state_compact` for lifecycle compaction planning and optional audited apply.
 8. `trpg_scene_components` for Discord component payload generation.
-9. Agent-level gate through `plugins.entries.trpg-runtime.config.allowedAgentIds`.
-10. Path/write safety guards around world-root resolution and patch operations.
+9. `trpg_session_new`, `trpg_session_resume`, `trpg_session_end` for checkpoint panel lifecycle.
+10. `trpg_panel_interact` and `trpg_panel_message_commit` for owner-guarded panel update/edit loops.
+11. Agent-level gate through `plugins.entries.trpg-runtime.config.allowedAgentIds`.
+12. Path/write safety guards around world-root resolution and patch operations.
 
 ## 2.1) World-data-driven behavior
 

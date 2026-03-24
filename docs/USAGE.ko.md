@@ -15,8 +15,10 @@
 6. `trpg_dice_roll`: 재현 가능한 주사위 결과 생성.
 7. `trpg_state_compact`: 라이프사이클 압축 계획과 선택적 감사 적용.
 8. `trpg_scene_components`: Discord 컴포넌트 페이로드 생성.
-9. `plugins.entries.trpg-runtime.config.allowedAgentIds` 기반 에이전트 실행 제한.
-10. world root 해석/패치 작업에 대한 경로 및 쓰기 가드.
+9. `trpg_session_new`, `trpg_session_resume`, `trpg_session_end`: 체크포인트 패널 라이프사이클.
+10. `trpg_panel_interact`, `trpg_panel_message_commit`: owner 제한 패널 갱신/edit 루프.
+11. `plugins.entries.trpg-runtime.config.allowedAgentIds` 기반 에이전트 실행 제한.
+12. world root 해석/패치 작업에 대한 경로 및 쓰기 가드.
 
 ## 2.1) World-data-driven 동작
 

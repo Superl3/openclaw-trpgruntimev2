@@ -10,6 +10,8 @@ Structured TRPG runtime plugin for OpenClaw.
 - `trpg_hooks_query` - dormant hook and reveal candidate query
 - `trpg_dice_roll` - deterministic/traceable dice roll output
 - `trpg_state_compact` - lifecycle compaction dry-run/audited apply planner
+- `trpg_session_new` / `trpg_session_resume` / `trpg_session_end` - session panel lifecycle
+- `trpg_panel_interact` / `trpg_panel_message_commit` - owner-guarded panel callback + message metadata sync
 
 All tools return JSON-shaped output (`details`) and JSON text in `content`.
 

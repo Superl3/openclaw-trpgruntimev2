@@ -13,6 +13,7 @@
         "tools": {
           "allow": [
             "read",
+            "message",
             "sessions_list",
             "sessions_history",
             "sessions_spawn",
@@ -24,7 +25,12 @@
             "trpg_hooks_query",
             "trpg_dice_roll",
             "trpg_state_compact",
-            "trpg_scene_components"
+            "trpg_scene_components",
+            "trpg_session_new",
+            "trpg_session_resume",
+            "trpg_session_end",
+            "trpg_panel_interact",
+            "trpg_panel_message_commit"
           ],
           "deny": [
             "exec",
@@ -33,7 +39,6 @@
             "edit",
             "apply_patch",
             "sessions_send",
-            "message",
             "gateway",
             "cron",
             "nodes",
