@@ -681,6 +681,44 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
       session,
       createTraceEvent({
         lane: "engine",
+        type: "engine.time.advanced",
+        tsIso: nowIso,
+        data: {
+          fromWorldNowIso: session.deterministicLoop.time.worldNowIso,
+          toWorldNowIso: nextLoop.time.worldNowIso,
+          deltaTimeSec: resolution.deltaTimeSec,
+          worldElapsedSec: nextLoop.time.worldElapsedSec,
+        },
+      }),
+    );
+
+    session = appendTraceEvent(
+      session,
+      createTraceEvent({
+        lane: "engine",
+        type: "engine.temporal.updated",
+        tsIso: nowIso,
+        data: {
+          locationId: resolution.temporalSummary.locationId,
+          memoryTouched: resolution.temporalSummary.memoryTouched,
+          memoryDecayed: resolution.temporalSummary.memoryDecayed,
+          freshnessUpdated: resolution.temporalSummary.freshnessUpdated,
+          freshnessDecayed: resolution.temporalSummary.freshnessDecayed,
+          tracesCreated: resolution.temporalSummary.tracesCreated,
+          tracesUpdated: resolution.temporalSummary.tracesUpdated,
+          tracesDecayed: resolution.temporalSummary.tracesDecayed,
+          tracesExpired: resolution.temporalSummary.tracesExpired,
+          locationShifted: resolution.temporalSummary.locationShifted,
+          locationSnapshot: resolution.temporalSummary.locationSnapshot,
+          qualitative: resolution.temporalSummary.qualitative,
+        },
+      }),
+    );
+
+    session = appendTraceEvent(
+      session,
+      createTraceEvent({
+        lane: "engine",
         type: "engine.action.resolved",
         tsIso: nowIso,
         data: {
@@ -693,6 +731,8 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
           analyzerWeight: selectedAnalyzerWeight,
           fallbackStrategy: selectedFallbackStrategy,
           preResolvedClaimUntrusted,
+          locationId: nextLoop.scene.locationId,
+          temporalLocationShifted: resolution.temporalSummary.locationShifted,
           sceneTransitioned,
         },
       }),

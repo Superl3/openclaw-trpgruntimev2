@@ -30,6 +30,14 @@
 - analyzerMemory는 bounded TTL 캐시이며 deterministic source-of-truth가 아닙니다.
 - 기본 UX에서는 raw drift 수치를 숨기고, 디버깅 시에만 `debugRuntimeSignals=true`를 사용하세요.
 
+## 2.3) Temporal systems 메모 (Checkpoint 5)
+
+- `delta_time`가 memory/freshness/residual trace/location drift를 deterministic하게 갱신합니다.
+- temporal 갱신 순서는 고정됩니다: decay -> action footprint -> location projection -> trace append -> panel refresh.
+- `infoFreshness`는 정보의 신선도만 표현하며, freshness 감소가 fact 삭제를 의미하지는 않습니다.
+- persistent location drift는 명시적 `locationId`가 있을 때만 적용됩니다. `locationId`가 없는 scene도 정상 동작합니다.
+- 기본 UX는 정성 신호 위주이며, raw temporal 수치는 `debugRuntimeSignals=true`에서만 노출됩니다.
+
 ## 2.1) World-data-driven 동작
 
 - 런타임 프롬프트 훅의 하드코딩된 설정/시나리오 주입 로직은 제거되었습니다.

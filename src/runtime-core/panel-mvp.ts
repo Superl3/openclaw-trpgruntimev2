@@ -1,4 +1,5 @@
 import { actionLabelFor, collectButtonActionIds, feasibilityLabel } from "./scene-loop.js";
+import { buildTemporalQualitativeSummary } from "./temporal-systems.js";
 import type { InteractionRouteKey, InteractionRouteRecord, SessionState } from "./types.js";
 
 export type PanelMessageMode = "send" | "edit";
@@ -62,6 +63,7 @@ function mainSectionText(session: SessionState): string {
   const lines = [
     "**Main UI**",
     `장면: ${loop.scene.title} (${loop.scene.sceneId}) / phase=${loop.scene.phase}`,
+    `위치: ${loop.scene.locationId ?? "(미지정)"}`,
     `Beat ${String(loop.beat.beatIndex)}: ${loop.beat.objective}`,
     `압력: ${String(loop.scene.pressure)} (${loop.scene.riskTier})`,
   ];
@@ -106,6 +108,10 @@ function driftQualitativeLabel(value: number): string {
 function subSectionText(session: SessionState, debugRuntimeSignals: boolean): string {
   const loop = session.deterministicLoop;
   const lines = ["**Sub UI**"];
+  const temporalSummary = buildTemporalQualitativeSummary({
+    temporal: loop.temporal,
+    locationId: loop.scene.locationId,
+  });
 
   if (session.status === "ended") {
     lines.push("세션 종료 상태다.");
@@ -141,9 +147,19 @@ function subSectionText(session: SessionState, debugRuntimeSignals: boolean): st
     `행동 성향 추세: warm=${driftQualitativeLabel(drift.warmth)} bold=${driftQualitativeLabel(drift.boldness)} caution=${driftQualitativeLabel(drift.caution)} altruism=${driftQualitativeLabel(drift.altruism)} aggression=${driftQualitativeLabel(drift.aggression)} humor=${driftQualitativeLabel(drift.humor)}`,
   );
 
+  lines.push(
+    `시간/기억: ${temporalSummary.memory}`,
+    `정보 신선도: ${temporalSummary.freshness}`,
+    `잔여 흔적: ${temporalSummary.traces}`,
+    `지역 상태: ${temporalSummary.location}`,
+  );
+
   if (debugRuntimeSignals) {
     lines.push(
       `debug.behavioral_drift.raw: warm=${drift.warmth.toFixed(2)} bold=${drift.boldness.toFixed(2)} caution=${drift.caution.toFixed(2)} altruism=${drift.altruism.toFixed(2)} aggression=${drift.aggression.toFixed(2)} humor=${drift.humor.toFixed(2)}`,
+    );
+    lines.push(
+      `debug.temporal.raw: location=${temporalSummary.debug.locationId ?? "none"} memory=${String(temporalSummary.debug.memoryCount)} max_familiarity=${String(temporalSummary.debug.maxFamiliarity)} max_freshness=${String(temporalSummary.debug.maxFreshness)} traces=${String(temporalSummary.debug.activeTraceCount)} max_trace=${String(temporalSummary.debug.maxTraceIntensity)} location_state=${temporalSummary.debug.locationState ? `tension=${String(temporalSummary.debug.locationState.tension)} alertness=${String(temporalSummary.debug.locationState.alertness)} accessibility=${String(temporalSummary.debug.locationState.accessibility)}` : "none"}`,
     );
   }
 

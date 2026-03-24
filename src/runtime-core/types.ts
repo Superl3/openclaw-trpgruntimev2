@@ -32,6 +32,8 @@ export type RuntimeTraceEventType =
   | "panel.commit.success"
   | "panel.commit.failed"
   | "panel.commit.expired"
+  | "engine.time.advanced"
+  | "engine.temporal.updated"
   | "engine.action.resolved";
 
 export type RuntimeTraceEvent = {

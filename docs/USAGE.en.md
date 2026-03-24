@@ -30,6 +30,14 @@ Use it from `~/.openclaw/extensions/trpg-runtime` either as a plugin-only overla
 - Analyzer memory is bounded TTL cache, not deterministic source-of-truth.
 - Raw drift values are hidden in default UX; set `debugRuntimeSignals=true` only for debugging.
 
+## 2.3) Temporal systems notes (Checkpoint 5)
+
+- `delta_time` now drives deterministic temporal updates for memory, freshness, residual traces, and local location drift.
+- Temporal update order is fixed: decay -> action footprint -> location projection -> trace append -> panel refresh.
+- `infoFreshness` tracks staleness only; freshness decay does not imply fact deletion.
+- Persistent location drift requires explicit `locationId`; scenes without `locationId` remain valid and continue running.
+- `debugRuntimeSignals=true` reveals raw temporal metrics; default UX keeps qualitative cues.
+
 ## 2.1) World-data-driven behavior
 
 - Hardcoded setting/scenario content has been removed from runtime prompt hooks.

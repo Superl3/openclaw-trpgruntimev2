@@ -16,6 +16,7 @@ import {
   parsePanelCustomId,
   type PanelMessageMode,
 } from "../../runtime-core/panel-mvp.js";
+import { buildTemporalQualitativeSummary } from "../../runtime-core/temporal-systems.js";
 import { ensureDeterministicSceneLoopState } from "../../runtime-core/scene-loop.js";
 import { appendTraceEvent, createTraceEvent, ensureTraceState } from "../../runtime-core/trace.js";
 import { JsonFileStateStore } from "../../runtime-store/file-state-store.js";
@@ -490,6 +491,18 @@ function preparePanelDispatch(params: {
     errorHint: params.errorHint,
     debugRuntimeSignals: params.debugRuntimeSignals,
   });
+  const temporalSummary = buildTemporalQualitativeSummary({
+    temporal: loop.temporal,
+    locationId: loop.scene.locationId,
+  });
+  const temporalSummaryPayload = params.debugRuntimeSignals
+    ? temporalSummary
+    : {
+        memory: temporalSummary.memory,
+        traces: temporalSummary.traces,
+        freshness: temporalSummary.freshness,
+        location: temporalSummary.location,
+      };
 
   const preparedSession = appendTraceEvent(
     {
@@ -528,6 +541,7 @@ function preparePanelDispatch(params: {
         sessionId: params.session.sessionId,
         ownerId: params.session.ownerId,
         sceneId: params.session.sceneId,
+        locationId: loop.scene.locationId,
         uiVersion: params.session.uiVersion,
         status: params.session.status,
         worldNowIso: loop.time.worldNowIso,
@@ -540,6 +554,7 @@ function preparePanelDispatch(params: {
         beatId: loop.beat.beatId,
         exchangeId: loop.exchange?.exchangeId ?? null,
         deltaTimeSec: loop.time.lastDeltaSec,
+        temporalSummary: temporalSummaryPayload,
       },
       sub: {
         availableButtons,

@@ -1,3 +1,10 @@
+import {
+  ensureTemporalRuntimeState,
+  runTemporalUpdatePipeline,
+  type TemporalRuntimeState,
+  type TemporalUpdateSummary,
+} from "./temporal-systems.js";
+
 export type ActionFeasibility = "possible" | "currently_impossible" | "reckless" | "impossible";
 
 export type ScenePhase = "active" | "transitioning" | "resolved";
@@ -19,6 +26,7 @@ export type DeterministicActionId =
 
 export type SceneState = {
   sceneId: string;
+  locationId: string | null;
   sceneIndex: number;
   title: string;
   phase: ScenePhase;
@@ -116,6 +124,7 @@ export type DeterministicSceneLoopState = {
   behavioralDrift: BehavioralDriftState;
   intentInertia: IntentInertiaState;
   analyzerMemory: AnalyzerMemoryState;
+  temporal: TemporalRuntimeState;
   actionPalette: ActionPaletteEntry[];
 };
 
@@ -137,6 +146,7 @@ export type DeterministicActionResolution = {
   riskNote: string | null;
   reactionChain: string[];
   exchange: ExchangeState;
+  temporalSummary: TemporalUpdateSummary;
 };
 
 const DEFAULT_SCENE_ID = "scene-bootstrap";
@@ -561,6 +571,7 @@ export function createInitialDeterministicSceneLoop(params: {
   const seed: DeterministicSceneLoopState = {
     scene: {
       sceneId,
+      locationId: null,
       sceneIndex,
       title: sceneTitle(sceneIndex),
       phase: "active",
@@ -601,6 +612,7 @@ export function createInitialDeterministicSceneLoop(params: {
       lastIntentSignals: [],
       expiresAtIso: nextAnalyzerMemoryExpiry(params.nowIso),
     },
+    temporal: ensureTemporalRuntimeState(undefined, params.nowIso),
     actionPalette: [],
   };
 
@@ -621,6 +633,7 @@ export function ensureDeterministicSceneLoopState(value: unknown, params: {
   const pressure = clampInt(readInt(sceneObj.pressure, initial.scene.pressure), 0, 100);
   const scene: SceneState = {
     sceneId,
+    locationId: readString(sceneObj.locationId) || null,
     sceneIndex,
     title: readString(sceneObj.title, sceneTitle(sceneIndex)),
     phase:
@@ -732,6 +745,8 @@ export function ensureDeterministicSceneLoopState(value: unknown, params: {
         expiresAtIso: analyzerMemoryRaw.expiresAtIso ?? nextAnalyzerMemoryExpiry(params.nowIso),
       };
 
+  const temporal = ensureTemporalRuntimeState(root.temporal, time.worldNowIso || params.nowIso);
+
   const exchangeObj = toRecord(root.exchange);
   const exchange: ExchangeState | null = Object.keys(exchangeObj).length
     ? {
@@ -773,6 +788,7 @@ export function ensureDeterministicSceneLoopState(value: unknown, params: {
     behavioralDrift,
     intentInertia,
     analyzerMemory,
+    temporal,
     actionPalette: [],
   };
 
@@ -941,10 +957,36 @@ export function resolveDeterministicSceneAction(input: DeterministicActionInput)
       const nextSceneIndex = nextScene.sceneIndex + 1;
       nextScene.sceneIndex = nextSceneIndex;
       nextScene.sceneId = `scene-${String(nextSceneIndex).padStart(3, "0")}`;
+      nextScene.locationId = null;
       nextScene.title = sceneTitle(nextSceneIndex);
       nextScene.phase = "active";
       nextScene.npcAvailable = false;
       nextScene.pressure = clampInt(Math.round(nextScene.pressure * 0.7), 5, 100);
+    }
+  }
+
+  const worldNowIso = addSecondsToIso(current.time.worldNowIso || input.nowIso, deltaTimeSec);
+  const temporalPipeline = runTemporalUpdatePipeline({
+    temporal: current.temporal,
+    sceneId: nextScene.sceneId,
+    locationId: nextScene.locationId,
+    actionId: resolvedAction.resolvedActionId,
+    classification: classified.classification,
+    deltaTimeSec,
+    nowIso: worldNowIso,
+    ongoingAction,
+  });
+
+  if (temporalPipeline.projection) {
+    nextScene.pressure = clampInt(
+      Math.round(nextScene.pressure * 0.75 + temporalPipeline.projection.tension * 0.25),
+      0,
+      100,
+    );
+    if (temporalPipeline.projection.alertness >= 78) {
+      nextScene.npcAvailable = false;
+    } else if (temporalPipeline.projection.alertness <= 45 && classified.classification !== "reckless") {
+      nextScene.npcAvailable = true;
     }
   }
 
@@ -993,7 +1035,6 @@ export function resolveDeterministicSceneAction(input: DeterministicActionInput)
     occurredAtIso: input.nowIso,
   };
 
-  const worldNowIso = addSecondsToIso(current.time.worldNowIso || input.nowIso, deltaTimeSec);
   const nextLoop: DeterministicSceneLoopState = {
     scene: nextScene,
     beat,
@@ -1011,6 +1052,7 @@ export function resolveDeterministicSceneAction(input: DeterministicActionInput)
       ...current.analyzerMemory,
       expiresAtIso: current.analyzerMemory.expiresAtIso ?? nextAnalyzerMemoryExpiry(input.nowIso),
     },
+    temporal: temporalPipeline.nextTemporal,
     actionPalette: [],
   };
 
@@ -1026,5 +1068,6 @@ export function resolveDeterministicSceneAction(input: DeterministicActionInput)
     riskNote,
     reactionChain,
     exchange,
+    temporalSummary: temporalPipeline.summary,
   };
 }

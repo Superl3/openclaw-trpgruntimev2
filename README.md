@@ -13,6 +13,7 @@ Structured TRPG runtime plugin for OpenClaw.
 - `trpg_session_new` / `trpg_session_resume` / `trpg_session_end` - session panel lifecycle
 - `trpg_panel_interact` / `trpg_panel_message_commit` - owner-guarded panel callback + message metadata sync
 - Runtime hardening: bounded session trace, stale interaction codes, and `dispatchId`-based panel commit safety
+- Checkpoint 5 temporal core: deterministic memory/freshness/residual-trace/location drift driven by `delta_time`
 
 All tools return JSON-shaped output (`details`) and JSON text in `content`.
 
