@@ -1,6 +1,30 @@
 import { createHash } from "node:crypto";
 import type { TrpgRuntimeConfig } from "./config.js";
+import type { WorldSeed } from "./runtime-core/types.js";
 import { loadStructuredWorldFile } from "./world-store.js";
+import {
+  buildFactionCanonFingerprint,
+  buildFactionCanonReferenceIndexFromWorldSeed,
+  detectFactionCanonScaffoldDrift,
+  validateFactionCanon,
+  type FactionCanonDiagnostic,
+  type FactionCanonEntry,
+  type FactionCanonFile,
+} from "./faction-canon.js";
+import { buildWorldSeedFingerprint, validateWorldSeed } from "./runtime-core/world-seed.js";
+
+const FACTION_CANON_PATH = "canon/factions.yaml";
+const WORLD_SEED_REFERENCE_CANDIDATE_PATHS = [
+  "canon/world-seed.yaml",
+  "canon/world-seed.yml",
+  "canon/world-seed.json",
+  "state/world-seed.yaml",
+  "state/world-seed.yml",
+  "state/world-seed.json",
+  "state/world-seeds.yaml",
+  "state/world-seeds.yml",
+  "state/world-seeds.json",
+] as const;
 
 export type FactionTickTrigger = "turn" | "scene_transition" | "session" | "downtime";
 export type FactionTickMode = "read-only" | "dry-run";
@@ -67,6 +91,8 @@ export type FactionPatchDraft = {
   operations: Array<{ op: "set"; file: string; pointer: string; value: unknown }>;
 };
 
+export type FactionCanonicalStatus = "used" | "missing" | "invalid" | "error";
+
 export type FactionTickResult = {
   ok: boolean;
   engine_version: "faction-engine-v1";
@@ -82,6 +108,32 @@ export type FactionTickResult = {
     rumors: string[];
     access_changes: string[];
   };
+  canonical_scaffold: {
+    status: FactionCanonicalStatus;
+    source_path: string | null;
+    diagnostics: FactionCanonDiagnostic[];
+    total_factions: number;
+    enabled_factions: number;
+    provenance: {
+      source_policy: {
+        seed: "seed_bootstrap_only";
+        canon: "canon_authoritative";
+      };
+      seed_source_path: string | null;
+      seed_fingerprint: string | null;
+      canon_source_path: string | null;
+      canon_fingerprint: string | null;
+      drift_status: "unknown" | "aligned" | "drifted" | "incompatible" | "missing_seed" | "missing_canon" | "invalid_seed" | "invalid_canon";
+      drift_summary: {
+        added_in_seed: number;
+        missing_in_seed: number;
+        changed_scaffold: number;
+        incompatible: number;
+      };
+    };
+  };
+  no_op: boolean;
+  no_op_reason: string | null;
   patch_draft?: FactionPatchDraft;
 };
 
@@ -112,6 +164,98 @@ function clamp(v: number, lo: number, hi: number): number {
 }
 function h(input: string): string {
   return createHash("sha256").update(input, "utf8").digest("hex").slice(0, 10);
+}
+
+function toDiagnostics(
+  diagnostics: FactionCanonDiagnostic[],
+  sourcePath: string,
+): FactionCanonDiagnostic[] {
+  return diagnostics.slice(0, 24).map((entry) => ({
+    code: entry.code,
+    message: entry.message,
+    path: entry.path ? `${sourcePath}${entry.path}` : sourcePath,
+    severity: entry.severity,
+  }));
+}
+
+async function loadWorldSeedReferenceIndex(params: {
+  worldRoot: string;
+  cfg: TrpgRuntimeConfig;
+}): Promise<{
+  references: { worldId: string; locationIds: Set<string>; pressureIds: Set<string> } | null;
+  diagnostics: FactionCanonDiagnostic[];
+  seedSourcePath: string | null;
+  seedFingerprint: string | null;
+  seed: WorldSeed | null;
+  seedStatus: "used" | "missing" | "invalid" | "error";
+}> {
+  for (const candidatePath of WORLD_SEED_REFERENCE_CANDIDATE_PATHS) {
+    let loaded;
+    try {
+      loaded = await loadStructuredWorldFile(params.worldRoot, candidatePath, {
+        allowMissing: true,
+        maxReadBytes: params.cfg.maxReadBytes,
+      });
+    } catch (error) {
+      return {
+        references: null,
+        diagnostics: [
+          {
+            code: "world_seed_reference_load_error",
+            message: error instanceof Error ? error.message : String(error),
+            path: candidatePath,
+            severity: "warn",
+          },
+        ],
+        seedSourcePath: candidatePath,
+        seedFingerprint: null,
+        seed: null,
+        seedStatus: "error",
+      };
+    }
+    if (!loaded.exists) {
+      continue;
+    }
+
+    const validated = validateWorldSeed(loaded.parsed);
+    if (!validated.ok) {
+      return {
+        references: null,
+        diagnostics: toDiagnostics(validated.issues, candidatePath).map((entry) => ({
+          ...entry,
+          code: `world_seed_reference_${entry.code}`,
+          severity: entry.severity === "error" ? "warn" : entry.severity,
+        })),
+        seedSourcePath: candidatePath,
+        seedFingerprint: null,
+        seed: null,
+        seedStatus: "invalid",
+      };
+    }
+
+    const index = buildFactionCanonReferenceIndexFromWorldSeed(validated.seed);
+    return {
+      references: {
+        worldId: index.worldId,
+        locationIds: index.locationIds,
+        pressureIds: index.pressureIds,
+      },
+      diagnostics: [],
+      seedSourcePath: candidatePath,
+      seedFingerprint: buildWorldSeedFingerprint(validated.seed),
+      seed: validated.seed,
+      seedStatus: "used",
+    };
+  }
+
+  return {
+    references: null,
+    diagnostics: [],
+    seedSourcePath: null,
+    seedFingerprint: null,
+    seed: null,
+    seedStatus: "missing",
+  };
 }
 
 function inferPresence(raw: string): "low" | "medium" | "high" {
@@ -255,65 +399,94 @@ type Agenda = {
   minor_motion_streak: number;
 };
 
-function parseFactions(parsed: unknown, zoneLookup: Record<string, string>): Faction[] {
+function visibilityFromPosture(
+  posture: FactionCanonEntry["posture"],
+): { public_presence: "low" | "medium" | "high"; covert_presence: "low" | "medium" | "high" } {
+  if (posture === "assertive") {
+    return {
+      public_presence: "high",
+      covert_presence: "medium",
+    };
+  }
+  if (posture === "low_profile") {
+    return {
+      public_presence: "low",
+      covert_presence: "high",
+    };
+  }
+  return {
+    public_presence: "medium",
+    covert_presence: "medium",
+  };
+}
+
+function reachFromPosture(posture: FactionCanonEntry["posture"]): ZoneReachLevel {
+  if (posture === "assertive") {
+    return "high";
+  }
+  if (posture === "low_profile") {
+    return "low";
+  }
+  return "medium";
+}
+
+function instabilityFromFactionCanon(entry: FactionCanonEntry): number {
+  const postureOffset = entry.posture === "assertive" ? 14 : entry.posture === "low_profile" ? -8 : 0;
+  return clamp(Math.round(24 + Math.abs(entry.resources - entry.heat) * 0.45 + postureOffset), 0, 100);
+}
+
+function parseFactions(canon: FactionCanonFile, zoneLookup: Record<string, string>): Faction[] {
   const out: Faction[] = [];
-  const arr = Array.isArray(toObj(parsed).factions) ? (toObj(parsed).factions as unknown[]) : [];
-  for (const entry of arr) {
-    const o = toObj(entry);
-    const id = s(o.id || o.faction_id);
-    if (!id) continue;
+  for (const entry of canon.factions) {
+    if (!entry.enabled) {
+      continue;
+    }
 
-    const objectives = toObj(o.objectives);
-    const methods = toObj(o.methods);
-    const visibility = toObj(o.visibility);
-    const pressure = toObj(o.pressure);
-    const hooks = toObj(o.event_hooks);
-
-    const defaultLocations = list(hooks.default_locations);
-    const defaultZones = unique([
-      ...list(hooks.default_zones).map((zoneId) => resolveZoneId(zoneId, zoneLookup)),
-      ...defaultLocations.map((locationName) => resolveZoneId(locationName, zoneLookup)),
-    ]).filter(Boolean);
-
+    const defaultLocations = unique(entry.homeLocationIds);
+    const defaultZones = unique(
+      entry.homeLocationIds
+        .map((rawId) => resolveZoneId(rawId, zoneLookup))
+        .filter(Boolean),
+    );
+    const reachLevel = reachFromPosture(entry.posture);
     const reach: Record<string, ZoneReachLevel> = {};
-    const reachRaw = toObj(o.faction_reach);
-    for (const [rawZone, rawLevel] of Object.entries(reachRaw)) {
-      const zoneId = resolveZoneId(rawZone, zoneLookup);
-      if (!zoneId) continue;
-      const level = normalizeReachLevel(rawLevel);
-      if (level !== "none") {
-        reach[zoneId] = level;
-      }
+    for (const zoneId of defaultZones) {
+      reach[zoneId] = reachLevel;
     }
 
-    for (const zoneId of defaultZones) {
-      if (!reach[zoneId]) {
-        reach[zoneId] = "medium";
-      }
-    }
+    const operationMethods = unique(
+      entry.pressureAffinityIds.map((pressureId) => `stabilize pressure ${pressureId}`),
+    );
+    const shortGoals = unique(
+      entry.pressureAffinityIds.map((pressureId) => `maintain leverage on ${pressureId}`),
+    );
+    const midGoals = unique(
+      entry.homeLocationIds.map((locationId) => `hold influence around ${locationId}`),
+    );
 
     out.push({
-      id,
-      name: s(o.name) || id,
+      id: entry.factionId,
+      name: entry.name,
       objectives: {
-        short: list(objectives.short).length ? list(objectives.short) : [s(o.current_goal || o.public_position || "maintain leverage")],
-        mid: list(objectives.mid).length ? list(objectives.mid) : [s(o.hidden_objective || "expand influence")],
+        short: shortGoals.length ? shortGoals.slice(0, 3) : ["maintain leverage"],
+        mid: midGoals.length ? midGoals.slice(0, 3) : ["expand influence"],
       },
-      methods: list(methods.preferred_moves).length ? list(methods.preferred_moves) : [s(o.public_position || "pressure maneuver")],
-      assets: list(o.assets),
-      pressure: clamp(n(pressure.current, n(o.pressure, 50)), 0, 100),
-      heat: clamp(n(o.heat, 45), 0, 100),
-      instability: clamp(n(o.instability, 35), 0, 100),
-      visibility: {
-        public_presence: inferPresence(s(visibility.public_presence)),
-        covert_presence: inferPresence(s(visibility.covert_presence)),
-      },
+      methods: operationMethods.length ? operationMethods.slice(0, 4) : ["pressure maneuver"],
+      assets: [`resources:${String(entry.resources)}`, `heat:${String(entry.heat)}`],
+      pressure: clamp(Math.round(entry.resources * 0.62 + entry.heat * 0.38), 0, 100),
+      heat: clamp(entry.heat, 0, 100),
+      instability: instabilityFromFactionCanon(entry),
+      visibility: visibilityFromPosture(entry.posture),
       hooks: {
         default_locations: defaultLocations,
         default_zones: defaultZones,
-        default_npcs: list(hooks.default_npcs),
-        small: list(hooks.small_motion_signals).length ? list(hooks.small_motion_signals) : ["rumor drift", "presence shift"],
-        major: list(hooks.major_motion_signals).length ? list(hooks.major_motion_signals) : ["access lockdown", "institution crackdown"],
+        default_npcs: [],
+        small: entry.pressureAffinityIds.length
+          ? entry.pressureAffinityIds.slice(0, 3).map((pressureId) => `${pressureId} pressure drift`)
+          : ["rumor drift", "presence shift"],
+        major: entry.pressureAffinityIds.length
+          ? entry.pressureAffinityIds.slice(0, 3).map((pressureId) => `${pressureId} pressure surge`)
+          : ["access lockdown", "institution crackdown"],
       },
       reach,
     });
@@ -370,12 +543,139 @@ function formatAccess(controls: unknown): string[] {
   });
 }
 
+function buildNoopTick(trigger: FactionTickTrigger): { current: string; previous: string; advanced: boolean; reason: string } {
+  const now = new Date().toISOString();
+  return {
+    current: `${trigger}:no-op:${now}`,
+    previous: `${trigger}:no-op:${now}`,
+    advanced: false,
+    reason: "no-op",
+  };
+}
+
+function buildCanonicalScaffoldProvenance(params: {
+  seedStatus: "used" | "missing" | "invalid" | "error";
+  seedSourcePath: string | null;
+  seedFingerprint: string | null;
+  canonStatus: FactionCanonicalStatus;
+  canonSourcePath: string | null;
+  canonFingerprint: string | null;
+  drift?: {
+    status: "aligned" | "drifted" | "incompatible";
+    summary: {
+      addedInSeed: number;
+      missingInSeed: number;
+      changedScaffold: number;
+      incompatible: number;
+    };
+  } | null;
+}): FactionTickResult["canonical_scaffold"]["provenance"] {
+  const driftStatus: FactionTickResult["canonical_scaffold"]["provenance"]["drift_status"] =
+    params.seedStatus === "invalid" || params.seedStatus === "error"
+      ? "invalid_seed"
+      : params.canonStatus === "invalid" || params.canonStatus === "error"
+        ? "invalid_canon"
+        : params.seedStatus === "missing"
+          ? "missing_seed"
+          : params.canonStatus === "missing"
+            ? "missing_canon"
+            : params.drift?.status ?? "unknown";
+
+  return {
+    source_policy: {
+      seed: "seed_bootstrap_only",
+      canon: "canon_authoritative",
+    },
+    seed_source_path: params.seedSourcePath,
+    seed_fingerprint: params.seedFingerprint,
+    canon_source_path: params.canonSourcePath,
+    canon_fingerprint: params.canonFingerprint,
+    drift_status: driftStatus,
+    drift_summary: {
+      added_in_seed: params.drift?.summary.addedInSeed ?? 0,
+      missing_in_seed: params.drift?.summary.missingInSeed ?? 0,
+      changed_scaffold: params.drift?.summary.changedScaffold ?? 0,
+      incompatible: params.drift?.summary.incompatible ?? 0,
+    },
+  };
+}
+
+function createNoopFactionTickResult(params: {
+  mode: FactionTickMode;
+  trigger: FactionTickTrigger;
+  status: FactionCanonicalStatus;
+  sourcePath: string | null;
+  diagnostics: FactionCanonDiagnostic[];
+  noOpReason: string;
+  totalFactions?: number;
+  enabledFactions?: number;
+  seedStatus?: "used" | "missing" | "invalid" | "error";
+  seedSourcePath?: string | null;
+  seedFingerprint?: string | null;
+  canonFingerprint?: string | null;
+}): FactionTickResult {
+  const provenance = buildCanonicalScaffoldProvenance({
+    seedStatus: params.seedStatus ?? "missing",
+    seedSourcePath: params.seedSourcePath ?? null,
+    seedFingerprint: params.seedFingerprint ?? null,
+    canonStatus: params.status,
+    canonSourcePath: params.sourcePath,
+    canonFingerprint: params.canonFingerprint ?? null,
+    drift: null,
+  });
+
+  return {
+    ok: true,
+    engine_version: "faction-engine-v1",
+    mode: params.mode,
+    trigger: params.trigger,
+    tick: {
+      ...buildNoopTick(params.trigger),
+      reason: params.noOpReason,
+    },
+    generated_events: [],
+    emission_summary: {
+      drop_now: [],
+      delayed: [],
+      silent: [],
+    },
+    world_motion_summary: {
+      pressure: [],
+      observations: [params.noOpReason],
+      npc_posture: [],
+      rumors: [],
+      access_changes: [],
+    },
+    canonical_scaffold: {
+      status: params.status,
+      source_path: params.sourcePath,
+      diagnostics: params.diagnostics.slice(0, 24),
+      total_factions: Math.max(0, Math.trunc(params.totalFactions ?? 0)),
+      enabled_factions: Math.max(0, Math.trunc(params.enabledFactions ?? 0)),
+      provenance,
+    },
+    no_op: true,
+    no_op_reason: params.noOpReason,
+  };
+}
+
 export function formatFactionPromptSummary(result: FactionTickResult): string {
   const lines: string[] = [
     "[FACTION_ENGINE_WORLD_MOTION]",
     "Causality-first offscreen motion. Use as context and pressure, never as mandatory menu choices.",
     `tick=${result.tick.current} advanced=${result.tick.advanced ? "yes" : "no"} events=${result.generated_events.length}`,
+    `canonical=${result.canonical_scaffold.status} enabled=${String(result.canonical_scaffold.enabled_factions)}/${String(result.canonical_scaffold.total_factions)} no_op=${result.no_op ? "yes" : "no"}`,
+    `canonical_drift=${result.canonical_scaffold.provenance.drift_status} seed_fp=${result.canonical_scaffold.provenance.seed_fingerprint ?? "none"} canon_fp=${result.canonical_scaffold.provenance.canon_fingerprint ?? "none"}`,
   ];
+  if (result.no_op_reason) {
+    lines.push(`no_op_reason=${result.no_op_reason}`);
+  }
+  if (result.canonical_scaffold.diagnostics.length) {
+    lines.push("diagnostics:");
+    for (const item of result.canonical_scaffold.diagnostics.slice(0, 3)) {
+      lines.push(`- [${item.severity}] ${item.code}: ${item.message}`);
+    }
+  }
   if (result.world_motion_summary.pressure.length) {
     lines.push("pressure:");
     for (const item of result.world_motion_summary.pressure.slice(0, 4)) lines.push(`- ${item}`);
@@ -410,20 +710,160 @@ export async function runFactionEngineTick(params: { worldRoot: string; cfg: Trp
   const includeUndropped = b(params.input?.includeUndropped);
   const forceAdvance = b(params.input?.forceAdvance);
 
-  const [factionsFile, agendasFile, pressureFile, eventsFile, sceneFile, clockFile, travelFile] = await Promise.all([
-    loadStructuredWorldFile(params.worldRoot, "canon/factions.yaml", { allowMissing: false, maxReadBytes: params.cfg.maxReadBytes }),
-    loadStructuredWorldFile(params.worldRoot, "state/faction-agendas.yaml", { allowMissing: true, maxReadBytes: params.cfg.maxReadBytes }),
-    loadStructuredWorldFile(params.worldRoot, "state/world-pressure.yaml", { allowMissing: true, maxReadBytes: params.cfg.maxReadBytes }),
-    loadStructuredWorldFile(params.worldRoot, "state/world-events.yaml", { allowMissing: true, maxReadBytes: params.cfg.maxReadBytes }),
-    loadStructuredWorldFile(params.worldRoot, "state/current-scene.yaml", { allowMissing: true, maxReadBytes: params.cfg.maxReadBytes }),
-    loadStructuredWorldFile(params.worldRoot, "state/world-clock.yaml", { allowMissing: true, maxReadBytes: params.cfg.maxReadBytes }),
-    loadStructuredWorldFile(params.worldRoot, "state/travel-state.yaml", { allowMissing: true, maxReadBytes: params.cfg.maxReadBytes }),
+  let factionsFile;
+  try {
+    factionsFile = await loadStructuredWorldFile(params.worldRoot, FACTION_CANON_PATH, {
+      allowMissing: true,
+      maxReadBytes: params.cfg.maxReadBytes,
+    });
+  } catch (error) {
+    return createNoopFactionTickResult({
+      mode,
+      trigger,
+      status: "error",
+      sourcePath: FACTION_CANON_PATH,
+      diagnostics: [
+        {
+          code: "faction_canon_load_error",
+          message: error instanceof Error ? error.message : String(error),
+          path: FACTION_CANON_PATH,
+          severity: "error",
+        },
+      ],
+      noOpReason: "Faction canonical scaffold load failed.",
+      seedStatus: "missing",
+      seedSourcePath: null,
+      seedFingerprint: null,
+    });
+  }
+
+  const referenceLoad = await loadWorldSeedReferenceIndex({
+    worldRoot: params.worldRoot,
+    cfg: params.cfg,
+  });
+
+  if (!factionsFile.exists) {
+    return createNoopFactionTickResult({
+      mode,
+      trigger,
+      status: "missing",
+      sourcePath: FACTION_CANON_PATH,
+      diagnostics: [
+        {
+          code: "faction_canon_missing",
+          message: "canon/factions.yaml is missing. Add canonical faction scaffold to enable faction tick.",
+          path: FACTION_CANON_PATH,
+          severity: "warn",
+        },
+      ],
+      noOpReason: "Faction canonical scaffold is missing.",
+      seedStatus: referenceLoad.seedStatus,
+      seedSourcePath: referenceLoad.seedSourcePath,
+      seedFingerprint: referenceLoad.seedFingerprint,
+    });
+  }
+  const validatedCanon = validateFactionCanon(factionsFile.parsed, {
+    references: referenceLoad.references
+      ? {
+          worldId: referenceLoad.references.worldId,
+          locationIds: referenceLoad.references.locationIds,
+          pressureIds: referenceLoad.references.pressureIds,
+        }
+      : undefined,
+  });
+  const validationDiagnostics = toDiagnostics(validatedCanon.diagnostics, FACTION_CANON_PATH);
+  const canonicalDiagnostics = [...referenceLoad.diagnostics, ...validationDiagnostics].slice(0, 24);
+
+  if (!validatedCanon.ok) {
+    return createNoopFactionTickResult({
+      mode,
+      trigger,
+      status: "invalid",
+      sourcePath: FACTION_CANON_PATH,
+      diagnostics: canonicalDiagnostics,
+      noOpReason: "Faction canonical scaffold is invalid.",
+      seedStatus: referenceLoad.seedStatus,
+      seedSourcePath: referenceLoad.seedSourcePath,
+      seedFingerprint: referenceLoad.seedFingerprint,
+    });
+  }
+
+  const totalFactionCount = validatedCanon.canon.factions.length;
+  const enabledFactionCount = validatedCanon.canon.factions.filter((entry) => entry.enabled).length;
+  const canonFingerprint = buildFactionCanonFingerprint(validatedCanon.canon);
+  const driftReport = referenceLoad.seed
+    ? detectFactionCanonScaffoldDrift({
+        seed: referenceLoad.seed,
+        canon: validatedCanon.canon,
+      })
+    : null;
+  const canonicalProvenance = buildCanonicalScaffoldProvenance({
+    seedStatus: referenceLoad.seedStatus,
+    seedSourcePath: referenceLoad.seedSourcePath,
+    seedFingerprint: referenceLoad.seedFingerprint,
+    canonStatus: "used",
+    canonSourcePath: FACTION_CANON_PATH,
+    canonFingerprint,
+    drift: driftReport
+      ? {
+          status: driftReport.status,
+          summary: {
+            addedInSeed: driftReport.summary.addedInSeed,
+            missingInSeed: driftReport.summary.missingInSeed,
+            changedScaffold: driftReport.summary.changedScaffold,
+            incompatible: driftReport.summary.incompatible,
+          },
+        }
+      : null,
+  });
+  if (enabledFactionCount === 0) {
+    return createNoopFactionTickResult({
+      mode,
+      trigger,
+      status: "used",
+      sourcePath: FACTION_CANON_PATH,
+      diagnostics: canonicalDiagnostics,
+      noOpReason: "No enabled factions. Set enabled=true to advance faction motion.",
+      totalFactions: totalFactionCount,
+      enabledFactions: 0,
+      seedStatus: referenceLoad.seedStatus,
+      seedSourcePath: referenceLoad.seedSourcePath,
+      seedFingerprint: referenceLoad.seedFingerprint,
+      canonFingerprint,
+    });
+  }
+
+  const [agendasFile, pressureFile, eventsFile, sceneFile, clockFile, travelFile] = await Promise.all([
+    loadStructuredWorldFile(params.worldRoot, "state/faction-agendas.yaml", {
+      allowMissing: true,
+      maxReadBytes: params.cfg.maxReadBytes,
+    }),
+    loadStructuredWorldFile(params.worldRoot, "state/world-pressure.yaml", {
+      allowMissing: true,
+      maxReadBytes: params.cfg.maxReadBytes,
+    }),
+    loadStructuredWorldFile(params.worldRoot, "state/world-events.yaml", {
+      allowMissing: true,
+      maxReadBytes: params.cfg.maxReadBytes,
+    }),
+    loadStructuredWorldFile(params.worldRoot, "state/current-scene.yaml", {
+      allowMissing: true,
+      maxReadBytes: params.cfg.maxReadBytes,
+    }),
+    loadStructuredWorldFile(params.worldRoot, "state/world-clock.yaml", {
+      allowMissing: true,
+      maxReadBytes: params.cfg.maxReadBytes,
+    }),
+    loadStructuredWorldFile(params.worldRoot, "state/travel-state.yaml", {
+      allowMissing: true,
+      maxReadBytes: params.cfg.maxReadBytes,
+    }),
   ]);
 
   const scene = toObj(toObj(sceneFile.parsed).scene);
   const pressureRoot = toObj(pressureFile.parsed);
   const zoneLookup = buildZoneLookup({ pressureRoot, scene });
-  const factions = parseFactions(factionsFile.parsed, zoneLookup);
+  const factions = parseFactions(validatedCanon.canon, zoneLookup);
 
   const location = toObj(scene.location);
   const travelState = toObj(toObj(travelFile.parsed).travel_state);
@@ -749,6 +1189,16 @@ export async function runFactionEngineTick(params: { worldRoot: string; cfg: Trp
       rumors: summarySource.flatMap((e) => e.rumors_emitted).slice(0, 6),
       access_changes: formatAccess(accessControls),
     },
+    canonical_scaffold: {
+      status: "used",
+      source_path: FACTION_CANON_PATH,
+      diagnostics: canonicalDiagnostics,
+      total_factions: totalFactionCount,
+      enabled_factions: enabledFactionCount,
+      provenance: canonicalProvenance,
+    },
+    no_op: false,
+    no_op_reason: null,
   };
 
   if (!advanced) return result;

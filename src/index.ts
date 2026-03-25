@@ -3663,8 +3663,8 @@ function toolGate(params: {
 }
 
 const trpgRuntimePlugin = {
-  id: "trpg-runtime",
-  name: "TRPG Runtime",
+  id: "trpg-runtime-v2",
+  name: "TRPG Runtime V2",
   description: "Structured world-store and patch tooling for dedicated TRPG sessions.",
   configSchema: trpgRuntimeConfigSchema,
   register(api: OpenClawPluginApi) {
@@ -4026,28 +4026,35 @@ const trpgRuntimePlugin = {
             return jsonToolResult(gate.payload);
           }
 
-          const input = params as FactionTickInput;
-          const tickResult = await runFactionEngineTick({
-            worldRoot: gate.worldRoot,
-            cfg,
-            input,
-          });
-
-          if (tickResult.patch_draft && input.mode === "dry-run") {
-            const dryRunResult = await runPatchDryRun({
+          try {
+            const input = params as FactionTickInput;
+            const tickResult = await runFactionEngineTick({
               worldRoot: gate.worldRoot,
               cfg,
-              agentId: gate.agentId,
-              cache: patchCache,
-              input: tickResult.patch_draft as PatchDryRunInput,
+              input,
             });
+
+            if (tickResult.patch_draft && input.mode === "dry-run") {
+              const dryRunResult = await runPatchDryRun({
+                worldRoot: gate.worldRoot,
+                cfg,
+                agentId: gate.agentId,
+                cache: patchCache,
+                input: tickResult.patch_draft as PatchDryRunInput,
+              });
+              return jsonToolResult({
+                ...tickResult,
+                dry_run_result: dryRunResult,
+              });
+            }
+
+            return jsonToolResult(tickResult);
+          } catch (error) {
             return jsonToolResult({
-              ...tickResult,
-              dry_run_result: dryRunResult,
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
             });
           }
-
-          return jsonToolResult(tickResult);
         },
       }),
       { name: "trpg_faction_tick" },

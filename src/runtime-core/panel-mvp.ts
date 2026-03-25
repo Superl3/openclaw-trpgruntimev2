@@ -1,6 +1,7 @@
 import { actionLabelFor, collectButtonActionIds, feasibilityLabel } from "./scene-loop.js";
 import { buildQuestEconomyQualitativeSummary } from "./quest-economy.js";
 import { buildTemporalQualitativeSummary } from "./temporal-systems.js";
+import { buildAnchorQualitativeSummary } from "./anchor-layer.js";
 import type { InteractionRouteKey, InteractionRouteRecord, SessionState } from "./types.js";
 
 export type PanelMessageMode = "send" | "edit";
@@ -65,6 +66,10 @@ function mainSectionText(session: SessionState): string {
     economy: loop.questEconomy,
     locationId: loop.scene.locationId,
   });
+  const anchorSummary = buildAnchorQualitativeSummary({
+    anchor: loop.anchor,
+    lastSummary: null,
+  });
   const lines = [
     "**Main UI**",
     `장면: ${loop.scene.title} (${loop.scene.sceneId}) / phase=${loop.scene.phase}`,
@@ -73,6 +78,7 @@ function mainSectionText(session: SessionState): string {
     `압력: ${String(loop.scene.pressure)} (${loop.scene.riskTier})`,
     `활성 과제: ${String(questSummary.actionable.activeCount)}건 · ${questSummary.actionable.activeTop ? (questSummary.actionable.activeTop.llmShortText ?? questSummary.actionable.activeTop.defaultText) : "진행 중 과제가 없다."}`,
     `접촉 기회: ${String(questSummary.actionable.surfacedCount)}건 · ${questSummary.actionable.surfacedTop.length > 0 ? questSummary.actionable.surfacedTop.map((slot) => slot.llmShortText ?? slot.defaultText).join(" / ") : "현재 접촉 가능한 기회가 없다."}`,
+    `장기 축: ${anchorSummary.text}`,
     `세계 동향: ${questSummary.worldPulse.text}`,
     `최근 변화: ${questSummary.recentOutcomes.text}`,
   ];
@@ -125,6 +131,10 @@ function subSectionText(session: SessionState, debugRuntimeSignals: boolean): st
     economy: loop.questEconomy,
     locationId: loop.scene.locationId,
   });
+  const anchorSummary = buildAnchorQualitativeSummary({
+    anchor: loop.anchor,
+    lastSummary: null,
+  });
 
   if (session.status === "ended") {
     lines.push("세션 종료 상태다.");
@@ -170,6 +180,7 @@ function subSectionText(session: SessionState, debugRuntimeSignals: boolean): st
   lines.push(
     `퀘스트(진행): ${questSummary.actionable.activeText}`,
     `퀘스트(기회): ${questSummary.actionable.surfacedText}`,
+    `앵커 축: ${anchorSummary.text}`,
     `월드 축: ${questSummary.worldPulse.text}`,
   );
 
@@ -181,6 +192,7 @@ function subSectionText(session: SessionState, debugRuntimeSignals: boolean): st
 
   if (debugRuntimeSignals) {
     const hookDebug = questSummary.debug.hookText;
+    const canonicalSync = session.runtimeMetadata?.canonicalSync;
     lines.push(
       `debug.behavioral_drift.raw: warm=${drift.warmth.toFixed(2)} bold=${drift.boldness.toFixed(2)} caution=${drift.caution.toFixed(2)} altruism=${drift.altruism.toFixed(2)} aggression=${drift.aggression.toFixed(2)} humor=${drift.humor.toFixed(2)}`,
     );
@@ -195,6 +207,12 @@ function subSectionText(session: SessionState, debugRuntimeSignals: boolean): st
     );
     lines.push(
       `debug.quest_budget.raw: live=${String(questSummary.debug.liveQuestCount)} budget_used=live:${String(questSummary.debug.budget.used.livePool)}/world:${String(questSummary.debug.budget.used.world)}/attention:${String(questSummary.debug.budget.used.attention)}/narrative:${String(questSummary.debug.budget.used.narrative)} budget_caps=live:${String(questSummary.debug.budget.caps.livePool)}/world:${String(questSummary.debug.budget.caps.world)}/attention:${String(questSummary.debug.budget.caps.attention)}/narrative:${String(questSummary.debug.budget.caps.narrative)} quota_caps=loc:${String(questSummary.debug.softQuota.caps.perLocation)}/pressure:${String(questSummary.debug.softQuota.caps.perPressure)}/archetype:${String(questSummary.debug.softQuota.caps.perArchetype)} top_pressure_intensity=${String(questSummary.debug.topPressureIntensity)}`,
+    );
+    lines.push(
+      `debug.anchor.raw: count=${String(anchorSummary.debug.anchorCount)} active=${String(anchorSummary.activeCount)} escalated=${String(anchorSummary.escalatedCount)} signal_mode=${anchorSummary.debug.signalMode} signal_reason=${anchorSummary.debug.signalReason ?? "none"} active_ids=${anchorSummary.debug.activeIds.length > 0 ? anchorSummary.debug.activeIds.join(",") : "none"} terminal_ids=${anchorSummary.debug.terminalIds.length > 0 ? anchorSummary.debug.terminalIds.join(",") : "none"}`,
+    );
+    lines.push(
+      `debug.canonical_sync.raw: policy=${canonicalSync?.sourcePolicy ?? "seed_bootstrap_only"} drift=${canonicalSync?.driftStatus ?? "unknown"} drift_counts=added:${String(canonicalSync?.driftCounts.addedInSeed ?? 0)}/missing:${String(canonicalSync?.driftCounts.missingInSeed ?? 0)}/changed:${String(canonicalSync?.driftCounts.changedScaffold ?? 0)}/incompatible:${String(canonicalSync?.driftCounts.incompatible ?? 0)} seed_fp=${canonicalSync?.seedFingerprint ?? "none"} canon_fp=${canonicalSync?.canonFingerprint ?? "none"}`,
     );
   }
 

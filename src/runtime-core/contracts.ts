@@ -13,10 +13,12 @@ import type {
   InteractionRouteKey,
   InteractionRouteRecord,
   NewSessionResult,
+  RuntimeCanonicalProvenance,
   RuntimeBootstrapDiagnostic,
   RuntimeBootstrapInput,
   ResumeSessionResult,
   SessionState,
+  WorldSeed,
 } from "./types.js";
 import type { DeterministicActionResolution } from "./scene-loop.js";
 
@@ -63,6 +65,7 @@ export type StartNewSessionInput = {
   initialSceneId?: string;
   runtimeBootstrap?: RuntimeBootstrapInput | null;
   runtimeBootstrapDiagnostics?: RuntimeBootstrapDiagnostic[];
+  runtimeCanonicalProvenance?: RuntimeCanonicalProvenance | null;
 };
 
 export type RuntimeSeedLoadStatus = "used" | "missing" | "invalid" | "error";
@@ -71,6 +74,7 @@ export type RuntimeBootstrapLoadResult = {
   status: RuntimeSeedLoadStatus;
   sourcePath: string | null;
   bootstrap: RuntimeBootstrapInput | null;
+  validatedSeed: WorldSeed | null;
   diagnostics: RuntimeBootstrapDiagnostic[];
 };
 

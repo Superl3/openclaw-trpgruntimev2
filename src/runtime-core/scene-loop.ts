@@ -11,6 +11,12 @@ import {
   type QuestEconomyState,
   type QuestEconomyTickSummary,
 } from "./quest-economy.js";
+import {
+  ensureAnchorRuntimeState,
+  runAnchorTick,
+  type AnchorRuntimeState,
+  type AnchorTickSummary,
+} from "./anchor-layer.js";
 import type { RuntimeBootstrapInput } from "./types.js";
 
 export type ActionFeasibility = "possible" | "currently_impossible" | "reckless" | "impossible";
@@ -134,6 +140,7 @@ export type DeterministicSceneLoopState = {
   analyzerMemory: AnalyzerMemoryState;
   temporal: TemporalRuntimeState;
   questEconomy: QuestEconomyState;
+  anchor: AnchorRuntimeState;
   actionPalette: ActionPaletteEntry[];
 };
 
@@ -157,6 +164,7 @@ export type DeterministicActionResolution = {
   exchange: ExchangeState;
   temporalSummary: TemporalUpdateSummary;
   questSummary: QuestEconomyTickSummary;
+  anchorSummary: AnchorTickSummary;
 };
 
 const DEFAULT_SCENE_ID = "scene-bootstrap";
@@ -630,6 +638,7 @@ export function createInitialDeterministicSceneLoop(params: {
     questEconomy: ensureQuestEconomyState(undefined, params.nowIso, {
       worldPressures: bootstrap?.questEconomy.worldPressures,
     }),
+    anchor: ensureAnchorRuntimeState(undefined),
     actionPalette: [],
   };
 
@@ -764,6 +773,7 @@ export function ensureDeterministicSceneLoopState(value: unknown, params: {
 
   const temporal = ensureTemporalRuntimeState(root.temporal, time.worldNowIso || params.nowIso);
   const questEconomy = ensureQuestEconomyState(root.questEconomy, time.worldNowIso || params.nowIso);
+  const anchor = ensureAnchorRuntimeState(root.anchor);
 
   const exchangeObj = toRecord(root.exchange);
   const exchange: ExchangeState | null = Object.keys(exchangeObj).length
@@ -808,6 +818,7 @@ export function ensureDeterministicSceneLoopState(value: unknown, params: {
     analyzerMemory,
     temporal,
     questEconomy,
+    anchor,
     actionPalette: [],
   };
 
@@ -1025,6 +1036,18 @@ export function resolveDeterministicSceneAction(input: DeterministicActionInput)
     temporalSignal: questTemporalSignal,
   });
 
+  const anchorTick = runAnchorTick({
+    anchor: current.anchor,
+    economyBefore: current.questEconomy,
+    economyAfter: questTick.nextEconomy,
+    questSummary: questTick.summary,
+    nowIso: worldNowIso,
+    deltaTimeSec,
+    actionId: resolvedAction.resolvedActionId,
+    classification: classified.classification,
+    sceneId: nextScene.sceneId,
+  });
+
   nextScene.riskTier = riskTierFromPressure(nextScene.pressure);
 
   const exchangeIndex = sceneTransitioned ? 1 : (current.exchange?.exchangeIndex ?? 0) + 1;
@@ -1089,6 +1112,7 @@ export function resolveDeterministicSceneAction(input: DeterministicActionInput)
     },
     temporal: temporalPipeline.nextTemporal,
     questEconomy: questTick.nextEconomy,
+    anchor: anchorTick.nextAnchor,
     actionPalette: [],
   };
 
@@ -1106,5 +1130,6 @@ export function resolveDeterministicSceneAction(input: DeterministicActionInput)
     exchange,
     temporalSummary: temporalPipeline.summary,
     questSummary: questTick.summary,
+    anchorSummary: anchorTick.summary,
   };
 }

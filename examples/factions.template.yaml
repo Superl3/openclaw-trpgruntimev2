@@ -1,0 +1,19 @@
+schemaVersion: 1
+worldId: harbor-reach
+factions:
+  - factionId: tide-union
+    name: Tide Union
+    enabled: true
+    homeLocationIds: [dock-ward]
+    pressureAffinityIds: [contraband-flow]
+    resources: 58
+    heat: 44
+    posture: balanced
+  - factionId: hill-wardens
+    name: Hill Wardens
+    enabled: true
+    homeLocationIds: [iron-hill]
+    pressureAffinityIds: [harbor-fever]
+    resources: 62
+    heat: 37
+    posture: low_profile

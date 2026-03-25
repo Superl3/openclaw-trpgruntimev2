@@ -352,6 +352,7 @@ test("invalid world seed file falls back safely to default bootstrap", async () 
   assert.equal(created.seedBootstrap.status, "invalid");
   assert.equal(created.session.runtimeMetadata.bootstrap.source, "default");
   assert.ok(created.session.runtimeMetadata.bootstrap.diagnostics.length > 0);
+  assert.equal(created.session.runtimeMetadata.canonicalSync.driftStatus, "invalid_seed");
 });
 
 test("resume keeps runtime state and ignores changed world seed file", async () => {
@@ -380,6 +381,7 @@ test("resume keeps runtime state and ignores changed world seed file", async () 
 
   const beforeFingerprint = created.session.runtimeMetadata.bootstrap.seed.seedFingerprint;
   const beforeEconomy = created.session.deterministicLoop.questEconomy;
+  const beforeCanonicalSync = created.session.runtimeMetadata.canonicalSync;
 
   const changedSeed = makeValidSeed();
   changedSeed.seedValue = "alpha-seed-updated";
@@ -395,4 +397,5 @@ test("resume keeps runtime state and ignores changed world seed file", async () 
   assert.equal(resumed.session.runtimeMetadata.bootstrap.source, "worldSeed");
   assert.equal(resumed.session.runtimeMetadata.bootstrap.seed.seedFingerprint, beforeFingerprint);
   assert.deepEqual(resumed.session.deterministicLoop.questEconomy, beforeEconomy);
+  assert.deepEqual(resumed.session.runtimeMetadata.canonicalSync, beforeCanonicalSync);
 });

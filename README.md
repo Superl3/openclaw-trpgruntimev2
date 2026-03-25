@@ -18,6 +18,9 @@ Structured TRPG runtime plugin for OpenClaw.
 - Checkpoint 6B rich surfacing: active/surfaced/recent outcome panel projection with bounded tuning telemetry snapshot
 - Checkpoint 6C/6D optional rich hook lane: bounded actionable + worldPulse short text with deterministic fallback
 - Checkpoint 7A world seed bootstrap: validated canonical world seed scaffold + one-way runtime bootstrap projection
+- Checkpoint 7B faction canon scaffold: minimal canonical factions model + faction tick fallback-safe enablement
+- Checkpoint 7C anchor lifecycle layer: deterministic long-horizon conflict anchors with bounded panel/trace projection
+- Checkpoint 8A canonical sync body: provenance fingerprinting + explicit drift audit/sync loop
 
 All tools return JSON-shaped output (`details`) and JSON text in `content`.
 
@@ -41,6 +44,46 @@ All tools return JSON-shaped output (`details`) and JSON text in `content`.
 - Resume flow keeps persisted runtime state; it does not re-bootstrap from seed unless a new session is created.
 - Starter template: copy `examples/world-seed.template.yaml` to `world/canon/world-seed.yaml` and edit ids/baselines for your setting.
 - Preflight validator (schema/invariant check only): `node scripts/validate-world-seed.mjs world/canon/world-seed.yaml`
+
+## Faction canonical scaffold (Checkpoint 7B)
+
+- `canon/factions.yaml` is the operational source-of-truth for `trpg_faction_tick`.
+- `WorldSeed.factions` is projection-only bootstrap material; it does not override operational faction canon during tick.
+- Starter template: copy `examples/factions.template.yaml` to `world/canon/factions.yaml` and tailor ids/resources/heat/posture.
+- Preflight validator (schema/invariant/referential checks): `node scripts/validate-factions-canon.mjs world/canon/factions.yaml`
+- Drift audit (read-only): `node scripts/diff-factions-vs-seed.mjs world/canon/world-seed.yaml world/canon/factions.yaml`
+- Explicit scaffold sync helper (dry-run default): `node scripts/scaffold-factions-from-seed.mjs world/canon/world-seed.yaml world/canon/factions.yaml`
+- Write/apply is explicit: `--apply`; overwrite existing file requires `--apply --force`.
+- Missing/invalid faction canon now returns structured no-op diagnostics instead of hard tick failure.
+
+## Canonical sync body (Checkpoint 8A)
+
+- Runtime metadata stores canonical sync provenance/fingerprints only (no canonical body copy).
+- Source policy remains explicit:
+  - seed: `seed_bootstrap_only`
+  - canon: `canon_authoritative`
+- Scaffold sync policy defaults to `preserve_operational`:
+  - refresh scaffold fields from seed projection
+  - preserve operational canonical fields (`resources`, `heat`) by default
+- Faction tick output now includes canonical provenance + drift hints for ops/debug flows.
+- Suggested operator loop:
+  1. validate seed (`validate-world-seed`)
+  2. audit drift (`diff-factions-vs-seed`)
+  3. run sync dry-run (`scaffold-factions-from-seed`)
+  4. apply explicitly (`--apply`, and `--force` for overwrite)
+  5. validate canon (`validate-factions-canon`)
+  6. run faction tick/session
+
+## Anchor lifecycle layer (Checkpoint 7C)
+
+- Runtime deterministic loop now includes bounded `anchor` state for long-horizon conflict axes.
+- Anchor lifecycle is deterministic and bounded: `candidate -> active -> escalated -> resolved|failed -> archived`.
+- Anchor cap enforcement avoids hard-delete for started/terminal anchors; terminal anchors transition to archived by retention policy.
+- Default panel view exposes qualitative top-anchor only; debug mode exposes bounded raw anchor metadata.
+- Engine trace now includes anchor lifecycle events:
+  - `engine.anchor.formed`, `engine.anchor.advanced`, `engine.anchor.escalated`
+  - `engine.anchor.resolved`, `engine.anchor.failed`, `engine.anchor.archived`
+- Optional external/faction signal input degrades safely on missing/invalid/no-op data.
 
 ## Safety model
 

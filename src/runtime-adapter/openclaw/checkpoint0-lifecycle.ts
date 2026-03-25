@@ -22,12 +22,29 @@ import { buildQuestEconomyQualitativeSummary } from "../../runtime-core/quest-ec
 import { buildTemporalQualitativeSummary } from "../../runtime-core/temporal-systems.js";
 import { ensureDeterministicSceneLoopState } from "../../runtime-core/scene-loop.js";
 import { buildRuntimeBootstrapInput, validateWorldSeed } from "../../runtime-core/world-seed.js";
+import {
+  buildFactionCanonFingerprint,
+  buildFactionCanonReferenceIndexFromWorldSeed,
+  detectFactionCanonScaffoldDrift,
+  validateFactionCanon,
+} from "../../faction-canon.js";
+import {
+  createRuntimeCanonicalProvenance,
+  driftStatusFromLoadStatus,
+  type CanonicalLoadStatus,
+} from "../../runtime-core/sync-meta.js";
 import { appendTraceEvent, createTraceEvent, ensureTraceState } from "../../runtime-core/trace.js";
 import { JsonFileStateStore } from "../../runtime-store/file-state-store.js";
-import { ensureRuntimeMetadata, type InteractionRouteRecord, type SessionState } from "../../runtime-core/types.js";
+import {
+  ensureRuntimeMetadata,
+  type InteractionRouteRecord,
+  type RuntimeCanonicalProvenance,
+  type SessionState,
+} from "../../runtime-core/types.js";
 import { loadStructuredWorldFile } from "../../world-store.js";
 
 const CHECKPOINT0_STORE_RELATIVE_PATH = "state/runtime-core";
+const FACTION_CANON_PATH = "canon/factions.yaml";
 const WORLD_SEED_CANDIDATE_PATHS = [
   "canon/world-seed.yaml",
   "canon/world-seed.yml",
@@ -182,6 +199,7 @@ async function loadRuntimeBootstrapFromWorldSeed(params: {
         status: "error",
         sourcePath: candidatePath,
         bootstrap: null,
+        validatedSeed: null,
         diagnostics: [
           {
             code: "world_seed_load_error",
@@ -203,6 +221,7 @@ async function loadRuntimeBootstrapFromWorldSeed(params: {
         status: "invalid",
         sourcePath: candidatePath,
         bootstrap: null,
+        validatedSeed: null,
         diagnostics: toSeedDiagnostics(validated.issues, candidatePath),
       };
     }
@@ -211,6 +230,7 @@ async function loadRuntimeBootstrapFromWorldSeed(params: {
       status: "used",
       sourcePath: candidatePath,
       bootstrap: buildRuntimeBootstrapInput(validated.seed),
+      validatedSeed: validated.seed,
       diagnostics: toSeedDiagnostics(validated.issues, candidatePath),
     };
   }
@@ -219,8 +239,104 @@ async function loadRuntimeBootstrapFromWorldSeed(params: {
     status: "missing",
     sourcePath: null,
     bootstrap: null,
+    validatedSeed: null,
     diagnostics: [],
   };
+}
+
+async function loadRuntimeCanonicalProvenance(params: {
+  worldRoot: string;
+  cfg: TrpgRuntimeConfig;
+  seedBootstrap: RuntimeBootstrapLoadResult;
+}): Promise<RuntimeCanonicalProvenance> {
+  const nowIso = new Date().toISOString();
+  const seedStatus = params.seedBootstrap.status as CanonicalLoadStatus;
+  const seed = params.seedBootstrap.validatedSeed;
+
+  let canonStatus: CanonicalLoadStatus = "missing";
+  let canonSourcePath: string | null = null;
+  let canonFingerprint: string | null = null;
+  let canonWorldId: string | null = null;
+  let driftCounts = {
+    addedInSeed: 0,
+    missingInSeed: 0,
+    changedScaffold: 0,
+    incompatible: 0,
+  };
+  let hasDrift = false;
+  let hasIncompatible = false;
+
+  try {
+    const loadedCanon = await loadStructuredWorldFile(params.worldRoot, FACTION_CANON_PATH, {
+      allowMissing: true,
+      maxReadBytes: params.cfg.maxReadBytes,
+    });
+
+    if (!loadedCanon.exists) {
+      canonStatus = "missing";
+    } else {
+      canonSourcePath = FACTION_CANON_PATH;
+      const referenceIndex = seed ? buildFactionCanonReferenceIndexFromWorldSeed(seed) : null;
+      const validatedCanon = validateFactionCanon(loadedCanon.parsed, {
+        references: referenceIndex
+          ? {
+              worldId: referenceIndex.worldId,
+              locationIds: referenceIndex.locationIds,
+              pressureIds: referenceIndex.pressureIds,
+            }
+          : undefined,
+      });
+
+      if (!validatedCanon.ok) {
+        canonStatus = "invalid";
+      } else {
+        canonStatus = "used";
+        canonWorldId = validatedCanon.canon.worldId;
+        canonFingerprint = buildFactionCanonFingerprint(validatedCanon.canon);
+        if (seed) {
+          const drift = detectFactionCanonScaffoldDrift({
+            seed,
+            canon: validatedCanon.canon,
+          });
+          driftCounts = {
+            addedInSeed: drift.summary.addedInSeed,
+            missingInSeed: drift.summary.missingInSeed,
+            changedScaffold: drift.summary.changedScaffold,
+            incompatible: drift.summary.incompatible,
+          };
+          hasDrift =
+            drift.summary.addedInSeed > 0 ||
+            drift.summary.missingInSeed > 0 ||
+            drift.summary.changedScaffold > 0 ||
+            drift.summary.incompatible > 0;
+          hasIncompatible = drift.status === "incompatible";
+        }
+      }
+    }
+  } catch {
+    canonStatus = "error";
+  }
+
+  const driftStatus = driftStatusFromLoadStatus({
+    seedStatus,
+    canonStatus,
+    hasDrift,
+    hasIncompatible,
+  });
+
+  return createRuntimeCanonicalProvenance({
+    sourcePolicy: "canon_authoritative",
+    worldId: seed?.worldId ?? canonWorldId ?? null,
+    schemaVersion: seed?.schemaVersion ?? null,
+    seedSourcePath: params.seedBootstrap.sourcePath,
+    seedFingerprint: params.seedBootstrap.bootstrap?.seedFingerprint ?? null,
+    canonSourcePath,
+    canonFingerprint,
+    generatedAtIso: seed?.createdAtIso ?? null,
+    validatedAtIso: nowIso,
+    driftStatus,
+    driftCounts,
+  });
 }
 
 function resolveChannelKey(params: Record<string, unknown>, ctx: OpenClawPluginToolContext): string {
@@ -771,12 +887,18 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
             worldRoot: gate.worldRoot,
             cfg,
           });
+          const canonicalProvenance = await loadRuntimeCanonicalProvenance({
+            worldRoot: gate.worldRoot,
+            cfg,
+            seedBootstrap,
+          });
           const result = await runtime.engine.startNewSession({
             channelKey,
             ownerId,
             initialSceneId: sceneId || undefined,
             runtimeBootstrap: seedBootstrap.bootstrap,
             runtimeBootstrapDiagnostics: seedBootstrap.diagnostics,
+            runtimeCanonicalProvenance: canonicalProvenance,
           });
           const session = normalizeSession(result.session);
           const nowIso = new Date().toISOString();
@@ -802,6 +924,7 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
               used: seedBootstrap.status === "used",
               diagnostics: seedBootstrap.diagnostics,
             },
+            canonicalProvenance,
             ...prepared.payload,
           };
 

@@ -81,6 +81,53 @@ Use it from `~/.openclaw/extensions/trpg-runtime` either as a plugin-only overla
 - Starter template is available at `examples/world-seed.template.yaml`; copy it to `world/canon/world-seed.yaml` and tailor IDs/baselines.
 - Preflight validation (no session/bootstrap execution): `node scripts/validate-world-seed.mjs world/canon/world-seed.yaml`.
 
+## 2.8) Faction canonical scaffold notes (Checkpoint 7B)
+
+- `canon/factions.yaml` is the operational source-of-truth for `trpg_faction_tick`.
+- `WorldSeed.factions` is projection-only scaffold input and does not override `canon/factions.yaml` during tick.
+- Canonical faction fields are minimal and fixed: `factionId`, `name`, `enabled`, `homeLocationIds`, `pressureAffinityIds`, `resources`, `heat`, `posture`.
+- Missing/invalid faction canon returns structured no-op diagnostics instead of throwing a hard tick error.
+- Enabled factions can be zero; this is treated as valid no-op (not a fatal error).
+- Starter template is available at `examples/factions.template.yaml`; copy to `world/canon/factions.yaml` and edit values.
+- Preflight validation: `node scripts/validate-factions-canon.mjs world/canon/factions.yaml`.
+- Drift audit helper (read-only): `node scripts/diff-factions-vs-seed.mjs world/canon/world-seed.yaml world/canon/factions.yaml`.
+- Scaffold sync helper defaults to dry-run: `node scripts/scaffold-factions-from-seed.mjs world/canon/world-seed.yaml world/canon/factions.yaml`.
+- Apply is explicit (`--apply`), and overwrite requires `--apply --force`.
+
+## 2.10) Canonical sync body notes (Checkpoint 8A)
+
+- Runtime metadata stores provenance/fingerprints only; canonical truth body is not duplicated into runtime metadata.
+- Source policy remains explicit:
+  - seed side: `seed_bootstrap_only`
+  - canonical side: `canon_authoritative`
+- Drift audit is structural/bounded (`addedInSeed`, `missingInSeed`, `changedScaffold`, `incompatible`).
+- Sync policy defaults to `preserve_operational`:
+  - refresh scaffold fields from seed projection (`factionId/name/enabled/homeLocationIds/pressureAffinityIds/posture`)
+  - preserve operational fields (`resources`, `heat`) unless `--policy replace_all` is explicitly chosen.
+- Faction tick output now includes canonical provenance and drift hint metadata for ops/debug.
+- Recommended operator loop:
+  1. validate seed
+  2. run drift audit
+  3. run sync dry-run
+  4. apply explicitly (`--apply`, and `--force` for overwrite)
+  5. validate canon
+  6. run faction tick/runtime session
+
+## 2.9) Anchor lifecycle notes (Checkpoint 7C)
+
+- Deterministic scene loop now owns bounded `anchor` runtime state for long-horizon conflict axes.
+- Anchor lifecycle is fixed and bounded: `candidate -> active -> escalated -> resolved|failed -> archived`.
+- Cap enforcement preserves started/terminal anchors (no hard-delete); terminal anchors archive by retention.
+- Anchor panel projection is qualitative-first in default mode; raw anchor metadata is debug-only (`debugRuntimeSignals=true`).
+- Engine trace includes anchor lifecycle events:
+  - `engine.anchor.formed`
+  - `engine.anchor.advanced`
+  - `engine.anchor.escalated`
+  - `engine.anchor.resolved`
+  - `engine.anchor.failed`
+  - `engine.anchor.archived`
+- Optional faction/world signal input is non-authoritative and fallback-safe (`missing`/`invalid`/`noop` degradation).
+
 ## 2.1) World-data-driven behavior
 
 - Hardcoded setting/scenario content has been removed from runtime prompt hooks.
@@ -149,6 +196,10 @@ Onboarding flow after install:
 ```bash
 node -e "JSON.parse(require('fs').readFileSync('examples/openclaw.overlay.onboard.plugin-only.json','utf8'));console.log('ok: plugin-only json')"
 node -e "JSON.parse(require('fs').readFileSync('examples/openclaw.overlay.onboard.trpg-agent.json','utf8'));console.log('ok: trpg-agent json')"
+node scripts/validate-world-seed.mjs examples/world-seed.template.yaml
+node scripts/validate-factions-canon.mjs examples/factions.template.yaml
+node scripts/diff-factions-vs-seed.mjs examples/world-seed.template.yaml examples/factions.template.yaml
+node scripts/scaffold-factions-from-seed.mjs examples/world-seed.template.yaml examples/factions.template.yaml
 npm run typecheck
 npm run smoke:manifest
 ```

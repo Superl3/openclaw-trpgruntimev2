@@ -81,6 +81,54 @@
 - 시작용 템플릿은 `examples/world-seed.template.yaml`에 있으며, `world/canon/world-seed.yaml`로 복사한 뒤 ID/baseline을 설정에 맞게 수정하세요.
 - 실행 전 preflight 검증(세션/부트스트랩 실행 없음): `node scripts/validate-world-seed.mjs world/canon/world-seed.yaml`.
 
+## 2.8) Faction canonical scaffold 메모 (Checkpoint 7B)
+
+- `canon/factions.yaml`는 `trpg_faction_tick`의 operational source-of-truth입니다.
+- `WorldSeed.factions`는 projection-only bootstrap scaffold이며 tick 시 `canon/factions.yaml` 권위를 덮어쓰지 않습니다.
+- canonical faction 필드는 최소/고정입니다: `factionId`, `name`, `enabled`, `homeLocationIds`, `pressureAffinityIds`, `resources`, `heat`, `posture`.
+- faction canon이 없거나 invalid여도 hard throw 대신 structured no-op diagnostics를 반환합니다.
+- enabled faction이 0개여도 fatal error가 아니라 valid no-op으로 처리합니다.
+- 시작용 템플릿은 `examples/factions.template.yaml`이며, `world/canon/factions.yaml`로 복사해 값만 수정하세요.
+- 실행 전 preflight 검증: `node scripts/validate-factions-canon.mjs world/canon/factions.yaml`.
+- drift audit helper(읽기 전용): `node scripts/diff-factions-vs-seed.mjs world/canon/world-seed.yaml world/canon/factions.yaml`.
+- scaffold sync helper는 기본이 dry-run입니다: `node scripts/scaffold-factions-from-seed.mjs world/canon/world-seed.yaml world/canon/factions.yaml`.
+- 실제 쓰기는 `--apply`를 명시해야 하며, 기존 파일 overwrite는 `--apply --force`가 필요합니다.
+
+## 2.10) Canonical sync body 메모 (Checkpoint 8A)
+
+- runtime metadata에는 provenance/fingerprint만 저장하고 canonical 본문은 복제 저장하지 않습니다.
+- source policy는 명시적으로 유지됩니다:
+  - seed 측: `seed_bootstrap_only`
+  - canonical 측: `canon_authoritative`
+- drift audit는 구조화/제한된 결과를 반환합니다 (`addedInSeed`, `missingInSeed`, `changedScaffold`, `incompatible`).
+- sync 기본 정책은 `preserve_operational`입니다:
+  - seed projection으로 scaffold 필드만 refresh
+  - operational 필드(`resources`, `heat`)는 기본 보존
+  - 전체 교체가 필요하면 명시적으로 `--policy replace_all` 사용
+- faction tick 결과에 canonical provenance 및 drift 힌트 메타데이터가 포함됩니다.
+- 권장 운영 루프:
+  1. seed validate
+  2. drift audit 실행
+  3. sync dry-run 실행
+  4. 명시적 apply (`--apply`, overwrite 시 `--force`)
+  5. canon validate
+  6. faction tick/runtime session 실행
+
+## 2.9) Anchor lifecycle 메모 (Checkpoint 7C)
+
+- deterministic scene loop가 장기 충돌 축용 bounded `anchor` runtime state를 직접 소유합니다.
+- anchor lifecycle은 고정/제한됩니다: `candidate -> active -> escalated -> resolved|failed -> archived`.
+- cap enforcement 시 started/terminal anchor는 hard-delete하지 않으며, terminal은 보관 정책에 따라 archived로 전이됩니다.
+- 기본 패널은 정성 중심(anchor top)만 노출하고, raw anchor 메타데이터는 디버그 모드(`debugRuntimeSignals=true`)에서만 노출합니다.
+- engine trace에 anchor lifecycle 이벤트가 추가됩니다:
+  - `engine.anchor.formed`
+  - `engine.anchor.advanced`
+  - `engine.anchor.escalated`
+  - `engine.anchor.resolved`
+  - `engine.anchor.failed`
+  - `engine.anchor.archived`
+- optional faction/world signal 입력은 비권한 계층이며 `missing`/`invalid`/`noop` 상황에서 안전하게 degrade됩니다.
+
 ## 2.1) World-data-driven 동작
 
 - 런타임 프롬프트 훅의 하드코딩된 설정/시나리오 주입 로직은 제거되었습니다.
@@ -149,6 +197,10 @@ openclaw plugins info trpg-runtime
 ```bash
 node -e "JSON.parse(require('fs').readFileSync('examples/openclaw.overlay.onboard.plugin-only.json','utf8'));console.log('ok: plugin-only json')"
 node -e "JSON.parse(require('fs').readFileSync('examples/openclaw.overlay.onboard.trpg-agent.json','utf8'));console.log('ok: trpg-agent json')"
+node scripts/validate-world-seed.mjs examples/world-seed.template.yaml
+node scripts/validate-factions-canon.mjs examples/factions.template.yaml
+node scripts/diff-factions-vs-seed.mjs examples/world-seed.template.yaml examples/factions.template.yaml
+node scripts/scaffold-factions-from-seed.mjs examples/world-seed.template.yaml examples/factions.template.yaml
 npm run typecheck
 npm run smoke:manifest
 ```

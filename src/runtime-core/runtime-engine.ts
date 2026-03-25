@@ -55,6 +55,7 @@ import {
   setQuestHookTextDebugState,
   WORLD_PULSE_HOOK_SLOT_KEY,
 } from "./quest-economy.js";
+import type { AnchorTickEvent } from "./anchor-layer.js";
 import {
   RUNTIME_SCHEMA_VERSION,
   type EndSessionResult,
@@ -64,6 +65,7 @@ import {
   type PanelRecoveryInstruction,
   type RuntimeBootstrapDiagnostic,
   type RuntimeBootstrapInput,
+  type RuntimeCanonicalProvenance,
   type RuntimeMetadata,
   type ResumeSessionResult,
   type SessionState,
@@ -161,6 +163,7 @@ function normalizeBootstrapDiagnostics(value: RuntimeBootstrapDiagnostic[] | und
 function buildRuntimeMetadata(params: {
   runtimeBootstrap?: RuntimeBootstrapInput | null;
   runtimeBootstrapDiagnostics?: RuntimeBootstrapDiagnostic[];
+  runtimeCanonicalProvenance?: RuntimeCanonicalProvenance | null;
 }): RuntimeMetadata {
   const diagnostics = normalizeBootstrapDiagnostics(params.runtimeBootstrapDiagnostics);
   if (!params.runtimeBootstrap) {
@@ -170,6 +173,7 @@ function buildRuntimeMetadata(params: {
         seed: null,
         diagnostics,
       },
+      canonicalSync: params.runtimeCanonicalProvenance ?? undefined,
     });
   }
   return ensureRuntimeMetadata({
@@ -183,6 +187,7 @@ function buildRuntimeMetadata(params: {
       },
       diagnostics,
     },
+    canonicalSync: params.runtimeCanonicalProvenance ?? undefined,
   });
 }
 
@@ -197,6 +202,31 @@ function pressureIntensityBand(value: number): "low" | "moderate" | "high" | "cr
     return "high";
   }
   return "critical";
+}
+
+function anchorEventTypeToTraceType(eventType: AnchorTickEvent["eventType"]):
+  | "engine.anchor.formed"
+  | "engine.anchor.advanced"
+  | "engine.anchor.escalated"
+  | "engine.anchor.resolved"
+  | "engine.anchor.failed"
+  | "engine.anchor.archived" {
+  switch (eventType) {
+    case "formed":
+      return "engine.anchor.formed";
+    case "advanced":
+      return "engine.anchor.advanced";
+    case "escalated":
+      return "engine.anchor.escalated";
+    case "resolved":
+      return "engine.anchor.resolved";
+    case "failed":
+      return "engine.anchor.failed";
+    case "archived":
+      return "engine.anchor.archived";
+    default:
+      return "engine.anchor.advanced";
+  }
 }
 
 class Checkpoint0RuntimeEngine implements RuntimeEngine {
@@ -314,6 +344,7 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
     nowIso: string;
     runtimeBootstrap?: RuntimeBootstrapInput | null;
     runtimeBootstrapDiagnostics?: RuntimeBootstrapDiagnostic[];
+    runtimeCanonicalProvenance?: RuntimeCanonicalProvenance | null;
   }): SessionState {
     const deterministicLoop = createInitialDeterministicSceneLoop({
       sceneId: input.sceneId,
@@ -323,6 +354,7 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
     const runtimeMetadata = buildRuntimeMetadata({
       runtimeBootstrap: input.runtimeBootstrap,
       runtimeBootstrapDiagnostics: input.runtimeBootstrapDiagnostics,
+      runtimeCanonicalProvenance: input.runtimeCanonicalProvenance,
     });
 
     return {
@@ -439,6 +471,7 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
       nowIso,
       runtimeBootstrap: input.runtimeBootstrap,
       runtimeBootstrapDiagnostics: input.runtimeBootstrapDiagnostics,
+      runtimeCanonicalProvenance: input.runtimeCanonicalProvenance,
     });
 
     const session = appendTraceEvent(
@@ -1068,6 +1101,27 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
         },
       }),
     );
+
+    for (const anchorEvent of resolution.anchorSummary.events) {
+      session = appendTraceEvent(
+        session,
+        createTraceEvent({
+          lane: "engine",
+          type: anchorEventTypeToTraceType(anchorEvent.eventType),
+          tsIso: nowIso,
+          data: {
+            anchorId: anchorEvent.anchorId,
+            pressureId: anchorEvent.pressureId,
+            archetype: anchorEvent.archetype,
+            from: anchorEvent.from,
+            to: anchorEvent.to,
+            reason: anchorEvent.reason,
+            intensity: anchorEvent.intensity,
+            signalMode: resolution.anchorSummary.debug.signalMode,
+          },
+        }),
+      );
+    }
 
     session = appendTraceEvent(
       session,

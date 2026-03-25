@@ -109,6 +109,36 @@ export type RuntimeSeedProvenance = {
   seedFingerprint: string;
 };
 
+export type CanonicalSourcePolicy = "seed_bootstrap_only" | "canon_authoritative";
+
+export type CanonicalDriftStatus =
+  | "unknown"
+  | "aligned"
+  | "drifted"
+  | "missing_seed"
+  | "missing_canon"
+  | "invalid_seed"
+  | "invalid_canon";
+
+export type RuntimeCanonicalProvenance = {
+  sourcePolicy: CanonicalSourcePolicy;
+  worldId: string | null;
+  schemaVersion: number | null;
+  seedSourcePath: string | null;
+  seedFingerprint: string | null;
+  canonSourcePath: string | null;
+  canonFingerprint: string | null;
+  generatedAtIso: string | null;
+  validatedAtIso: string | null;
+  driftStatus: CanonicalDriftStatus;
+  driftCounts: {
+    addedInSeed: number;
+    missingInSeed: number;
+    changedScaffold: number;
+    incompatible: number;
+  };
+};
+
 export type RuntimeBootstrapMetadata = {
   source: "default" | "worldSeed";
   seed: RuntimeSeedProvenance | null;
@@ -117,6 +147,7 @@ export type RuntimeBootstrapMetadata = {
 
 export type RuntimeMetadata = {
   bootstrap: RuntimeBootstrapMetadata;
+  canonicalSync: RuntimeCanonicalProvenance;
 };
 
 export type PanelId = "fixed" | "main" | "sub";
@@ -152,6 +183,12 @@ export type RuntimeTraceEventType =
   | "engine.pressure.advanced"
   | "engine.quest.lifecycle"
   | "engine.quest.hook_text"
+  | "engine.anchor.formed"
+  | "engine.anchor.advanced"
+  | "engine.anchor.escalated"
+  | "engine.anchor.resolved"
+  | "engine.anchor.failed"
+  | "engine.anchor.archived"
   | "engine.action.resolved";
 
 export type RuntimeTraceEvent = {
@@ -291,6 +328,90 @@ function normalizeRuntimeSeedProvenance(value: unknown): RuntimeSeedProvenance |
   };
 }
 
+function readInt(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback;
+}
+
+function readIsoNullable(value: unknown): string | null {
+  const normalized = readString(value);
+  if (!normalized) {
+    return null;
+  }
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+
+function normalizeCanonicalSourcePolicy(value: unknown): CanonicalSourcePolicy {
+  const normalized = readString(value);
+  if (normalized === "seed_bootstrap_only" || normalized === "canon_authoritative") {
+    return normalized;
+  }
+  return "seed_bootstrap_only";
+}
+
+function normalizeCanonicalDriftStatus(value: unknown): CanonicalDriftStatus {
+  const normalized = readString(value);
+  if (
+    normalized === "unknown" ||
+    normalized === "aligned" ||
+    normalized === "drifted" ||
+    normalized === "missing_seed" ||
+    normalized === "missing_canon" ||
+    normalized === "invalid_seed" ||
+    normalized === "invalid_canon"
+  ) {
+    return normalized;
+  }
+  return "unknown";
+}
+
+function normalizeRuntimeCanonicalProvenance(value: unknown): RuntimeCanonicalProvenance {
+  const node = toRecord(value);
+  const driftCountsNode = toRecord(node.driftCounts);
+  return {
+    sourcePolicy: normalizeCanonicalSourcePolicy(node.sourcePolicy),
+    worldId: readString(node.worldId) || null,
+    schemaVersion: Number.isFinite(Number(node.schemaVersion))
+      ? Math.max(1, readInt(node.schemaVersion, 1))
+      : null,
+    seedSourcePath: readString(node.seedSourcePath) || null,
+    seedFingerprint: readString(node.seedFingerprint) || null,
+    canonSourcePath: readString(node.canonSourcePath) || null,
+    canonFingerprint: readString(node.canonFingerprint) || null,
+    generatedAtIso: readIsoNullable(node.generatedAtIso),
+    validatedAtIso: readIsoNullable(node.validatedAtIso),
+    driftStatus: normalizeCanonicalDriftStatus(node.driftStatus),
+    driftCounts: {
+      addedInSeed: Math.max(0, readInt(driftCountsNode.addedInSeed, 0)),
+      missingInSeed: Math.max(0, readInt(driftCountsNode.missingInSeed, 0)),
+      changedScaffold: Math.max(0, readInt(driftCountsNode.changedScaffold, 0)),
+      incompatible: Math.max(0, readInt(driftCountsNode.incompatible, 0)),
+    },
+  };
+}
+
+export function createDefaultRuntimeCanonicalProvenance(): RuntimeCanonicalProvenance {
+  return {
+    sourcePolicy: "seed_bootstrap_only",
+    worldId: null,
+    schemaVersion: null,
+    seedSourcePath: null,
+    seedFingerprint: null,
+    canonSourcePath: null,
+    canonFingerprint: null,
+    generatedAtIso: null,
+    validatedAtIso: null,
+    driftStatus: "unknown",
+    driftCounts: {
+      addedInSeed: 0,
+      missingInSeed: 0,
+      changedScaffold: 0,
+      incompatible: 0,
+    },
+  };
+}
+
 function normalizeRuntimeBootstrapDiagnostics(value: unknown): RuntimeBootstrapDiagnostic[] {
   if (!Array.isArray(value)) {
     return [];
@@ -322,12 +443,21 @@ export function ensureRuntimeMetadata(value: unknown): RuntimeMetadata {
   const bootstrapNode = toRecord(root.bootstrap);
   const sourceRaw = readString(bootstrapNode.source);
   const source: RuntimeBootstrapMetadata["source"] = sourceRaw === "worldSeed" ? "worldSeed" : "default";
+  const canonicalSync = normalizeRuntimeCanonicalProvenance(root.canonicalSync);
 
   return {
     bootstrap: {
       source,
       seed: normalizeRuntimeSeedProvenance(bootstrapNode.seed),
       diagnostics: normalizeRuntimeBootstrapDiagnostics(bootstrapNode.diagnostics),
+    },
+    canonicalSync: {
+      ...createDefaultRuntimeCanonicalProvenance(),
+      ...canonicalSync,
+      driftCounts: {
+        ...createDefaultRuntimeCanonicalProvenance().driftCounts,
+        ...canonicalSync.driftCounts,
+      },
     },
   };
 }
