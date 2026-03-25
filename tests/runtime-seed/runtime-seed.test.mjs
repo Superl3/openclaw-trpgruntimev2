@@ -181,6 +181,7 @@ async function setupPluginTools(plugin, worldRoot) {
       panelDispatchTtlSec: 120,
       traceMaxEvents: 60,
       debugRuntimeSignals: false,
+      canonicalSyncEnabled: true,
     },
     resolvePath: (input) => (input === "world" ? worldRoot : path.resolve(input)),
     logger: { info: () => {}, warn: () => {} },

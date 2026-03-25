@@ -463,7 +463,9 @@ function createGate(params: {
 function createRuntimeContext(worldRoot: string, cfg: TrpgRuntimeConfig) {
   const storeRoot = path.resolve(worldRoot, CHECKPOINT0_STORE_RELATIVE_PATH);
   const store = new JsonFileStateStore(storeRoot);
-  const questHookTextRenderer = cfg.richHookTextEnabled
+  const runtimeSafetyFlags = cfg.runtimeSafetyFlags;
+  const richHookTextEnabled = runtimeSafetyFlags.richHookActionableEnabled || runtimeSafetyFlags.richHookWorldPulseEnabled;
+  const questHookTextRenderer = richHookTextEnabled
     ? new RuleBasedQuestHookTextRenderer()
     : new NoopQuestHookTextRenderer();
   const engine = createCheckpoint0RuntimeEngine({
@@ -472,11 +474,12 @@ function createRuntimeContext(worldRoot: string, cfg: TrpgRuntimeConfig) {
     personaDriftAnalyzer: new RuleBasedPersonaDriftAnalyzer(),
     sceneRenderer: new NoopSceneRenderer(),
     questHookTextRenderer,
-    richHookTextEnabled: cfg.richHookTextEnabled,
+    richHookTextEnabled,
     hookTextTimeoutMs: cfg.hookTextTimeoutMs,
     hookTextCacheTtlSec: cfg.hookTextCacheTtlSec,
     traceMaxEvents: cfg.traceMaxEvents,
     analyzerMemoryTtlSec: cfg.analyzerMemoryTtlSec,
+    runtimeSafetyFlags,
   });
   return {
     storeRoot,
@@ -683,11 +686,13 @@ function preparePanelDispatch(params: {
   mode?: PanelMessageMode;
   errorHint?: string;
   dispatchTtlSec: number;
-  debugRuntimeSignals: boolean;
+  runtimeSafetyFlags: TrpgRuntimeConfig["runtimeSafetyFlags"];
 }): PreparedPanelDispatch {
   const mode: PanelMessageMode =
     params.mode ?? (params.session.panels.main.messageId ? "edit" : "send");
   const loop = params.session.deterministicLoop;
+  const debugRuntimeSignals = params.runtimeSafetyFlags.debugRuntimeSignals;
+  const telemetryExtended = params.runtimeSafetyFlags.telemetryExtended;
   const availableButtons = collectPanelRouteActionIds(params.session).filter(
     (actionId) => actionId !== "action.free_input.submit",
   );
@@ -699,7 +704,12 @@ function preparePanelDispatch(params: {
     routes: params.routes,
     mode,
     errorHint: params.errorHint,
-    debugRuntimeSignals: params.debugRuntimeSignals,
+    debugRuntimeSignals,
+    behavioralDriftEnabled: params.runtimeSafetyFlags.behavioralDriftEnabled,
+    anchorLifecycleEnabled: params.runtimeSafetyFlags.anchorLifecycleEnabled,
+    anchorSummaryOnly: params.runtimeSafetyFlags.anchorSummaryOnly,
+    telemetryExtended,
+    canonicalSyncEnabled: params.runtimeSafetyFlags.canonicalSyncEnabled,
   });
   const temporalSummary = buildTemporalQualitativeSummary({
     temporal: loop.temporal,
@@ -709,7 +719,7 @@ function preparePanelDispatch(params: {
     economy: loop.questEconomy,
     locationId: loop.scene.locationId,
   });
-  const temporalSummaryPayload = params.debugRuntimeSignals
+  const temporalSummaryPayload = debugRuntimeSignals
     ? temporalSummary
     : {
         memory: temporalSummary.memory,
@@ -717,7 +727,7 @@ function preparePanelDispatch(params: {
         freshness: temporalSummary.freshness,
         location: temporalSummary.location,
       };
-  const questSummaryPayload = params.debugRuntimeSignals
+  const questSummaryPayload = debugRuntimeSignals && telemetryExtended
     ? questSummary
     : {
         actionable: {
@@ -887,11 +897,30 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
             worldRoot: gate.worldRoot,
             cfg,
           });
-          const canonicalProvenance = await loadRuntimeCanonicalProvenance({
-            worldRoot: gate.worldRoot,
-            cfg,
-            seedBootstrap,
-          });
+          const canonicalProvenance = cfg.runtimeSafetyFlags.canonicalSyncEnabled
+            ? await loadRuntimeCanonicalProvenance({
+                worldRoot: gate.worldRoot,
+                cfg,
+                seedBootstrap,
+              })
+            : createRuntimeCanonicalProvenance({
+                sourcePolicy: "seed_bootstrap_only",
+                worldId: seedBootstrap.bootstrap?.worldId ?? null,
+                schemaVersion: seedBootstrap.bootstrap?.schemaVersion ?? null,
+                seedSourcePath: seedBootstrap.sourcePath,
+                seedFingerprint: seedBootstrap.bootstrap?.seedFingerprint ?? null,
+                canonSourcePath: null,
+                canonFingerprint: null,
+                generatedAtIso: null,
+                validatedAtIso: new Date().toISOString(),
+                driftStatus: "unknown",
+                driftCounts: {
+                  addedInSeed: 0,
+                  missingInSeed: 0,
+                  changedScaffold: 0,
+                  incompatible: 0,
+                },
+              });
           const result = await runtime.engine.startNewSession({
             channelKey,
             ownerId,
@@ -908,7 +937,7 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
             mode: "send",
             nowIso,
             dispatchTtlSec: cfg.panelDispatchTtlSec,
-            debugRuntimeSignals: cfg.debugRuntimeSignals,
+            runtimeSafetyFlags: cfg.runtimeSafetyFlags,
           });
           await runtime.store.upsertSession(prepared.session);
 
@@ -1013,7 +1042,7 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
             errorHint: forceRecreate ? "강제 재생성 모드: 새 메시지로 패널을 다시 올려야 한다." : undefined,
             nowIso,
             dispatchTtlSec: cfg.panelDispatchTtlSec,
-            debugRuntimeSignals: cfg.debugRuntimeSignals,
+            runtimeSafetyFlags: cfg.runtimeSafetyFlags,
           });
           await runtime.store.upsertSession(prepared.session);
 
@@ -1104,7 +1133,7 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
             mode: session.panels.main.messageId ? "edit" : "send",
             nowIso,
             dispatchTtlSec: cfg.panelDispatchTtlSec,
-            debugRuntimeSignals: cfg.debugRuntimeSignals,
+            runtimeSafetyFlags: cfg.runtimeSafetyFlags,
           });
           await runtime.store.upsertSession(prepared.session);
 
@@ -1401,7 +1430,7 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
                 : undefined,
             nowIso,
             dispatchTtlSec: cfg.panelDispatchTtlSec,
-            debugRuntimeSignals: cfg.debugRuntimeSignals,
+            runtimeSafetyFlags: cfg.runtimeSafetyFlags,
           });
           await runtime.store.upsertSession(prepared.session);
 

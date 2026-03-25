@@ -164,6 +164,116 @@ test("anchor forms from candidate pressure and stays deterministic in scene loop
   assert.deepEqual(first.nextLoop.anchor, second.nextLoop.anchor);
 });
 
+test("anchorLifecycleEnabled=false bypasses anchor tick and hides anchor panel rows", async () => {
+  const { sceneLoop, panel } = await modulesPromise;
+  const nowIso = "2026-03-24T00:00:00.000Z";
+
+  const bootstrap = {
+    source: "worldSeed",
+    worldId: "world-anchor-disabled",
+    schemaVersion: 1,
+    seedValue: "seed-anchor-disabled",
+    seedFingerprint: "fp-anchor-disabled",
+    determinismKey: "det-anchor-disabled",
+    generationProfile: {
+      profileId: "default",
+      pressureScalePercent: 100,
+      locationVolatility: "mixed",
+    },
+    questEconomy: {
+      worldPressures: [
+        {
+          pressureId: "pressure-anchor-disabled",
+          archetype: "power_struggle",
+          intensity: 88,
+          momentum: 3,
+          cadenceSec: 160,
+          targetLocations: ["loc-anchor-disabled"],
+          anchorCandidate: true,
+        },
+      ],
+    },
+    temporal: {
+      locationBaselines: [],
+    },
+    scaffold: {
+      factionIds: [],
+      npcArchetypeIds: [],
+    },
+  };
+
+  const baseLoop = sceneLoop.createInitialDeterministicSceneLoop({
+    sceneId: "scene-anchor-disabled",
+    nowIso,
+    bootstrap,
+  });
+  baseLoop.scene.locationId = "loc-anchor-disabled";
+
+  const enabled = sceneLoop.resolveDeterministicSceneAction({
+    loop: structuredClone(baseLoop),
+    routeActionId: "action.wait",
+    nowIso,
+  });
+  const disabled = sceneLoop.resolveDeterministicSceneAction({
+    loop: structuredClone(baseLoop),
+    routeActionId: "action.wait",
+    nowIso,
+    runtimeSafety: {
+      anchorLifecycleEnabled: false,
+    },
+  });
+
+  assert.ok(enabled.anchorSummary.formedNow >= 1);
+  assert.equal(disabled.anchorSummary.formedNow, 0);
+  assert.deepEqual(disabled.nextLoop.anchor, baseLoop.anchor);
+
+  const panelOut = panel.buildCheckpoint1Panel({
+    session: makeSession(disabled.nextLoop, nowIso),
+    routes: [],
+    mode: "send",
+    anchorLifecycleEnabled: false,
+  });
+  const panelText = JSON.stringify(panelOut.components);
+  assert.equal(panelText.includes("장기 축:"), false);
+  assert.equal(panelText.includes("앵커 축:"), false);
+});
+
+test("anchorSummaryOnly stays projection-only and does not alter quest economy path", async () => {
+  const { sceneLoop } = await modulesPromise;
+  const nowIso = "2026-03-24T00:00:00.000Z";
+  const loop = sceneLoop.createInitialDeterministicSceneLoop({
+    sceneId: "scene-anchor-summary-only",
+    nowIso,
+  });
+  loop.scene.locationId = "loc-anchor-summary-only";
+
+  const summaryOnly = sceneLoop.resolveDeterministicSceneAction({
+    loop: structuredClone(loop),
+    routeActionId: "action.wait",
+    nowIso,
+    runtimeSafety: {
+      anchorSummaryOnly: true,
+    },
+  });
+
+  const notSummaryOnly = sceneLoop.resolveDeterministicSceneAction({
+    loop: structuredClone(loop),
+    routeActionId: "action.wait",
+    nowIso,
+    runtimeSafety: {
+      anchorSummaryOnly: false,
+    },
+  });
+
+  const projectCore = (resolved) => ({
+    scene: resolved.nextLoop.scene,
+    questEconomy: resolved.nextLoop.questEconomy,
+    time: resolved.nextLoop.time,
+  });
+
+  assert.deepEqual(projectCore(summaryOnly), projectCore(notSummaryOnly));
+});
+
 test("runAnchorTick handles lifecycle transitions, cap, and no-hard-delete guard", async () => {
   const { anchorLayer, sceneLoop } = await modulesPromise;
   const nowIso = "2026-03-24T00:00:00.000Z";
@@ -572,4 +682,97 @@ test("engine emits anchor trace events when anchor lifecycle changes", async () 
   const traceTypes = processed.session.trace.events.map((entry) => entry.type);
   const hasAnchorTrace = traceTypes.some((entry) => entry.startsWith("engine.anchor."));
   assert.equal(hasAnchorTrace, true);
+});
+
+test("engine with anchorLifecycleEnabled=false emits no anchor trace events", async () => {
+  const { analyzer, noopLane, runtimeEngine, sceneLoop } = await modulesPromise;
+  const nowIso = "2026-03-24T00:00:00.000Z";
+  const store = {
+    async readSession() {
+      return null;
+    },
+    async readActiveSessionByChannel() {
+      return null;
+    },
+    async upsertSession() {},
+    async upsertInteractionRoute() {},
+    async readInteractionRoute() {
+      return null;
+    },
+    async consumeInteractionRoute() {
+      return null;
+    },
+    async deleteRoutesForSession() {
+      return 0;
+    },
+    async listRoutesForSession() {
+      return [];
+    },
+  };
+
+  const engine = runtimeEngine.createCheckpoint0RuntimeEngine({
+    store,
+    intentAnalyzer: new analyzer.RuleBasedIntentAnalyzer(),
+    personaDriftAnalyzer: new analyzer.RuleBasedPersonaDriftAnalyzer(),
+    sceneRenderer: new noopLane.NoopSceneRenderer(),
+    runtimeSafetyFlags: {
+      anchorLifecycleEnabled: false,
+    },
+  });
+
+  const bootstrap = {
+    source: "worldSeed",
+    worldId: "world-anchor-disabled-trace",
+    schemaVersion: 1,
+    seedValue: "seed-anchor-disabled-trace",
+    seedFingerprint: "fp-anchor-disabled-trace",
+    determinismKey: "det-anchor-disabled-trace",
+    generationProfile: {
+      profileId: "default",
+      pressureScalePercent: 100,
+      locationVolatility: "mixed",
+    },
+    questEconomy: {
+      worldPressures: [
+        {
+          pressureId: "pressure-anchor-disabled-trace",
+          archetype: "power_struggle",
+          intensity: 90,
+          momentum: 3,
+          cadenceSec: 160,
+          targetLocations: ["loc-anchor-disabled-trace"],
+          anchorCandidate: true,
+        },
+      ],
+    },
+    temporal: {
+      locationBaselines: [],
+    },
+    scaffold: {
+      factionIds: [],
+      npcArchetypeIds: [],
+    },
+  };
+
+  const created = await engine.startNewSession({
+    channelKey: "discord:anchor-disabled-trace",
+    ownerId: "owner-1",
+    initialSceneId: "scene-anchor-disabled-trace",
+    runtimeBootstrap: bootstrap,
+  });
+  const session = created.session;
+  session.deterministicLoop.scene.locationId = "loc-anchor-disabled-trace";
+  session.deterministicLoop = sceneLoop.ensureDeterministicSceneLoopState(session.deterministicLoop, {
+    sceneId: session.sceneId,
+    nowIso,
+  });
+
+  const processed = await engine.processSceneAction({
+    session,
+    routeActionId: "action.rush",
+  });
+
+  const traceTypes = processed.session.trace.events.map((entry) => entry.type);
+  const hasAnchorTrace = traceTypes.some((entry) => entry.startsWith("engine.anchor."));
+  assert.equal(hasAnchorTrace, false);
 });

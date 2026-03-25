@@ -555,9 +555,17 @@ test("panel clearly separates active and surfaced quest summaries", async () => 
     mode: "send",
     debugRuntimeSignals: true,
   });
+  const debugExtendedPanel = panel.buildCheckpoint1Panel({
+    session,
+    routes: [],
+    mode: "send",
+    debugRuntimeSignals: true,
+    telemetryExtended: true,
+  });
 
   const playerText = JSON.stringify(playerPanel.components);
   const debugText = JSON.stringify(debugPanel.components);
+  const debugExtendedText = JSON.stringify(debugExtendedPanel.components);
 
   assert.ok(playerText.includes("활성 과제:"));
   assert.ok(playerText.includes("접촉 기회:"));
@@ -566,7 +574,8 @@ test("panel clearly separates active and surfaced quest summaries", async () => 
   assert.equal(playerText.includes("debug.quest_tuning.raw"), false);
   assert.equal(playerText.includes("debug.quest_hook_text.raw"), false);
   assert.equal(playerText.includes("budget_used=live"), false);
-  assert.equal(debugText.includes("debug.quest_tuning.raw"), true);
+  assert.equal(debugText.includes("debug.quest_tuning.raw"), false);
+  assert.equal(debugExtendedText.includes("debug.quest_tuning.raw"), true);
   assert.equal(debugText.includes("debug.quest_hook_text.raw"), true);
 });
 

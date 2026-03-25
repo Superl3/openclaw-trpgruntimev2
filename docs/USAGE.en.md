@@ -57,6 +57,10 @@ Use it from `~/.openclaw/extensions/trpg-runtime` either as a plugin-only overla
 ## 2.6) Optional rich hook lane notes (Checkpoint 6C)
 
 - Runtime adds an optional hook text lane for actionable slots (`active top 1 + surfaced top up to 2`) and a narrow `worldPulse` synthetic slot.
+- Runtime safety flags gate each lane independently:
+  - `richHookActionableEnabled` controls actionable slot rewrites.
+  - `richHookWorldPulseEnabled` controls worldPulse rewrite.
+  - `richHookRecentOutcomesEnabled` is policy-blocked in v1 to prevent accidental lane expansion.
 - Lane is non-authoritative: lifecycle/budget/pressure adjudication remains deterministic engine responsibility.
 - Input/output contract is compact and bounded (`slotKey` + short structured facts, max 3 overrides).
 - `llmShortText` is constrained to one short line and is clipped to `defaultText` length.
@@ -105,6 +109,7 @@ Use it from `~/.openclaw/extensions/trpg-runtime` either as a plugin-only overla
   - refresh scaffold fields from seed projection (`factionId/name/enabled/homeLocationIds/pressureAffinityIds/posture`)
   - preserve operational fields (`resources`, `heat`) unless `--policy replace_all` is explicitly chosen.
 - Faction tick output now includes canonical provenance and drift hint metadata for ops/debug.
+- Runtime default (`canonicalSyncEnabled=false`) keeps bootstrap flow in safe mode and skips automatic canonical drift load.
 - Recommended operator loop:
   1. validate seed
   2. run drift audit
@@ -112,6 +117,19 @@ Use it from `~/.openclaw/extensions/trpg-runtime` either as a plugin-only overla
   4. apply explicitly (`--apply`, and `--force` for overwrite)
   5. validate canon
   6. run faction tick/runtime session
+
+## 2.11) Runtime safety flags (v1 safe mode)
+
+- Core remains always-on deterministic truth: scene loop, temporal systems, quest economy, world seed bootstrap, faction canon scaffold.
+- v1 safe-mode defaults:
+  - `behavioralDriftEnabled=true`, `behavioralDriftAffectsRules=false`
+  - `anchorLifecycleEnabled=true`, `anchorSummaryOnly=true`
+  - `richHookActionableEnabled=true`, `richHookWorldPulseEnabled=true`, `richHookRecentOutcomesEnabled=false`
+  - `debugRuntimeSignals=false`, `traceVerbose=false`, `telemetryExtended=false`
+  - `canonicalSyncEnabled=false`, `canonicalWriteBackEnabled=false`
+- `anchorLifecycleEnabled=false` bypasses anchor tick and hides anchor rows from panel projections.
+- `traceVerbose=false` and `telemetryExtended=false` keep trace/debug outputs bounded and compact.
+- `canonicalWriteBackEnabled=false` blocks canonical targets in audited patch apply path.
 
 ## 2.9) Anchor lifecycle notes (Checkpoint 7C)
 

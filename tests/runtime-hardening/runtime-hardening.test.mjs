@@ -316,14 +316,134 @@ test("default panel hides raw drift and debug panel shows raw drift", async () =
     mode: "send",
     debugRuntimeSignals: true,
   });
+  const debugExtended = panel.buildCheckpoint1Panel({
+    session,
+    routes: [],
+    mode: "send",
+    debugRuntimeSignals: true,
+    telemetryExtended: true,
+  });
 
   const normalText = JSON.stringify(normal.components);
   const debugText = JSON.stringify(debug.components);
+  const debugExtendedText = JSON.stringify(debugExtended.components);
 
   assert.equal(normalText.includes("debug.behavioral_drift.raw"), false);
   assert.equal(debugText.includes("debug.behavioral_drift.raw"), true);
   assert.equal(normalText.includes("debug.quest_tuning.raw"), false);
-  assert.equal(debugText.includes("debug.quest_tuning.raw"), true);
+  assert.equal(debugText.includes("debug.quest_tuning.raw"), false);
+  assert.equal(debugExtendedText.includes("debug.quest_tuning.raw"), true);
+});
+
+test("behavioralDriftEnabled=false freezes drift accumulation and keeps core identity mode", async () => {
+  const { analyzer, noopLane, runtimeEngine, sceneLoop } = await modulesPromise;
+  const nowIso = "2026-03-24T00:00:00.000Z";
+  const session = makeSession(sceneLoop, nowIso);
+  session.deterministicLoop.behavioralDrift.drift.warmth = 0.6;
+  session.deterministicLoop.behavioralDrift.drift.boldness = -0.2;
+
+  const engine = runtimeEngine.createCheckpoint0RuntimeEngine({
+    store: createMemoryStore(),
+    intentAnalyzer: new analyzer.RuleBasedIntentAnalyzer(),
+    personaDriftAnalyzer: new analyzer.RuleBasedPersonaDriftAnalyzer(),
+    sceneRenderer: new noopLane.NoopSceneRenderer(),
+    runtimeSafetyFlags: {
+      behavioralDriftEnabled: false,
+    },
+  });
+
+  const processed = await engine.processSceneAction({
+    session,
+    routeActionId: "action.free_input.submit",
+    freeInput: "주변을 조사한다",
+  });
+
+  assert.deepEqual(
+    processed.session.deterministicLoop.behavioralDrift.drift,
+    sceneLoop.zeroBehavioralAxisVector(),
+  );
+  const driftTrace = processed.session.trace.events.find((entry) => entry.type === "analyzer.drift.rejected");
+  assert.ok(driftTrace);
+});
+
+test("behavioralDriftAffectsRules flag does not alter deterministic rule adjudication", async () => {
+  const { analyzer, noopLane, runtimeEngine, sceneLoop } = await modulesPromise;
+  const nowIso = "2026-03-24T00:00:00.000Z";
+  const seedSession = makeSession(sceneLoop, nowIso);
+
+  const runWithFlag = async (behavioralDriftAffectsRules) => {
+    const engine = runtimeEngine.createCheckpoint0RuntimeEngine({
+      store: createMemoryStore(),
+      intentAnalyzer: new analyzer.RuleBasedIntentAnalyzer(),
+      personaDriftAnalyzer: new analyzer.RuleBasedPersonaDriftAnalyzer(),
+      sceneRenderer: new noopLane.NoopSceneRenderer(),
+      runtimeSafetyFlags: {
+        behavioralDriftEnabled: true,
+        behavioralDriftAffectsRules,
+      },
+    });
+    return engine.processSceneAction({
+      session: structuredClone(seedSession),
+      routeActionId: "action.free_input.submit",
+      freeInput: "강행 돌파한다",
+    });
+  };
+
+  const off = await runWithFlag(false);
+  const on = await runWithFlag(true);
+
+  assert.equal(off.resolution.resolvedActionId, on.resolution.resolvedActionId);
+  assert.equal(off.resolution.classification, on.resolution.classification);
+  assert.equal(off.resolution.deltaTimeSec, on.resolution.deltaTimeSec);
+});
+
+test("traceVerbose/telemetryExtended flags keep trace payload bounded by default", async () => {
+  const { analyzer, noopLane, questEconomy, runtimeEngine, sceneLoop } = await modulesPromise;
+  const nowIso = "2026-03-24T00:00:00.000Z";
+  const session = makeHookReadySession(sceneLoop, questEconomy, nowIso, 84);
+
+  const compactEngine = runtimeEngine.createCheckpoint0RuntimeEngine({
+    store: createMemoryStore(),
+    intentAnalyzer: new analyzer.RuleBasedIntentAnalyzer(),
+    personaDriftAnalyzer: new analyzer.RuleBasedPersonaDriftAnalyzer(),
+    sceneRenderer: new noopLane.NoopSceneRenderer(),
+    runtimeSafetyFlags: {
+      traceVerbose: false,
+      telemetryExtended: false,
+      richHookActionableEnabled: false,
+      richHookWorldPulseEnabled: false,
+    },
+  });
+
+  const verboseEngine = runtimeEngine.createCheckpoint0RuntimeEngine({
+    store: createMemoryStore(),
+    intentAnalyzer: new analyzer.RuleBasedIntentAnalyzer(),
+    personaDriftAnalyzer: new analyzer.RuleBasedPersonaDriftAnalyzer(),
+    sceneRenderer: new noopLane.NoopSceneRenderer(),
+    runtimeSafetyFlags: {
+      traceVerbose: true,
+      telemetryExtended: true,
+      richHookActionableEnabled: false,
+      richHookWorldPulseEnabled: false,
+    },
+  });
+
+  const compact = await compactEngine.processSceneAction({
+    session: structuredClone(session),
+    routeActionId: "action.wait",
+  });
+  const verbose = await verboseEngine.processSceneAction({
+    session: structuredClone(session),
+    routeActionId: "action.wait",
+  });
+
+  const compactLifecycle = compact.session.trace.events.find((entry) => entry.type === "engine.quest.lifecycle");
+  const verboseLifecycle = verbose.session.trace.events.find((entry) => entry.type === "engine.quest.lifecycle");
+  assert.ok(compactLifecycle && verboseLifecycle);
+  assert.equal(Object.hasOwn(compactLifecycle.data, "transitions"), false);
+  assert.equal(Object.hasOwn(compactLifecycle.data, "tuningSnapshot"), false);
+  assert.equal(Array.isArray(verboseLifecycle.data.transitions), true);
+  assert.equal(typeof verboseLifecycle.data.tuningSnapshot, "object");
 });
 
 test("hook lane renderer error falls back without breaking action resolution", async () => {
@@ -476,6 +596,9 @@ test("worldPulse slotType override applies through shared hook lane", async () =
     richHookTextEnabled: true,
     hookTextTimeoutMs: 150,
     hookTextCacheTtlSec: 600,
+    runtimeSafetyFlags: {
+      traceVerbose: true,
+    },
   });
 
   const processed = await engine.processSceneAction({
@@ -490,6 +613,107 @@ test("worldPulse slotType override applies through shared hook lane", async () =
   assert.ok(hookTrace);
   const slotMetaText = JSON.stringify(hookTrace.data.slotMeta);
   assert.equal(slotMetaText.includes("worldPulse"), true);
+});
+
+test("richHookActionableEnabled=false keeps actionable hooks deterministic", async () => {
+  const { analyzer, noopLane, questEconomy, runtimeEngine, sceneLoop } = await modulesPromise;
+  const nowIso = "2026-03-24T00:00:00.000Z";
+  const session = makeHookReadySession(sceneLoop, questEconomy, nowIso, 86);
+
+  const engine = runtimeEngine.createCheckpoint0RuntimeEngine({
+    store: createMemoryStore(),
+    intentAnalyzer: new analyzer.RuleBasedIntentAnalyzer(),
+    personaDriftAnalyzer: new analyzer.RuleBasedPersonaDriftAnalyzer(),
+    sceneRenderer: new noopLane.NoopSceneRenderer(),
+    questHookTextRenderer: {
+      render: async (input) => ({
+        contractVersion: 1,
+        overrides: input.slots.map((slot) => ({ slotKey: slot.slotKey, shortText: "짧은 후크" })),
+      }),
+    },
+    runtimeSafetyFlags: {
+      richHookActionableEnabled: false,
+      richHookWorldPulseEnabled: true,
+      traceVerbose: true,
+    },
+  });
+
+  const processed = await engine.processSceneAction({
+    session,
+    routeActionId: "action.wait",
+  });
+
+  const actionableSlot = processed.session.deterministicLoop.questEconomy.presentation.hookSlots[0] ?? null;
+  const worldPulseSlot = processed.session.deterministicLoop.questEconomy.presentation.worldPulseSlot;
+  assert.ok(actionableSlot);
+  assert.equal(actionableSlot.llmShortText, null);
+  assert.ok(worldPulseSlot);
+  assert.equal(typeof worldPulseSlot.llmShortText, "string");
+});
+
+test("richHookWorldPulseEnabled=false keeps worldPulse deterministic", async () => {
+  const { analyzer, noopLane, questEconomy, runtimeEngine, sceneLoop } = await modulesPromise;
+  const nowIso = "2026-03-24T00:00:00.000Z";
+  const session = makeHookReadySession(sceneLoop, questEconomy, nowIso, 86);
+
+  const engine = runtimeEngine.createCheckpoint0RuntimeEngine({
+    store: createMemoryStore(),
+    intentAnalyzer: new analyzer.RuleBasedIntentAnalyzer(),
+    personaDriftAnalyzer: new analyzer.RuleBasedPersonaDriftAnalyzer(),
+    sceneRenderer: new noopLane.NoopSceneRenderer(),
+    questHookTextRenderer: {
+      render: async (input) => ({
+        contractVersion: 1,
+        overrides: input.slots.map((slot) => ({ slotKey: slot.slotKey, shortText: "짧은 후크" })),
+      }),
+    },
+    runtimeSafetyFlags: {
+      richHookActionableEnabled: true,
+      richHookWorldPulseEnabled: false,
+      traceVerbose: true,
+    },
+  });
+
+  const processed = await engine.processSceneAction({
+    session,
+    routeActionId: "action.wait",
+  });
+
+  const actionableSlot = processed.session.deterministicLoop.questEconomy.presentation.hookSlots[0] ?? null;
+  const worldPulseSlot = processed.session.deterministicLoop.questEconomy.presentation.worldPulseSlot;
+  assert.ok(actionableSlot);
+  assert.equal(typeof actionableSlot.llmShortText, "string");
+  assert.ok(worldPulseSlot);
+  assert.equal(worldPulseSlot.llmShortText, null);
+});
+
+test("recentOutcomes rich lane request is policy-blocked even when flag is true", async () => {
+  const { analyzer, noopLane, questEconomy, runtimeEngine, sceneLoop } = await modulesPromise;
+  const nowIso = "2026-03-24T00:00:00.000Z";
+  const session = makeHookReadySession(sceneLoop, questEconomy, nowIso, 86);
+
+  const engine = runtimeEngine.createCheckpoint0RuntimeEngine({
+    store: createMemoryStore(),
+    intentAnalyzer: new analyzer.RuleBasedIntentAnalyzer(),
+    personaDriftAnalyzer: new analyzer.RuleBasedPersonaDriftAnalyzer(),
+    sceneRenderer: new noopLane.NoopSceneRenderer(),
+    runtimeSafetyFlags: {
+      richHookActionableEnabled: true,
+      richHookWorldPulseEnabled: true,
+      richHookRecentOutcomesEnabled: true,
+      traceVerbose: true,
+    },
+  });
+
+  const processed = await engine.processSceneAction({
+    session,
+    routeActionId: "action.wait",
+  });
+
+  const hookTrace = processed.session.trace.events.find((entry) => entry.type === "engine.quest.hook_text");
+  assert.ok(hookTrace);
+  assert.equal(hookTrace.data.recentOutcomesRichRequested, true);
+  assert.equal(hookTrace.data.recentOutcomesRichApplied, false);
 });
 
 test("deterministic quest lifecycle and budgets remain identical with hook lane on or off", async () => {

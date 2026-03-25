@@ -48,11 +48,15 @@ async function loadModules() {
 
   const worldSeed = await importFromOut("src/runtime-core/world-seed.js");
   const factionCanon = await importFromOut("src/faction-canon.js");
+  const config = await importFromOut("src/config.js");
+  const patchEngine = await importFromOut("src/patch-engine.js");
   const pluginModule = await importFromOut("index.js");
 
   return {
     worldSeed,
     factionCanon,
+    config,
+    patchEngine,
     plugin: pluginModule.default,
   };
 }
@@ -161,7 +165,7 @@ function makeValidSeed() {
   };
 }
 
-async function setupPluginTools(plugin, worldRoot) {
+async function setupPluginTools(plugin, worldRoot, overrides = {}) {
   const tools = new Map();
   const api = {
     pluginConfig: {
@@ -169,6 +173,7 @@ async function setupPluginTools(plugin, worldRoot) {
       panelDispatchTtlSec: 120,
       traceMaxEvents: 80,
       debugRuntimeSignals: false,
+      ...overrides,
     },
     resolvePath: (input) => (input === "world" ? worldRoot : path.resolve(input)),
     logger: { info: () => {}, warn: () => {} },
@@ -354,6 +359,92 @@ test("sync helper apply updates scaffold fields and preserves resources/heat by 
   assert.equal(syncedWatch.heat, 7);
 });
 
+test("canonicalSyncEnabled=false keeps runtime canonical provenance in safe unknown mode", async () => {
+  const { plugin, worldSeed, factionCanon } = await modulesPromise;
+  const worldRoot = "/tmp/trpg-runtime-v2-sync-runtime-safe-mode";
+  await fs.rm(worldRoot, { recursive: true, force: true });
+  await fs.mkdir(path.resolve(worldRoot, "canon"), { recursive: true });
+  await fs.mkdir(path.resolve(worldRoot, "state/runtime-core"), { recursive: true });
+
+  const seed = makeValidSeed();
+  const validatedSeed = worldSeed.validateWorldSeed(seed);
+  assert.equal(validatedSeed.ok, true);
+  const canon = factionCanon.projectFactionCanonFromWorldSeed(validatedSeed.seed);
+
+  await writeYaml(path.resolve(worldRoot, "canon/world-seed.yaml"), seed);
+  await writeYaml(path.resolve(worldRoot, "canon/factions.yaml"), canon);
+
+  const tools = await setupPluginTools(plugin, worldRoot);
+  const newTool = tools.get("trpg_session_new");
+  assert.ok(newTool);
+
+  const created = JSON.parse((await newTool.execute("new", {
+    channelKey: "discord:sync-safe-mode",
+    ownerId: "owner-1",
+  })).content[0].text);
+
+  assert.equal(created.ok, true);
+  assert.equal(created.session.runtimeMetadata.canonicalSync.driftStatus, "unknown");
+  assert.equal(created.session.runtimeMetadata.canonicalSync.canonFingerprint, null);
+  assert.equal(created.session.runtimeMetadata.canonicalSync.sourcePolicy, "seed_bootstrap_only");
+});
+
+test("canonicalWriteBackEnabled=false blocks canonical targets in audited apply", async () => {
+  const { config, patchEngine } = await modulesPromise;
+  const worldRoot = "/tmp/trpg-runtime-v2-sync-writeback-guard";
+  await fs.rm(worldRoot, { recursive: true, force: true });
+  await fs.mkdir(path.resolve(worldRoot, "canon"), { recursive: true });
+
+  await writeYaml(path.resolve(worldRoot, "canon/factions.yaml"), {
+    schemaVersion: 1,
+    worldId: "world-sync-alpha",
+    factions: [],
+  });
+
+  const cfg = config.parseTrpgRuntimeConfig({
+    allowPatchApply: true,
+    canonicalWriteBackEnabled: false,
+  });
+  const cache = patchEngine.createPatchCache();
+  const dryRun = await patchEngine.runPatchDryRun({
+    worldRoot,
+    cfg,
+    agentId: "trpg",
+    cache,
+    input: {
+      title: "canon writeback guard test",
+      operations: [
+        {
+          op: "set",
+          file: "canon/factions.yaml",
+          pointer: "/meta",
+          value: { test: true },
+        },
+      ],
+    },
+  });
+
+  assert.equal(dryRun.ok, true);
+  const apply = await patchEngine.runPatchApply({
+    worldRoot,
+    cfg,
+    agentId: "trpg",
+    cache,
+    input: {
+      validatedPatchId: dryRun.patchId,
+      audit: {
+        approved: true,
+        approvedBy: "canon-auditor",
+        verdict: "pass",
+        conflictStatus: "non-conflicting",
+      },
+    },
+  });
+
+  assert.equal(apply.ok, false);
+  assert.match(String(apply.error), /canonical write-back is disabled/i);
+});
+
 test("runtime canonical provenance persists across new + resume", async () => {
   const { plugin, worldSeed, factionCanon } = await modulesPromise;
   const worldRoot = "/tmp/trpg-runtime-v2-sync-runtime-provenance";
@@ -370,7 +461,9 @@ test("runtime canonical provenance persists across new + resume", async () => {
   await writeJson(path.resolve(worldRoot, "canon/factions.json"), canon);
   await writeYaml(path.resolve(worldRoot, "canon/factions.yaml"), canon);
 
-  const tools = await setupPluginTools(plugin, worldRoot);
+  const tools = await setupPluginTools(plugin, worldRoot, {
+    canonicalSyncEnabled: true,
+  });
   const newTool = tools.get("trpg_session_new");
   const resumeTool = tools.get("trpg_session_resume");
   assert.ok(newTool && resumeTool);

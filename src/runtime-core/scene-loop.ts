@@ -12,6 +12,7 @@ import {
   type QuestEconomyTickSummary,
 } from "./quest-economy.js";
 import {
+  createNoopAnchorTickSummary,
   ensureAnchorRuntimeState,
   runAnchorTick,
   type AnchorRuntimeState,
@@ -150,6 +151,11 @@ export type DeterministicActionInput = {
   freeInput?: string;
   resolvedActionOverride?: string;
   nowIso: string;
+  runtimeSafety?: {
+    anchorLifecycleEnabled?: boolean;
+    anchorSummaryOnly?: boolean;
+    behavioralDriftAffectsRules?: boolean;
+  };
 };
 
 export type DeterministicActionResolution = {
@@ -1036,17 +1042,28 @@ export function resolveDeterministicSceneAction(input: DeterministicActionInput)
     temporalSignal: questTemporalSignal,
   });
 
-  const anchorTick = runAnchorTick({
-    anchor: current.anchor,
-    economyBefore: current.questEconomy,
-    economyAfter: questTick.nextEconomy,
-    questSummary: questTick.summary,
-    nowIso: worldNowIso,
-    deltaTimeSec,
-    actionId: resolvedAction.resolvedActionId,
-    classification: classified.classification,
-    sceneId: nextScene.sceneId,
-  });
+  const anchorLifecycleEnabled = input.runtimeSafety?.anchorLifecycleEnabled !== false;
+  const anchorSummaryOnly = input.runtimeSafety?.anchorSummaryOnly !== false;
+  const anchorTick = anchorLifecycleEnabled
+    ? runAnchorTick({
+        anchor: current.anchor,
+        economyBefore: current.questEconomy,
+        economyAfter: questTick.nextEconomy,
+        questSummary: questTick.summary,
+        nowIso: worldNowIso,
+        deltaTimeSec,
+        actionId: resolvedAction.resolvedActionId,
+        classification: classified.classification,
+        sceneId: nextScene.sceneId,
+        summaryOnly: anchorSummaryOnly,
+      })
+    : {
+        nextAnchor: current.anchor,
+        summary: createNoopAnchorTickSummary({
+          signalMode: "noop",
+          signalReason: "anchor_lifecycle_disabled",
+        }),
+      };
 
   nextScene.riskTier = riskTierFromPressure(nextScene.pressure);
 

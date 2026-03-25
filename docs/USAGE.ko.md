@@ -57,6 +57,10 @@
 ## 2.6) Optional rich hook lane 메모 (Checkpoint 6C)
 
 - actionable slot(활성 top 1 + surfaced 최대 2)과 좁은 `worldPulse` synthetic slot을 대상으로 optional hook text lane을 추가했습니다.
+- runtime safety flag로 lane을 분리 제어합니다:
+  - `richHookActionableEnabled`: actionable slot rewrite on/off
+  - `richHookWorldPulseEnabled`: worldPulse rewrite on/off
+  - `richHookRecentOutcomesEnabled`: v1에서는 정책적으로 차단(확장 lane 오활성 방지)
 - lane은 비권한(non-authoritative) 계층이며 lifecycle/budget/pressure 판정은 기존 deterministic engine이 유지합니다.
 - I/O 계약은 compact/bounded 형태입니다 (`slotKey` 중심 구조화 사실, override 최대 3개).
 - `llmShortText`는 단문 1줄 제한이며 `defaultText` 길이를 넘지 않도록 잘립니다.
@@ -106,6 +110,7 @@
   - operational 필드(`resources`, `heat`)는 기본 보존
   - 전체 교체가 필요하면 명시적으로 `--policy replace_all` 사용
 - faction tick 결과에 canonical provenance 및 drift 힌트 메타데이터가 포함됩니다.
+- runtime 기본값(`canonicalSyncEnabled=false`)에서는 안전 모드로 동작하며 자동 canonical drift load를 수행하지 않습니다.
 - 권장 운영 루프:
   1. seed validate
   2. drift audit 실행
@@ -113,6 +118,19 @@
   4. 명시적 apply (`--apply`, overwrite 시 `--force`)
   5. canon validate
   6. faction tick/runtime session 실행
+
+## 2.11) Runtime safety flags (v1 안전 모드)
+
+- 코어는 항상 켜진 deterministic truth로 유지됩니다: scene loop, temporal systems, quest economy, world seed bootstrap, faction canon scaffold.
+- v1 안전 모드 기본값:
+  - `behavioralDriftEnabled=true`, `behavioralDriftAffectsRules=false`
+  - `anchorLifecycleEnabled=true`, `anchorSummaryOnly=true`
+  - `richHookActionableEnabled=true`, `richHookWorldPulseEnabled=true`, `richHookRecentOutcomesEnabled=false`
+  - `debugRuntimeSignals=false`, `traceVerbose=false`, `telemetryExtended=false`
+  - `canonicalSyncEnabled=false`, `canonicalWriteBackEnabled=false`
+- `anchorLifecycleEnabled=false`이면 anchor tick을 우회하고 패널 anchor 행도 숨깁니다.
+- `traceVerbose=false`, `telemetryExtended=false`는 trace/debug 출력 범위를 축약해 bounded 상태를 유지합니다.
+- `canonicalWriteBackEnabled=false`이면 audited patch apply 경로에서 canonical 대상 write-back을 차단합니다.
 
 ## 2.9) Anchor lifecycle 메모 (Checkpoint 7C)
 

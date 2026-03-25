@@ -95,6 +95,7 @@ export type AnchorTickInput = {
   actionId: DeterministicActionId;
   classification: ActionFeasibility;
   sceneId: string;
+  summaryOnly?: boolean;
   factionSignal?: unknown;
 };
 
@@ -458,7 +459,30 @@ function capAnchorList(anchors: AnchorState[]): { anchors: AnchorState[]; droppe
   };
 }
 
+export function createNoopAnchorTickSummary(params?: {
+  signalMode?: AnchorTickSummary["debug"]["signalMode"];
+  signalReason?: string | null;
+}): AnchorTickSummary {
+  return {
+    formedNow: 0,
+    advancedNow: 0,
+    escalatedNow: 0,
+    resolvedNow: 0,
+    failedNow: 0,
+    archivedNow: 0,
+    activeCount: 0,
+    escalatedCount: 0,
+    events: [],
+    debug: {
+      signalMode: params?.signalMode ?? "missing",
+      signalReason: params?.signalReason ?? null,
+      cappedDroppedCandidates: 0,
+    },
+  };
+}
+
 export function runAnchorTick(input: AnchorTickInput): AnchorTickResult {
+  // v1 safety policy: anchor layer remains summary/projection-only even when summaryOnly=false.
   const current = ensureAnchorRuntimeState(input.anchor);
   const pressureById = getPressureIntensityById(input.economyAfter);
   const transitionsByQuest = transitionsByQuestSummary(input.questSummary);

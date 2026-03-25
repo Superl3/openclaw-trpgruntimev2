@@ -85,6 +85,18 @@ All tools return JSON-shaped output (`details`) and JSON text in `content`.
   - `engine.anchor.resolved`, `engine.anchor.failed`, `engine.anchor.archived`
 - Optional external/faction signal input degrades safely on missing/invalid/no-op data.
 
+## Runtime safety flags (v1 safe mode)
+
+- v1 safe mode defaults:
+  - `behavioralDriftEnabled=true`, `behavioralDriftAffectsRules=false`
+  - `anchorLifecycleEnabled=true`, `anchorSummaryOnly=true`
+  - `richHookActionableEnabled=true`, `richHookWorldPulseEnabled=true`, `richHookRecentOutcomesEnabled=false`
+  - `debugRuntimeSignals=false`, `traceVerbose=false`, `telemetryExtended=false`
+  - `canonicalSyncEnabled=false`, `canonicalWriteBackEnabled=false`
+- Core (always deterministic, not feature-disabled): scene loop, temporal systems, quest economy, world seed bootstrap, faction canon scaffold.
+- Optional/gated layers: behavioral drift accumulation, anchor projection visibility, rich hook slot rewriting, extended debug/trace/telemetry, canonical sync provenance loading.
+- `canonicalWriteBackEnabled=false` blocks canonical-file targets in audited patch-apply path.
+
 ## Safety model
 
 - Agent gate: defaults to `allowedAgentIds: []` (empty list means allow all agents)
@@ -140,8 +152,11 @@ These are minimal post-install examples with safe defaults:
 
 - `plugins.entries.trpg-runtime.config.allowPatchApply=false`
 - `plugins.entries.trpg-runtime.config.allowedAgentIds=[]` (plugin-only) or `["trpg"]` (dedicated agent)
-- `plugins.entries.trpg-runtime.config.richHookTextEnabled=false` (optional hook lane is off by default; when enabled it augments actionable hooks + worldPulse only)
-- `plugins.entries.trpg-runtime.config.debugRuntimeSignals=false` (raw drift signals hidden by default)
+- `plugins.entries.trpg-runtime.config.debugRuntimeSignals=false`
+- `plugins.entries.trpg-runtime.config.traceVerbose=false`
+- `plugins.entries.trpg-runtime.config.telemetryExtended=false`
+- `plugins.entries.trpg-runtime.config.canonicalSyncEnabled=false`
+- `plugins.entries.trpg-runtime.config.canonicalWriteBackEnabled=false`
 
 ## Bundled TRPG agent
 

@@ -63,10 +63,45 @@
         "default": 900,
         "description": "TTL for analyzer memory cache; cache is non-authoritative."
       },
+      "behavioralDriftEnabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable behavioral drift accumulation in analyzer lane."
+      },
+      "behavioralDriftAffectsRules": {
+        "type": "boolean",
+        "default": false,
+        "description": "Reserved safety flag. Deterministic rule adjudication remains drift-independent in v1."
+      },
+      "anchorLifecycleEnabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable deterministic anchor lifecycle tick layer."
+      },
+      "anchorSummaryOnly": {
+        "type": "boolean",
+        "default": true,
+        "description": "Keep anchor layer summary/projection-only without direct rule-path coupling."
+      },
       "richHookTextEnabled": {
         "type": "boolean",
         "default": false,
-        "description": "Enable optional short LLM-style hook text overrides for actionable quest slots. Deterministic state remains authoritative."
+        "description": "Legacy compatibility switch for rich hook lane. Prefer richHookActionableEnabled/richHookWorldPulseEnabled."
+      },
+      "richHookActionableEnabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable optional rich text overrides for actionable quest hook slots."
+      },
+      "richHookWorldPulseEnabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable optional rich text override for worldPulse hook slot."
+      },
+      "richHookRecentOutcomesEnabled": {
+        "type": "boolean",
+        "default": false,
+        "description": "Reserved/guarded flag. RecentOutcomes rich lane is policy-blocked in v1."
       },
       "hookTextTimeoutMs": {
         "type": "integer",
@@ -86,6 +121,26 @@
         "type": "boolean",
         "default": false,
         "description": "Show raw drift/debug runtime signals in panel UI."
+      },
+      "traceVerbose": {
+        "type": "boolean",
+        "default": false,
+        "description": "Emit extended trace metadata. Default keeps bounded summary traces."
+      },
+      "telemetryExtended": {
+        "type": "boolean",
+        "default": false,
+        "description": "Enable extended telemetry projection in debug/ops payloads."
+      },
+      "canonicalSyncEnabled": {
+        "type": "boolean",
+        "default": false,
+        "description": "Enable runtime canonical sync provenance load at session bootstrap."
+      },
+      "canonicalWriteBackEnabled": {
+        "type": "boolean",
+        "default": false,
+        "description": "Allow canonical write-back targets in audited patch apply path."
       }
     }
   },
@@ -120,9 +175,44 @@
       "help": "Analyzer cache TTL; does not affect deterministic source-of-truth.",
       "advanced": true
     },
+    "behavioralDriftEnabled": {
+      "label": "Behavioral Drift Enabled",
+      "help": "Enable/disable drift accumulation. Rules remain deterministic.",
+      "advanced": true
+    },
+    "behavioralDriftAffectsRules": {
+      "label": "Drift Affects Rules",
+      "help": "Reserved in v1. Rule adjudication stays drift-independent.",
+      "advanced": true
+    },
+    "anchorLifecycleEnabled": {
+      "label": "Anchor Lifecycle Enabled",
+      "help": "Toggle deterministic anchor lifecycle layer.",
+      "advanced": true
+    },
+    "anchorSummaryOnly": {
+      "label": "Anchor Summary Only",
+      "help": "Keep anchor layer summary-only (recommended v1 mode).",
+      "advanced": true
+    },
     "richHookTextEnabled": {
-      "label": "Rich Hook Text Enabled",
-      "help": "Optional short hook text lane for actionable slots only. Fallback remains deterministic.",
+      "label": "Rich Hook Text (Legacy)",
+      "help": "Legacy compatibility switch. Prefer actionable/worldPulse flags.",
+      "advanced": true
+    },
+    "richHookActionableEnabled": {
+      "label": "Rich Hook Actionable",
+      "help": "Enable rich lane for actionable hooks. Deterministic fallback always exists.",
+      "advanced": true
+    },
+    "richHookWorldPulseEnabled": {
+      "label": "Rich Hook WorldPulse",
+      "help": "Enable rich lane for worldPulse slot. Deterministic fallback always exists.",
+      "advanced": true
+    },
+    "richHookRecentOutcomesEnabled": {
+      "label": "Rich Hook RecentOutcomes",
+      "help": "Policy-guarded off in v1 to avoid accidental lane expansion.",
       "advanced": true
     },
     "hookTextTimeoutMs": {
@@ -138,6 +228,26 @@
     "debugRuntimeSignals": {
       "label": "Debug Runtime Signals",
       "help": "Enable raw drift/debug values in Sub UI.",
+      "advanced": true
+    },
+    "traceVerbose": {
+      "label": "Trace Verbose",
+      "help": "Include extended trace metadata for ops/debug sessions.",
+      "advanced": true
+    },
+    "telemetryExtended": {
+      "label": "Telemetry Extended",
+      "help": "Enable extended telemetry projection in debug outputs.",
+      "advanced": true
+    },
+    "canonicalSyncEnabled": {
+      "label": "Canonical Sync Enabled",
+      "help": "Enable runtime canonical provenance load loop.",
+      "advanced": true
+    },
+    "canonicalWriteBackEnabled": {
+      "label": "Canonical Write-Back Enabled",
+      "help": "Allow canonical file write-back in audited apply path.",
       "advanced": true
     }
   }

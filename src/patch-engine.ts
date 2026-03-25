@@ -611,6 +611,10 @@ function isAuditedWritableScope(file: string): boolean {
   return file.startsWith("state/") || file.startsWith("canon/");
 }
 
+function isCanonicalTarget(file: string): boolean {
+  return file.startsWith("canon/");
+}
+
 export async function runPatchApply(params: {
   worldRoot: string;
   cfg: TrpgRuntimeConfig;
@@ -686,6 +690,16 @@ export async function runPatchApply(params: {
       patchId: patch.patchId,
       error: "audited apply is limited to world/state/* and world/canon/* targets",
       disallowedTargets,
+    };
+  }
+
+  const canonicalTargets = simulation.touchedFiles.filter((file) => isCanonicalTarget(file));
+  if (canonicalTargets.length > 0 && !params.cfg.runtimeSafetyFlags.canonicalWriteBackEnabled) {
+    return {
+      ok: false,
+      patchId: patch.patchId,
+      error: "canonical write-back is disabled by runtime safety flag (canonicalWriteBackEnabled=false)",
+      canonicalTargets,
     };
   }
 

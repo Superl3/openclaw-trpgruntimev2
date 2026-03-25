@@ -1,5 +1,10 @@
 import path from "node:path";
 import type { OpenClawPluginToolContext } from "openclaw/plugin-sdk/core";
+import {
+  DEFAULT_RUNTIME_SAFETY_FLAGS,
+  normalizeRuntimeSafetyFlags,
+  type RuntimeSafetyFlags,
+} from "./runtime-core/safety-flags.js";
 
 export type TrpgRuntimeConfig = {
   worldRoot?: string;
@@ -15,6 +20,11 @@ export type TrpgRuntimeConfig = {
   hookTextTimeoutMs: number;
   hookTextCacheTtlSec: number;
   debugRuntimeSignals: boolean;
+  traceVerbose: boolean;
+  telemetryExtended: boolean;
+  canonicalSyncEnabled: boolean;
+  canonicalWriteBackEnabled: boolean;
+  runtimeSafetyFlags: RuntimeSafetyFlags;
 };
 
 const DEFAULT_CONFIG: TrpgRuntimeConfig = {
@@ -31,6 +41,11 @@ const DEFAULT_CONFIG: TrpgRuntimeConfig = {
   hookTextTimeoutMs: 350,
   hookTextCacheTtlSec: 900,
   debugRuntimeSignals: false,
+  traceVerbose: false,
+  telemetryExtended: false,
+  canonicalSyncEnabled: false,
+  canonicalWriteBackEnabled: false,
+  runtimeSafetyFlags: DEFAULT_RUNTIME_SAFETY_FLAGS,
 };
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -71,10 +86,52 @@ function readStringArray(value: unknown, fallback: string[]): string[] {
   return values.length > 0 ? values : fallback;
 }
 
+function readBoolean(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
 export function parseTrpgRuntimeConfig(raw: unknown): TrpgRuntimeConfig {
   const obj = asRecord(raw);
   const worldRoot = typeof obj.worldRoot === "string" && obj.worldRoot.trim() ? obj.worldRoot : undefined;
   const allowPatchApply = typeof obj.allowPatchApply === "boolean" ? obj.allowPatchApply : false;
+  const legacyRichHookTextEnabled =
+    typeof obj.richHookTextEnabled === "boolean" ? obj.richHookTextEnabled : undefined;
+  const runtimeSafetyFlags = normalizeRuntimeSafetyFlags({
+    behavioralDriftEnabled: readBoolean(
+      obj.behavioralDriftEnabled,
+      DEFAULT_RUNTIME_SAFETY_FLAGS.behavioralDriftEnabled,
+    ),
+    behavioralDriftAffectsRules: readBoolean(
+      obj.behavioralDriftAffectsRules,
+      DEFAULT_RUNTIME_SAFETY_FLAGS.behavioralDriftAffectsRules,
+    ),
+    anchorLifecycleEnabled: readBoolean(
+      obj.anchorLifecycleEnabled,
+      DEFAULT_RUNTIME_SAFETY_FLAGS.anchorLifecycleEnabled,
+    ),
+    anchorSummaryOnly: readBoolean(obj.anchorSummaryOnly, DEFAULT_RUNTIME_SAFETY_FLAGS.anchorSummaryOnly),
+    richHookActionableEnabled: readBoolean(
+      obj.richHookActionableEnabled,
+      legacyRichHookTextEnabled ?? DEFAULT_RUNTIME_SAFETY_FLAGS.richHookActionableEnabled,
+    ),
+    richHookWorldPulseEnabled: readBoolean(
+      obj.richHookWorldPulseEnabled,
+      legacyRichHookTextEnabled ?? DEFAULT_RUNTIME_SAFETY_FLAGS.richHookWorldPulseEnabled,
+    ),
+    richHookRecentOutcomesEnabled: readBoolean(
+      obj.richHookRecentOutcomesEnabled,
+      DEFAULT_RUNTIME_SAFETY_FLAGS.richHookRecentOutcomesEnabled,
+    ),
+    debugRuntimeSignals: readBoolean(obj.debugRuntimeSignals, DEFAULT_RUNTIME_SAFETY_FLAGS.debugRuntimeSignals),
+    traceVerbose: readBoolean(obj.traceVerbose, DEFAULT_RUNTIME_SAFETY_FLAGS.traceVerbose),
+    telemetryExtended: readBoolean(obj.telemetryExtended, DEFAULT_RUNTIME_SAFETY_FLAGS.telemetryExtended),
+    canonicalSyncEnabled: readBoolean(obj.canonicalSyncEnabled, DEFAULT_RUNTIME_SAFETY_FLAGS.canonicalSyncEnabled),
+    canonicalWriteBackEnabled: readBoolean(
+      obj.canonicalWriteBackEnabled,
+      DEFAULT_RUNTIME_SAFETY_FLAGS.canonicalWriteBackEnabled,
+    ),
+  });
+  const richHookTextEnabled = runtimeSafetyFlags.richHookActionableEnabled || runtimeSafetyFlags.richHookWorldPulseEnabled;
 
   return {
     worldRoot,
@@ -116,7 +173,7 @@ export function parseTrpgRuntimeConfig(raw: unknown): TrpgRuntimeConfig {
       86_400,
       "analyzerMemoryTtlSec",
     ),
-    richHookTextEnabled: typeof obj.richHookTextEnabled === "boolean" ? obj.richHookTextEnabled : false,
+    richHookTextEnabled,
     hookTextTimeoutMs: readInteger(obj.hookTextTimeoutMs, DEFAULT_CONFIG.hookTextTimeoutMs, 80, 2_000, "hookTextTimeoutMs"),
     hookTextCacheTtlSec: readInteger(
       obj.hookTextCacheTtlSec,
@@ -125,7 +182,12 @@ export function parseTrpgRuntimeConfig(raw: unknown): TrpgRuntimeConfig {
       7_200,
       "hookTextCacheTtlSec",
     ),
-    debugRuntimeSignals: typeof obj.debugRuntimeSignals === "boolean" ? obj.debugRuntimeSignals : false,
+    debugRuntimeSignals: runtimeSafetyFlags.debugRuntimeSignals,
+    traceVerbose: runtimeSafetyFlags.traceVerbose,
+    telemetryExtended: runtimeSafetyFlags.telemetryExtended,
+    canonicalSyncEnabled: runtimeSafetyFlags.canonicalSyncEnabled,
+    canonicalWriteBackEnabled: runtimeSafetyFlags.canonicalWriteBackEnabled,
+    runtimeSafetyFlags,
   };
 }
 

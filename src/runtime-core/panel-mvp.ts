@@ -20,6 +20,11 @@ type PanelRenderInput = {
   mode: PanelMessageMode;
   errorHint?: string;
   debugRuntimeSignals?: boolean;
+  behavioralDriftEnabled?: boolean;
+  anchorLifecycleEnabled?: boolean;
+  anchorSummaryOnly?: boolean;
+  telemetryExtended?: boolean;
+  canonicalSyncEnabled?: boolean;
 };
 
 export const PANEL_MODAL_SUBMIT_ACTION_ID = "action.free_input.submit";
@@ -60,7 +65,9 @@ function fixedSectionText(session: SessionState): string {
   ].join("\n");
 }
 
-function mainSectionText(session: SessionState): string {
+function mainSectionText(session: SessionState, params: {
+  anchorLifecycleEnabled: boolean;
+}): string {
   const loop = session.deterministicLoop;
   const questSummary = buildQuestEconomyQualitativeSummary({
     economy: loop.questEconomy,
@@ -78,10 +85,12 @@ function mainSectionText(session: SessionState): string {
     `압력: ${String(loop.scene.pressure)} (${loop.scene.riskTier})`,
     `활성 과제: ${String(questSummary.actionable.activeCount)}건 · ${questSummary.actionable.activeTop ? (questSummary.actionable.activeTop.llmShortText ?? questSummary.actionable.activeTop.defaultText) : "진행 중 과제가 없다."}`,
     `접촉 기회: ${String(questSummary.actionable.surfacedCount)}건 · ${questSummary.actionable.surfacedTop.length > 0 ? questSummary.actionable.surfacedTop.map((slot) => slot.llmShortText ?? slot.defaultText).join(" / ") : "현재 접촉 가능한 기회가 없다."}`,
-    `장기 축: ${anchorSummary.text}`,
     `세계 동향: ${questSummary.worldPulse.text}`,
     `최근 변화: ${questSummary.recentOutcomes.text}`,
   ];
+  if (params.anchorLifecycleEnabled) {
+    lines.splice(7, 0, `장기 축: ${anchorSummary.text}`);
+  }
 
   if (session.status === "ended") {
     lines.push("세션이 종료되었다. `/trpg new`로 새 세션을 시작할 수 있다.");
@@ -120,7 +129,13 @@ function driftQualitativeLabel(value: number): string {
   return "안정";
 }
 
-function subSectionText(session: SessionState, debugRuntimeSignals: boolean): string {
+function subSectionText(session: SessionState, params: {
+  debugRuntimeSignals: boolean;
+  behavioralDriftEnabled: boolean;
+  anchorLifecycleEnabled: boolean;
+  telemetryExtended: boolean;
+  canonicalSyncEnabled: boolean;
+}): string {
   const loop = session.deterministicLoop;
   const lines = ["**Sub UI**"];
   const temporalSummary = buildTemporalQualitativeSummary({
@@ -166,9 +181,13 @@ function subSectionText(session: SessionState, debugRuntimeSignals: boolean): st
   }
 
   const drift = loop.behavioralDrift.drift;
-  lines.push(
-    `행동 성향 추세: warm=${driftQualitativeLabel(drift.warmth)} bold=${driftQualitativeLabel(drift.boldness)} caution=${driftQualitativeLabel(drift.caution)} altruism=${driftQualitativeLabel(drift.altruism)} aggression=${driftQualitativeLabel(drift.aggression)} humor=${driftQualitativeLabel(drift.humor)}`,
-  );
+  if (params.behavioralDriftEnabled) {
+    lines.push(
+      `행동 성향 추세: warm=${driftQualitativeLabel(drift.warmth)} bold=${driftQualitativeLabel(drift.boldness)} caution=${driftQualitativeLabel(drift.caution)} altruism=${driftQualitativeLabel(drift.altruism)} aggression=${driftQualitativeLabel(drift.aggression)} humor=${driftQualitativeLabel(drift.humor)}`,
+    );
+  } else {
+    lines.push("행동 성향 추세: 안전 모드(core identity only, drift off)");
+  }
 
   lines.push(
     `시간/기억: ${temporalSummary.memory}`,
@@ -180,9 +199,11 @@ function subSectionText(session: SessionState, debugRuntimeSignals: boolean): st
   lines.push(
     `퀘스트(진행): ${questSummary.actionable.activeText}`,
     `퀘스트(기회): ${questSummary.actionable.surfacedText}`,
-    `앵커 축: ${anchorSummary.text}`,
     `월드 축: ${questSummary.worldPulse.text}`,
   );
+  if (params.anchorLifecycleEnabled) {
+    lines.splice(lines.length - 1, 0, `앵커 축: ${anchorSummary.text}`);
+  }
 
   if (questSummary.recentOutcomes.items.length > 0) {
     lines.push(
@@ -190,30 +211,38 @@ function subSectionText(session: SessionState, debugRuntimeSignals: boolean): st
     );
   }
 
-  if (debugRuntimeSignals) {
+  if (params.debugRuntimeSignals) {
     const hookDebug = questSummary.debug.hookText;
     const canonicalSync = session.runtimeMetadata?.canonicalSync;
-    lines.push(
-      `debug.behavioral_drift.raw: warm=${drift.warmth.toFixed(2)} bold=${drift.boldness.toFixed(2)} caution=${drift.caution.toFixed(2)} altruism=${drift.altruism.toFixed(2)} aggression=${drift.aggression.toFixed(2)} humor=${drift.humor.toFixed(2)}`,
-    );
+    if (params.behavioralDriftEnabled) {
+      lines.push(
+        `debug.behavioral_drift.raw: warm=${drift.warmth.toFixed(2)} bold=${drift.boldness.toFixed(2)} caution=${drift.caution.toFixed(2)} altruism=${drift.altruism.toFixed(2)} aggression=${drift.aggression.toFixed(2)} humor=${drift.humor.toFixed(2)}`,
+      );
+    }
     lines.push(
       `debug.temporal.raw: location=${temporalSummary.debug.locationId ?? "none"} memory=${String(temporalSummary.debug.memoryCount)} max_familiarity=${String(temporalSummary.debug.maxFamiliarity)} max_freshness=${String(temporalSummary.debug.maxFreshness)} traces=${String(temporalSummary.debug.activeTraceCount)} max_trace=${String(temporalSummary.debug.maxTraceIntensity)} location_state=${temporalSummary.debug.locationState ? `tension=${String(temporalSummary.debug.locationState.tension)} alertness=${String(temporalSummary.debug.locationState.alertness)} accessibility=${String(temporalSummary.debug.locationState.accessibility)}` : "none"}`,
     );
     lines.push(
       `debug.quest_hook_text.raw: attempted=${String(hookDebug.generationAttempted)} result=${hookDebug.result} reason=${hookDebug.reason ?? "none"} cache_hit=${String(hookDebug.cacheHitCount)} cache_miss=${String(hookDebug.cacheMissCount)} slots=${hookDebug.slotMeta.length > 0 ? hookDebug.slotMeta.map((entry) => `${entry.slotType}:${entry.slotKey}:${entry.source}:${entry.cacheHit ? "hit" : "miss"}${entry.skipReason ? `:${entry.skipReason}` : ""}`).join(" / ") : "none"}`,
     );
-    lines.push(
-      `debug.quest_tuning.raw: surfacing_rate=${questSummary.debug.tuning.surfacingRate.toFixed(2)} expiration_rate=${questSummary.debug.tuning.expirationRate.toFixed(2)} mutation_rate=${questSummary.debug.tuning.mutationRate.toFixed(2)} successor_rate=${questSummary.debug.tuning.successorRate.toFixed(2)} avg_urgency=${String(questSummary.debug.tuning.averageUrgency)} active_vs_surfaced=${questSummary.debug.tuning.activeVsSurfacedRatio.toFixed(2)} budget_util=live:${questSummary.debug.tuning.budgetUtilization.live.toFixed(2)}/world:${questSummary.debug.tuning.budgetUtilization.world.toFixed(2)}/attention:${questSummary.debug.tuning.budgetUtilization.attention.toFixed(2)}/narrative:${questSummary.debug.tuning.budgetUtilization.narrative.toFixed(2)} quota_sat=loc:${questSummary.debug.tuning.quotaSaturation.location.toFixed(2)}/pressure:${questSummary.debug.tuning.quotaSaturation.pressure.toFixed(2)}/archetype:${questSummary.debug.tuning.quotaSaturation.archetype.toFixed(2)}`,
-    );
-    lines.push(
-      `debug.quest_budget.raw: live=${String(questSummary.debug.liveQuestCount)} budget_used=live:${String(questSummary.debug.budget.used.livePool)}/world:${String(questSummary.debug.budget.used.world)}/attention:${String(questSummary.debug.budget.used.attention)}/narrative:${String(questSummary.debug.budget.used.narrative)} budget_caps=live:${String(questSummary.debug.budget.caps.livePool)}/world:${String(questSummary.debug.budget.caps.world)}/attention:${String(questSummary.debug.budget.caps.attention)}/narrative:${String(questSummary.debug.budget.caps.narrative)} quota_caps=loc:${String(questSummary.debug.softQuota.caps.perLocation)}/pressure:${String(questSummary.debug.softQuota.caps.perPressure)}/archetype:${String(questSummary.debug.softQuota.caps.perArchetype)} top_pressure_intensity=${String(questSummary.debug.topPressureIntensity)}`,
-    );
-    lines.push(
-      `debug.anchor.raw: count=${String(anchorSummary.debug.anchorCount)} active=${String(anchorSummary.activeCount)} escalated=${String(anchorSummary.escalatedCount)} signal_mode=${anchorSummary.debug.signalMode} signal_reason=${anchorSummary.debug.signalReason ?? "none"} active_ids=${anchorSummary.debug.activeIds.length > 0 ? anchorSummary.debug.activeIds.join(",") : "none"} terminal_ids=${anchorSummary.debug.terminalIds.length > 0 ? anchorSummary.debug.terminalIds.join(",") : "none"}`,
-    );
-    lines.push(
-      `debug.canonical_sync.raw: policy=${canonicalSync?.sourcePolicy ?? "seed_bootstrap_only"} drift=${canonicalSync?.driftStatus ?? "unknown"} drift_counts=added:${String(canonicalSync?.driftCounts.addedInSeed ?? 0)}/missing:${String(canonicalSync?.driftCounts.missingInSeed ?? 0)}/changed:${String(canonicalSync?.driftCounts.changedScaffold ?? 0)}/incompatible:${String(canonicalSync?.driftCounts.incompatible ?? 0)} seed_fp=${canonicalSync?.seedFingerprint ?? "none"} canon_fp=${canonicalSync?.canonFingerprint ?? "none"}`,
-    );
+    if (params.telemetryExtended) {
+      lines.push(
+        `debug.quest_tuning.raw: surfacing_rate=${questSummary.debug.tuning.surfacingRate.toFixed(2)} expiration_rate=${questSummary.debug.tuning.expirationRate.toFixed(2)} mutation_rate=${questSummary.debug.tuning.mutationRate.toFixed(2)} successor_rate=${questSummary.debug.tuning.successorRate.toFixed(2)} avg_urgency=${String(questSummary.debug.tuning.averageUrgency)} active_vs_surfaced=${questSummary.debug.tuning.activeVsSurfacedRatio.toFixed(2)} budget_util=live:${questSummary.debug.tuning.budgetUtilization.live.toFixed(2)}/world:${questSummary.debug.tuning.budgetUtilization.world.toFixed(2)}/attention:${questSummary.debug.tuning.budgetUtilization.attention.toFixed(2)}/narrative:${questSummary.debug.tuning.budgetUtilization.narrative.toFixed(2)} quota_sat=loc:${questSummary.debug.tuning.quotaSaturation.location.toFixed(2)}/pressure:${questSummary.debug.tuning.quotaSaturation.pressure.toFixed(2)}/archetype:${questSummary.debug.tuning.quotaSaturation.archetype.toFixed(2)}`,
+      );
+      lines.push(
+        `debug.quest_budget.raw: live=${String(questSummary.debug.liveQuestCount)} budget_used=live:${String(questSummary.debug.budget.used.livePool)}/world:${String(questSummary.debug.budget.used.world)}/attention:${String(questSummary.debug.budget.used.attention)}/narrative:${String(questSummary.debug.budget.used.narrative)} budget_caps=live:${String(questSummary.debug.budget.caps.livePool)}/world:${String(questSummary.debug.budget.caps.world)}/attention:${String(questSummary.debug.budget.caps.attention)}/narrative:${String(questSummary.debug.budget.caps.narrative)} quota_caps=loc:${String(questSummary.debug.softQuota.caps.perLocation)}/pressure:${String(questSummary.debug.softQuota.caps.perPressure)}/archetype:${String(questSummary.debug.softQuota.caps.perArchetype)} top_pressure_intensity=${String(questSummary.debug.topPressureIntensity)}`,
+      );
+    }
+    if (params.anchorLifecycleEnabled) {
+      lines.push(
+        `debug.anchor.raw: count=${String(anchorSummary.debug.anchorCount)} active=${String(anchorSummary.activeCount)} escalated=${String(anchorSummary.escalatedCount)} signal_mode=${anchorSummary.debug.signalMode} signal_reason=${anchorSummary.debug.signalReason ?? "none"} active_ids=${anchorSummary.debug.activeIds.length > 0 ? anchorSummary.debug.activeIds.join(",") : "none"} terminal_ids=${anchorSummary.debug.terminalIds.length > 0 ? anchorSummary.debug.terminalIds.join(",") : "none"}`,
+      );
+    }
+    if (params.canonicalSyncEnabled) {
+      lines.push(
+        `debug.canonical_sync.raw: policy=${canonicalSync?.sourcePolicy ?? "seed_bootstrap_only"} drift=${canonicalSync?.driftStatus ?? "unknown"} drift_counts=added:${String(canonicalSync?.driftCounts.addedInSeed ?? 0)}/missing:${String(canonicalSync?.driftCounts.missingInSeed ?? 0)}/changed:${String(canonicalSync?.driftCounts.changedScaffold ?? 0)}/incompatible:${String(canonicalSync?.driftCounts.incompatible ?? 0)} seed_fp=${canonicalSync?.seedFingerprint ?? "none"} canon_fp=${canonicalSync?.canonFingerprint ?? "none"}`,
+      );
+    }
   }
 
   return lines.join("\n");
@@ -286,6 +315,10 @@ export function buildCheckpoint1Panel(input: PanelRenderInput): PanelRenderOutpu
   const routeByAction = routeMapByAction(input.routes);
   const ended = input.session.status === "ended";
   const debugRuntimeSignals = input.debugRuntimeSignals === true;
+  const behavioralDriftEnabled = input.behavioralDriftEnabled !== false;
+  const anchorLifecycleEnabled = input.anchorLifecycleEnabled !== false;
+  const telemetryExtended = input.telemetryExtended === true;
+  const canonicalSyncEnabled = input.canonicalSyncEnabled === true;
   const visiblePalette = input.session.deterministicLoop.actionPalette
     .filter((entry) => entry.showInButtons)
     .slice(0, 4);
@@ -311,8 +344,17 @@ export function buildCheckpoint1Panel(input: PanelRenderInput): PanelRenderOutpu
   const message = ended ? "TRPG 세션이 종료되었다." : "TRPG 세션 패널";
   const blocks: Array<Record<string, unknown>> = [
     { type: "text", text: fixedSectionText(input.session) },
-    { type: "text", text: mainSectionText(input.session) },
-    { type: "text", text: subSectionText(input.session, debugRuntimeSignals) },
+    { type: "text", text: mainSectionText(input.session, { anchorLifecycleEnabled }) },
+    {
+      type: "text",
+      text: subSectionText(input.session, {
+        debugRuntimeSignals,
+        behavioralDriftEnabled,
+        anchorLifecycleEnabled,
+        telemetryExtended,
+        canonicalSyncEnabled,
+      }),
+    },
   ];
 
   if (buttons.length > 0) {
