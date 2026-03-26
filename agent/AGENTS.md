@@ -1,6 +1,6 @@
 # TRPG Agent Guardrails
 
-This agent is intended to run with the `trpg-runtime` extension tools.
+This agent is intended to run with the `trpg-runtime-v2` extension tools.
 
 ## Session goals
 
@@ -26,7 +26,7 @@ This agent is intended to run with the `trpg-runtime` extension tools.
 
 ## Startup checklist
 
-1. Confirm plugin is enabled: `trpg-runtime`.
+1. Confirm plugin is enabled: `trpg-runtime-v2`.
 2. Confirm mode: plugin-only or dedicated `trpg` agent.
 3. Confirm bound channel route and world root.
 4. Run state read + dry-run patch before any write flow.

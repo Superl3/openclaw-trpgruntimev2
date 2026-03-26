@@ -2,8 +2,8 @@
 
 ## 1) Overview
 
-`trpg-runtime` is a local OpenClaw extension that exposes structured TRPG world-state tools.
-Use it from `~/.openclaw/extensions/trpg-runtime` either as a plugin-only overlay or with a dedicated `trpg` agent.
+`trpg-runtime-v2` is a local OpenClaw extension that exposes structured TRPG world-state tools.
+Use it from `~/.openclaw/extensions/trpg-runtime-v2` either as a plugin-only overlay or with a dedicated `trpg` agent.
 
 ## 2) Features
 
@@ -17,7 +17,7 @@ Use it from `~/.openclaw/extensions/trpg-runtime` either as a plugin-only overla
 8. `trpg_scene_components` for Discord component payload generation.
 9. `trpg_session_new`, `trpg_session_resume`, `trpg_session_end` for checkpoint panel lifecycle.
 10. `trpg_panel_interact` and `trpg_panel_message_commit` for owner-guarded panel update/edit loops.
-11. Agent-level gate through `plugins.entries.trpg-runtime.config.allowedAgentIds`.
+11. Agent-level gate through `plugins.entries.trpg-runtime-v2.config.allowedAgentIds`.
 12. Path/write safety guards around world-root resolution and patch operations.
 
 ## 2.2) Runtime hardening notes
@@ -158,11 +158,11 @@ Use it from `~/.openclaw/extensions/trpg-runtime` either as a plugin-only overla
 
 ## 3) Install / Onboard steps
 
-1. Keep extension files at `~/.openclaw/extensions/trpg-runtime`.
+1. Keep extension files at `~/.openclaw/extensions/trpg-runtime-v2`.
 2. Install/link once:
 
 ```bash
-openclaw plugins install -l ~/.openclaw/extensions/trpg-runtime
+openclaw plugins install -l ~/.openclaw/extensions/trpg-runtime-v2
 ```
 
 3. Choose one onboarding overlay in this repo:
@@ -173,12 +173,12 @@ openclaw plugins install -l ~/.openclaw/extensions/trpg-runtime
 
 ```bash
 openclaw config validate --json
-openclaw plugins info trpg-runtime
+openclaw plugins info trpg-runtime-v2
 ```
 
 ## 4) Config modes (plugin-only vs dedicated agent)
 
-- Plugin-only: keep existing agents/bindings, only load plugin keys under `plugins.load` and `plugins.entries.trpg-runtime`.
+- Plugin-only: keep existing agents/bindings, only load plugin keys under `plugins.load` and `plugins.entries.trpg-runtime-v2`.
 - Dedicated agent: add `agents.list` entry `id: "trpg"` + `bindings` route for Discord + plugin config restricted to `allowedAgentIds: ["trpg"]`.
 - Both modes keep `allowPatchApply: false` by default for safe onboarding.
 
@@ -194,7 +194,7 @@ openclaw plugins info trpg-runtime
 - Excluded files:
   - real API keys/tokens/OAuth credentials
   - local sessions, lock files, private account metadata
-- Dedicated overlays use `agentDir: "~/.openclaw/extensions/trpg-runtime/agent"`.
+- Dedicated overlays use `agentDir: "~/.openclaw/extensions/trpg-runtime-v2/agent"`.
 - Plugin-only onboarding stays valid even when you do not use dedicated `agentDir` assets.
 
 Onboarding flow after install:
@@ -205,7 +205,7 @@ Onboarding flow after install:
 2. Validate config:
    - `openclaw config validate --json`
 3. Check plugin:
-   - `openclaw plugins info trpg-runtime`
+   - `openclaw plugins info trpg-runtime-v2`
 4. Dedicated mode binding check:
    - `openclaw agents bindings --agent trpg --json`
 
@@ -225,19 +225,32 @@ npm run smoke:manifest
 Expected key lines:
 - `ok: plugin-only json`
 - `ok: trpg-agent json`
-- `manifest ok: trpg-runtime`
+- `manifest ok: trpg-runtime-v2`
 
 ## 6) Common failures & fixes
 
-- Plugin not visible: confirm `plugins.load.paths` includes `~/.openclaw/extensions/trpg-runtime`.
-- Plugin blocked: confirm `plugins.load.allow` includes `trpg-runtime`.
+- Plugin not visible: confirm `plugins.load.paths` includes `~/.openclaw/extensions/trpg-runtime-v2`.
+- Plugin blocked: confirm `plugins.load.allow` includes `trpg-runtime-v2`.
 - Agent cannot call tools: confirm `allowedAgentIds` matches calling agent id (`trpg` in dedicated mode).
 - Route not triggering on Discord: replace `<discord_account_id>` and `<discord_channel_id>` in `bindings`.
 - Write attempts denied: expected unless `allowPatchApply` is set to `true`.
-- World file errors: keep world data under `~/.openclaw/extensions/trpg-runtime/world` or set a valid `worldRoot`.
+- World file errors: keep world data under `~/.openclaw/extensions/trpg-runtime-v2/world` or set a valid `worldRoot`.
 
 ## 7) Security/guardrails (`allowPatchApply`, `allowedAgentIds`, world path)
 
-- `allowPatchApply`: keep `false` during onboarding; turn on only for audited write workflows.
+- `allowPatchApply`: keep `false` during onboarding; turn on only for audited write workflows. Runtime blocks `trpg_patch_apply` writes while it is `false`.
 - `allowedAgentIds`: use `[]` for plugin-only broad access, or `["trpg"]` to constrain usage.
-- World path: default world root is extension-local (`~/.openclaw/extensions/trpg-runtime/world`); avoid pointing to unrelated directories.
+- World path: default world root is extension-local (`~/.openclaw/extensions/trpg-runtime-v2/world`); avoid pointing to unrelated directories.
+
+## 8) Agent model config + reasoning notes
+
+- Canonical model template source is `agent/config/models.template.json`.
+- `agent/models.template.json` and `agent/models.json` are backward-compat convenience copies; avoid maintaining separate divergent values.
+- Model `reasoning` options are advisory provider/client settings.
+- Runtime safety enforcement stays in plugin config (`plugins.entries.trpg-runtime-v2.config.*`) and deterministic runtime guards.
+
+## 9) Component policy note (buttons/modals/select)
+
+- Onboarding/bootstrap does not require select-menu support.
+- Button + modal-first flows are fully supported.
+- Select-menu components may be emitted optionally, but are not a bootstrap dependency.

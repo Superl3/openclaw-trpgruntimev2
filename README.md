@@ -1,4 +1,4 @@
-# trpg-runtime (local plugin)
+# trpg-runtime-v2 (local plugin)
 
 Structured TRPG runtime plugin for OpenClaw.
 
@@ -104,6 +104,22 @@ All tools return JSON-shaped output (`details`) and JSON text in `content`.
 - Canon target guard: patch operations support structured files only (`.yaml`, `.yml`, `.json`)
 - No hidden side effects in dry-run tools
 - `trpg_patch_apply` is optional and disabled by default (`allowPatchApply: false`)
+- When `allowPatchApply=false`, runtime blocks `trpg_patch_apply` writes even if audit metadata is present
+
+## Agent model config source of truth
+
+- Canonical template: `agent/config/models.template.json`.
+- Backward-compat copies (`agent/models.template.json`, `agent/models.json`) are convenience artifacts and should not be treated as the primary contract.
+
+## Reasoning setting scope
+
+- Model `reasoning` fields in agent model config are advisory client/provider settings.
+- Plugin runtime safety is enforced by plugin config (`plugins.entries.trpg-runtime-v2.config.*`) and deterministic guards, not by model reasoning flags.
+
+## Discord component policy
+
+- Runtime supports buttons/modals and can emit select-menu payloads where useful.
+- Bootstrap/onboarding does **not** require select-menu support; button+modal-first flows remain valid.
 
 ## Build
 
@@ -122,26 +138,26 @@ This repository step intentionally does **not** install or link the plugin yet.
 When ready, use one of:
 
 ```bash
-openclaw plugins install -l ~/.openclaw/extensions/trpg-runtime
+openclaw plugins install -l ~/.openclaw/extensions/trpg-runtime-v2
 ```
 
 or from this repo root:
 
 ```bash
-openclaw plugins install -l ../.openclaw/extensions/trpg-runtime
+openclaw plugins install -l ../.openclaw/extensions/trpg-runtime-v2
 ```
 
 Then enable/configure under:
 
-- `plugins.entries.trpg-runtime.enabled`
-- `plugins.entries.trpg-runtime.config`
+- `plugins.entries.trpg-runtime-v2.enabled`
+- `plugins.entries.trpg-runtime-v2.config`
 
 ## Drop-in / Plug-and-Play
 
 You can use this extension with either mode:
 
-- Plugin-only mode: load only the plugin with `examples/openclaw.overlay.plugin-only.json` and keep your existing agents/bindings.
-- Dedicated `trpg` agent mode: use `examples/openclaw.overlay.trpg-agent.json` to load plugin + agent + binding together.
+- Plugin-only mode: load only the plugin with `examples/openclaw.overlay.onboard.plugin-only.json` and keep your existing agents/bindings.
+- Dedicated `trpg` agent mode: use `examples/openclaw.overlay.onboard.trpg-agent.json` to load plugin + agent + binding together.
 
 ## Onboarding
 
@@ -150,13 +166,13 @@ You can use this extension with either mode:
 
 These are minimal post-install examples with safe defaults:
 
-- `plugins.entries.trpg-runtime.config.allowPatchApply=false`
-- `plugins.entries.trpg-runtime.config.allowedAgentIds=[]` (plugin-only) or `["trpg"]` (dedicated agent)
-- `plugins.entries.trpg-runtime.config.debugRuntimeSignals=false`
-- `plugins.entries.trpg-runtime.config.traceVerbose=false`
-- `plugins.entries.trpg-runtime.config.telemetryExtended=false`
-- `plugins.entries.trpg-runtime.config.canonicalSyncEnabled=false`
-- `plugins.entries.trpg-runtime.config.canonicalWriteBackEnabled=false`
+- `plugins.entries.trpg-runtime-v2.config.allowPatchApply=false`
+- `plugins.entries.trpg-runtime-v2.config.allowedAgentIds=[]` (plugin-only) or `["trpg"]` (dedicated agent)
+- `plugins.entries.trpg-runtime-v2.config.debugRuntimeSignals=false`
+- `plugins.entries.trpg-runtime-v2.config.traceVerbose=false`
+- `plugins.entries.trpg-runtime-v2.config.telemetryExtended=false`
+- `plugins.entries.trpg-runtime-v2.config.canonicalSyncEnabled=false`
+- `plugins.entries.trpg-runtime-v2.config.canonicalWriteBackEnabled=false`
 
 ## Bundled TRPG agent
 
@@ -164,14 +180,14 @@ This extension now includes reusable dedicated-agent assets in `agent/` for stan
 
 - Included: `agent/AGENTS.md`, `agent/prompts/*`, `agent/config/*.template.json`.
 - Excluded: real credentials/tokens/sessions/lock files and any private auth data.
-- Dedicated overlays already point `agentDir` to `~/.openclaw/extensions/trpg-runtime/agent`.
+- Dedicated overlays already point `agentDir` to `~/.openclaw/extensions/trpg-runtime-v2/agent`.
 - Plugin-only overlays still work without requiring the bundled `agentDir`.
 
 Recommended onboarding flow after install/link:
 
 1. Apply one example overlay (`examples/openclaw.overlay.onboard.plugin-only.json` or `examples/openclaw.overlay.onboard.trpg-agent.json`).
 2. Run `openclaw config validate --json`.
-3. Run `openclaw plugins info trpg-runtime`.
+3. Run `openclaw plugins info trpg-runtime-v2`.
 4. Dedicated mode only: run `openclaw agents bindings --agent trpg --json`.
 
 ## Bilingual docs
@@ -183,7 +199,7 @@ Verify wiring after applying your overlay:
 
 ```bash
 openclaw config validate --json
-openclaw plugins info trpg-runtime
+openclaw plugins info trpg-runtime-v2
 ```
 
 Dedicated mode extra check:
@@ -195,7 +211,7 @@ openclaw agents bindings --agent trpg --json
 ## Smoke checks after link/install
 
 ```bash
-openclaw plugins info trpg-runtime
+openclaw plugins info trpg-runtime-v2
 openclaw plugins list
 ```
 
@@ -209,7 +225,29 @@ Tool smoke (from a TRPG agent session):
 
 Apply smoke should be explicit and guarded:
 
-1. Set `plugins.entries.trpg-runtime.config.allowPatchApply=true`
+1. Set `plugins.entries.trpg-runtime-v2.config.allowPatchApply=true`
 2. Run `trpg_patch_apply` using a previously validated patch id
 3. Confirm `appliedFiles` and `checksumLikeSummary`
+
+## Black-box gamer smoke (external agent path bridge)
+
+Use the live smoke harness to verify decision-lane wiring against a separate OpenClaw agent directory.
+
+Recommended deterministic baseline first:
+
+```bash
+npm run smoke:gamer-live -- --lane deterministic --scenario happy,modal,stale --turns 4
+```
+
+Then resolve and run OpenClaw lane with an external agent path:
+
+```bash
+npm run smoke:gamer-live -- --lane openclaw --agent-path /abs/path/to/agent --print-lane-config --scenario happy,modal --turns 3
+```
+
+Optional overrides:
+
+- `--openclaw-home <path>`: alternate `~/.openclaw` root for global defaults
+- `--agent-id <id>`: fallback when `--agent-path` is not set
+- `--provider <provider-id>` / `--model <model-id>`: force provider/model during smoke
 

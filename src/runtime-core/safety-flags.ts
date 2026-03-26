@@ -11,6 +11,7 @@ export type RuntimeSafetyFlags = {
   telemetryExtended: boolean;
   canonicalSyncEnabled: boolean;
   canonicalWriteBackEnabled: boolean;
+  recommendationWhimEnabled: boolean;
 };
 
 export const DEFAULT_RUNTIME_SAFETY_FLAGS: RuntimeSafetyFlags = {
@@ -26,6 +27,7 @@ export const DEFAULT_RUNTIME_SAFETY_FLAGS: RuntimeSafetyFlags = {
   telemetryExtended: false,
   canonicalSyncEnabled: false,
   canonicalWriteBackEnabled: false,
+  recommendationWhimEnabled: false,
 };
 
 export function normalizeRuntimeSafetyFlags(
@@ -80,5 +82,9 @@ export function normalizeRuntimeSafetyFlags(
       typeof value?.canonicalWriteBackEnabled === "boolean"
         ? value.canonicalWriteBackEnabled
         : DEFAULT_RUNTIME_SAFETY_FLAGS.canonicalWriteBackEnabled,
+    recommendationWhimEnabled:
+      typeof value?.recommendationWhimEnabled === "boolean"
+        ? value.recommendationWhimEnabled
+        : DEFAULT_RUNTIME_SAFETY_FLAGS.recommendationWhimEnabled,
   };
 }

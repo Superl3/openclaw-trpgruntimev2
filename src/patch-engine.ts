@@ -9,6 +9,7 @@ import {
   resolveWorldAbsolutePath,
   supportsStructuredPatchPath,
 } from "./world-store.js";
+import { emitRuntimeDiagnostic } from "./runtime-core/runtime-diagnostics.js";
 
 type PatchOp = "set" | "delete" | "append_list";
 
@@ -619,6 +620,7 @@ export async function runPatchApply(params: {
   worldRoot: string;
   cfg: TrpgRuntimeConfig;
   agentId: string;
+  sessionId?: string;
   cache: PatchCache;
   input: PatchApplyInput;
 }): Promise<Record<string, unknown>> {
@@ -633,6 +635,35 @@ export async function runPatchApply(params: {
   const auditedApplyMode = params.cfg.allowPatchApply
     ? "audited-required-config-open"
     : "audited-required-config-closed";
+
+  if (!params.cfg.allowPatchApply) {
+    await emitRuntimeDiagnostic({
+      cfg: params.cfg,
+      worldRoot: params.worldRoot,
+      sessionId: params.sessionId,
+      event: "patch_apply_blocked_allow_patch_apply",
+      severity: "warn",
+      route: "trpg_patch_apply",
+      gate: "allowPatchApply",
+      result: "blocked",
+      details: {
+        auditedApplyMode,
+      },
+    });
+    return {
+      ok: false,
+      error: "trpg_patch_apply is disabled by config (allowPatchApply=false)",
+      policy: {
+        write: false,
+        blockedBy: "allowPatchApply",
+      },
+      auditedApply: {
+        mode: auditedApplyMode,
+        configAllowPatchApply: params.cfg.allowPatchApply,
+        gate: audited.gate,
+      },
+    };
+  }
 
   let patch: NormalizedPatch | null = null;
 
@@ -695,6 +726,19 @@ export async function runPatchApply(params: {
 
   const canonicalTargets = simulation.touchedFiles.filter((file) => isCanonicalTarget(file));
   if (canonicalTargets.length > 0 && !params.cfg.runtimeSafetyFlags.canonicalWriteBackEnabled) {
+    await emitRuntimeDiagnostic({
+      cfg: params.cfg,
+      worldRoot: params.worldRoot,
+      sessionId: params.sessionId,
+      event: "patch_apply_blocked_canonical_write_back",
+      severity: "warn",
+      route: "trpg_patch_apply",
+      gate: "canonicalWriteBackEnabled",
+      result: "blocked",
+      details: {
+        canonicalTargets,
+      },
+    });
     return {
       ok: false,
       patchId: patch.patchId,

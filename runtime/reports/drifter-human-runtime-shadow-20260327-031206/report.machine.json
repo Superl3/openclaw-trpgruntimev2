@@ -1,0 +1,179 @@
+{
+  "runId": "run-20260327-030959-3654742",
+  "generatedAt": "2026-03-26T18:12:06.267Z",
+  "runnerConfig": {
+    "lane": "bridge",
+    "scenarios": [
+      "happy",
+      "modal",
+      "stale"
+    ],
+    "turns": 1,
+    "improveMode": "shadow",
+    "improveWindow": 1,
+    "watch": false,
+    "maxCycles": 1,
+    "cyclesExecuted": 1
+  },
+  "summary": {
+    "passed": 3,
+    "failed": 0,
+    "turns": 3
+  },
+  "proposals": [
+    {
+      "at": "2026-03-26T18:11:16.668Z",
+      "mode": "shadow",
+      "reasons": [
+        "llm invalid/fallback observed (invalid=1, fallback=1)"
+      ],
+      "suggestedSettings": {
+        "temperature": 0,
+        "topP": 0.05,
+        "systemPromptAppend": "Return strict JSON only using one visible customId. If uncertain, follow the recommendation actionId and do not invent fields."
+      },
+      "context": {
+        "cycle": 1,
+        "scenario": "modal",
+        "force": false,
+        "scenarioTurnsPlayed": 1
+      },
+      "counters": {
+        "turnCount": 1,
+        "llmInvalidCount": 1,
+        "llmFallbackCount": 1,
+        "staleRecoverCount": 0,
+        "llmLaneErrorCount": 0,
+        "repeatedSelectionStreak": 1
+      }
+    },
+    {
+      "at": "2026-03-26T18:12:06.261Z",
+      "mode": "shadow",
+      "reasons": [
+        "stale recover observed (1)"
+      ],
+      "suggestedSettings": {
+        "maxTokens": 140,
+        "systemPromptAppend": "Prefer compact decisions and avoid extra prose to reduce delayed or stale interactions."
+      },
+      "context": {
+        "cycle": 1,
+        "scenario": "stale",
+        "force": false,
+        "scenarioTurnsPlayed": 1
+      },
+      "counters": {
+        "turnCount": 1,
+        "llmInvalidCount": 0,
+        "llmFallbackCount": 0,
+        "staleRecoverCount": 1,
+        "llmLaneErrorCount": 0,
+        "repeatedSelectionStreak": 2
+      }
+    }
+  ],
+  "turnTranscripts": [
+    {
+      "cycle": 1,
+      "scenario": "happy",
+      "turn": 1,
+      "received": {
+        "sessionId": "sess-33904ddc-77f7-4de3-8aab-a868719420b3",
+        "uiVersion": 1,
+        "sceneId": "scene-bootstrap",
+        "originalText": "**Fixed UI**\n- status: active\n- sessionId: sess-33904ddc-77f7-4de3-8aab-a868719420b3\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:10:26.463Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n🎯 성향 추천 선택\n조사\n이동\n강행\n자유 입력\n반영",
+        "textSummary": "**Fixed UI**\n- status: active\n- sessionId: sess-33904ddc-77f7-4de3-8aab-a868719420b3\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:10:26.463Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다."
+      },
+      "sent": {
+        "type": "button",
+        "customId": "trpg:v1:sess-33904ddc-77f7-4de3-8aab-a868719420b3:1:scene-bootstrap:action.wait",
+        "actionId": "action.wait",
+        "label": "🎯 성향 추천 선택"
+      },
+      "response": {
+        "ok": true,
+        "errorCode": null
+      },
+      "recovered": false
+    },
+    {
+      "cycle": 1,
+      "scenario": "modal",
+      "turn": 1,
+      "received": {
+        "sessionId": "sess-05658406-79a3-42a4-a839-4345cd112bd0",
+        "uiVersion": 1,
+        "sceneId": "scene-bootstrap",
+        "originalText": "**Fixed UI**\n- status: active\n- sessionId: sess-05658406-79a3-42a4-a839-4345cd112bd0\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:10:52.222Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n🎯 성향 추천 선택\n조사\n이동\n강행\n자유 입력\n반영",
+        "textSummary": "**Fixed UI**\n- status: active\n- sessionId: sess-05658406-79a3-42a4-a839-4345cd112bd0\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:10:52.222Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다."
+      },
+      "sent": {
+        "type": "modal",
+        "customId": "trpg:v1:sess-05658406-79a3-42a4-a839-4345cd112bd0:1:scene-bootstrap:action.free_input.submit",
+        "actionId": null,
+        "label": null,
+        "freeInput": "강행 돌파한다"
+      },
+      "response": {
+        "ok": true,
+        "errorCode": null
+      },
+      "recovered": false
+    },
+    {
+      "cycle": 1,
+      "scenario": "stale",
+      "turn": 1,
+      "received": {
+        "sessionId": "sess-c6a79a16-2f1f-4cb2-868a-07dcdb1c3d8a",
+        "uiVersion": 3,
+        "sceneId": "scene-bootstrap",
+        "originalText": "**Fixed UI**\n- status: active\n- sessionId: sess-c6a79a16-2f1f-4cb2-868a-07dcdb1c3d8a\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 3\n- world_time: 2026-03-26T18:13:31.675Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 29 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n최근 Exchange #1: 가능\ndelta_time: +135s (누적 135s)\n결과: 대기를 처리했다.\n반응 체인: 시간이 흘렀다. -> 환경 상태가 미세하게 변했다.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n🎯 성향 추천 선택\n조사\n이동\n강행\n자유 입력\n반영",
+        "textSummary": "**Fixed UI**\n- status: active\n- sessionId: sess-c6a79a16-2f1f-4cb2-868a-07dcdb1c3d8a\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 3\n- world_time: 2026-03-26T18:13:31.675Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 29 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n최근 Exchange #1: 가능\ndelta_time: +135s (누적 135s)\n결과: 대기를 처리했다.\n반응 체인: 시간이 흘렀다. -> 환경 상태가 미세하게 변했다.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다."
+      },
+      "sent": {
+        "type": "button",
+        "customId": "trpg:v1:sess-c6a79a16-2f1f-4cb2-868a-07dcdb1c3d8a:3:scene-bootstrap:action.wait",
+        "actionId": "action.wait",
+        "label": "🎯 성향 추천 선택"
+      },
+      "response": {
+        "ok": true,
+        "errorCode": null
+      },
+      "recovered": false
+    }
+  ],
+  "laneIssues": [],
+  "scenarioSummaries": [
+    {
+      "cycle": 1,
+      "scenario": "happy",
+      "ok": true,
+      "turnsPlayed": 1,
+      "startedAt": "2026-03-26T18:10:26.452Z",
+      "endedAt": "2026-03-26T18:10:52.218Z",
+      "durationMs": 25766
+    },
+    {
+      "cycle": 1,
+      "scenario": "modal",
+      "ok": true,
+      "turnsPlayed": 1,
+      "startedAt": "2026-03-26T18:10:52.218Z",
+      "endedAt": "2026-03-26T18:11:16.671Z",
+      "durationMs": 24453
+    },
+    {
+      "cycle": 1,
+      "scenario": "stale",
+      "ok": true,
+      "turnsPlayed": 1,
+      "startedAt": "2026-03-26T18:11:16.671Z",
+      "endedAt": "2026-03-26T18:12:06.267Z",
+      "durationMs": 49596
+    }
+  ],
+  "scenarioFeedback": []
+}

@@ -343,7 +343,7 @@ export function actionLabelFor(actionId: string): string {
     case "action.rush":
       return "강행";
     case "action.free_input.submit":
-      return "직접 입력";
+      return "자유 입력";
     default:
       return "알 수 없는 행동";
   }
@@ -444,6 +444,10 @@ export function mapFreeInputToActionDeterministic(freeInput: string): Determinis
   const normalized = readString(freeInput).toLowerCase();
   if (!normalized) {
     return "action.unknown";
+  }
+
+  if (/(성향\s*추천|추천\s*선택|캐릭터.+맡기|맡겨|delegate)/.test(normalized)) {
+    return "action.observe";
   }
 
   if (/(조사|살핀|탐색|observe|inspect|look)/.test(normalized)) {

@@ -36,12 +36,24 @@ import {
 import { appendTraceEvent, createTraceEvent, ensureTraceState } from "../../runtime-core/trace.js";
 import { JsonFileStateStore } from "../../runtime-store/file-state-store.js";
 import {
+  ensureSessionPresentationState,
   ensureRuntimeMetadata,
   type InteractionRouteRecord,
   type RuntimeCanonicalProvenance,
   type SessionState,
 } from "../../runtime-core/types.js";
 import { loadStructuredWorldFile } from "../../world-store.js";
+import {
+  SESSION_DATA_SECTIONS,
+  consumeSessionResetConfirmation,
+  copySectionData,
+  deleteSectionDataFromWorkspace,
+  ensureSessionWorkspace,
+  issueSessionResetConfirmation,
+  readSessionWorkspaceRecord,
+  wipeSessionWorkspace,
+  type SessionDataSection,
+} from "../../runtime-core/session-workspaces.js";
 
 const CHECKPOINT0_STORE_RELATIVE_PATH = "state/runtime-core";
 const FACTION_CANON_PATH = "canon/factions.yaml";
@@ -56,6 +68,7 @@ const WORLD_SEED_CANDIDATE_PATHS = [
   "state/world-seeds.yml",
   "state/world-seeds.json",
 ] as const;
+const NEW_CONFIRM_TOKEN_TTL_MS = 5 * 60 * 1000;
 
 const SESSION_NEW_PARAMETERS = {
   type: "object",
@@ -65,6 +78,25 @@ const SESSION_NEW_PARAMETERS = {
     ownerId: { type: "string" },
     actorId: { type: "string" },
     sceneId: { type: "string" },
+    confirmReset: { type: "boolean" },
+    confirmToken: { type: "string" },
+    wipeMode: { type: "string", enum: ["ask", "force"] },
+  },
+} as const;
+
+const SECTION_ITEMS_SCHEMA = {
+  type: "string",
+  enum: SESSION_DATA_SECTIONS,
+} as const;
+
+const SESSION_SECTION_TOOL_PARAMETERS = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    sessionId: { type: "string" },
+    channelKey: { type: "string" },
+    actorId: { type: "string" },
+    sections: { type: "array", items: SECTION_ITEMS_SCHEMA, minItems: 1 },
   },
 } as const;
 
@@ -87,6 +119,24 @@ const SESSION_END_PARAMETERS = {
     channelKey: { type: "string" },
     actorId: { type: "string" },
     reason: { type: "string" },
+  },
+} as const;
+
+const SESSION_HELP_PARAMETERS = {
+  type: "object",
+  additionalProperties: false,
+  properties: {},
+} as const;
+
+const SESSION_VERBOSE_PARAMETERS = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    sessionId: { type: "string" },
+    channelKey: { type: "string" },
+    actorId: { type: "string" },
+    enabled: { type: "boolean" },
+    tailCount: { type: "integer", minimum: 1, maximum: 12 },
   },
 } as const;
 
@@ -119,6 +169,151 @@ const PANEL_MESSAGE_COMMIT_PARAMETERS = {
   },
   required: ["sessionId"],
 } as const;
+
+type TrpgCommandHint = {
+  command: string;
+  tool: string;
+  summary: string;
+  example: string;
+};
+
+const TRPG_COMMAND_HINTS: TrpgCommandHint[] = [
+  {
+    command: "/trpg help",
+    tool: "trpg_session_help",
+    summary: "사용 가능한 TRPG 명령과 예시를 확인한다.",
+    example: "/trpg help",
+  },
+  {
+    command: "/trpg new",
+    tool: "trpg_session_new",
+    summary: "새 세션과 임시 워크스페이스를 시작한다.",
+    example: "/trpg new",
+  },
+  {
+    command: "/trpg resume",
+    tool: "trpg_session_resume",
+    summary: "현재 채널의 활성 세션 패널을 복구/재생성한다.",
+    example: "/trpg resume",
+  },
+  {
+    command: "/trpg save",
+    tool: "trpg_session_save",
+    summary: "임시 워크스페이스 변경을 canonical 파일로 저장한다.",
+    example: "/trpg save sections=[\"status\",\"inventory\"]",
+  },
+  {
+    command: "/trpg load",
+    tool: "trpg_session_load",
+    summary: "canonical 파일 내용을 임시 워크스페이스로 다시 불러온다.",
+    example: "/trpg load sections=[\"player\",\"scene\"]",
+  },
+  {
+    command: "/trpg data-delete",
+    tool: "trpg_session_data_delete",
+    summary: "임시 워크스페이스의 선택 섹션만 삭제한다.",
+    example: "/trpg data-delete sections=[\"scene\"]",
+  },
+  {
+    command: "/trpg verbose",
+    tool: "trpg_session_verbose",
+    summary: "디버그 추적 표시를 토글한다.",
+    example: "/trpg verbose enabled=true",
+  },
+  {
+    command: "/trpg end",
+    tool: "trpg_session_end",
+    summary: "세션을 종료하고 패널을 마감한다.",
+    example: "/trpg end",
+  },
+];
+
+function buildVisibleCommandHints() {
+  return {
+    title: "TRPG 명령 안내",
+    dataManagementNote: "데이터 관리 명령 안내: /trpg save · /trpg load · /trpg data-delete (자세한 예시는 /trpg help)",
+    commands: TRPG_COMMAND_HINTS,
+  };
+}
+
+function buildNewConfirmationActionHints(confirmToken: string) {
+  return {
+    yes: {
+      label: "YES",
+      intent: "기존 세션/임시데이터를 정리하고 /trpg new를 강행한다.",
+      tool: "trpg_session_new",
+      params: {
+        confirmReset: true,
+        confirmToken,
+        wipeMode: "force",
+      },
+      manualExample: `/trpg new confirmReset=true confirmToken=${confirmToken} wipeMode=force`,
+    },
+    no: {
+      label: "NO",
+      intent: "리셋을 취소하고 현재 상태를 유지한다.",
+      tool: "trpg_session_new",
+      params: {
+        confirmReset: false,
+        wipeMode: "ask",
+      },
+      manualExample: "/trpg new confirmReset=false wipeMode=ask",
+    },
+  };
+}
+
+function buildSessionStartActionComponents(sessionId: string, actorId: string) {
+  return {
+    type: "actions",
+    buttons: [
+      {
+        id: "trpg_start_resume",
+        label: "▶️ 패널 시작/갱신",
+        style: "primary",
+        tool: "trpg_session_resume",
+        params: {
+          sessionId,
+          actorId,
+        },
+      },
+      {
+        id: "trpg_start_help",
+        label: "❓ 명령 보기",
+        style: "secondary",
+        tool: "trpg_session_help",
+        params: {},
+      },
+    ],
+  };
+}
+
+function buildSessionResumeActionComponents(sessionId: string, actorId: string) {
+  return {
+    type: "actions",
+    buttons: [
+      {
+        id: "trpg_resume_refresh",
+        label: "🔄 패널 새로고침",
+        style: "primary",
+        tool: "trpg_session_resume",
+        params: {
+          sessionId,
+          actorId,
+        },
+      },
+      {
+        id: "trpg_resume_end",
+        label: "⏹️ 세션 종료",
+        style: "secondary",
+        tool: "trpg_session_end",
+        params: {
+          sessionId,
+          actorId,
+        },
+      },
+    ],
+  };
+}
 
 function jsonToolResult(payload: unknown) {
   return {
@@ -154,6 +349,25 @@ function readString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function sanitizeLegacyBootstrapTemplateText(value: string): string {
+  const normalized = readString(value);
+  if (!normalized) {
+    return "";
+  }
+
+  const hasForbidden =
+    /\bpart\s*a\b|\bpart\s*b\b/i.test(normalized) ||
+    /좋아요\s*,?\s*새\s*캐릭터\s*생성을\s*시작할게요/i.test(normalized) ||
+    /숨기고\s*있는\s*비밀/i.test(normalized) ||
+    (normalized.match(/(?:^|\n)\s*[1-6]\s*[\).:：-]\s+/g)?.length ?? 0) >= 4;
+
+  if (hasForbidden) {
+    return "캐릭터 준비를 이어갈게요.";
+  }
+
+  return normalized;
+}
+
 function readBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
@@ -169,6 +383,80 @@ function readInteger(value: unknown): number | null {
     }
   }
   return null;
+}
+
+function clampTraceTailCount(value: unknown, fallback: number): number {
+  const parsed = readInteger(value);
+  if (!parsed) {
+    return fallback;
+  }
+  return Math.max(1, Math.min(12, parsed));
+}
+
+function summarizeTraceData(value: Record<string, unknown>): Record<string, string | number | boolean | null> {
+  const allowedKeys = new Set([
+    "routeActionId",
+    "inputActionId",
+    "resolvedActionId",
+    "selectedActionId",
+    "selectedSource",
+    "selectedConfidence",
+    "classification",
+    "deltaTimeSec",
+    "sceneId",
+    "uiVersion",
+    "result",
+    "reason",
+    "transitionCount",
+    "surfacedNow",
+    "expiredDeleted",
+    "failedNow",
+    "mutatedNow",
+    "archivedNow",
+    "generationAttempted",
+    "updatedCount",
+    "slotCount",
+    "locationId",
+    "locationShifted",
+    "memoryTouched",
+    "tracesCreated",
+    "tracesExpired",
+    "dispatchId",
+    "mode",
+    "actionId",
+  ]);
+  const out: Record<string, string | number | boolean | null> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (!allowedKeys.has(key)) {
+      continue;
+    }
+    if (typeof raw === "string") {
+      out[key] = raw.length <= 72 ? raw : `${raw.slice(0, 69)}...`;
+      continue;
+    }
+    if (typeof raw === "number" || typeof raw === "boolean" || raw === null) {
+      out[key] = raw;
+    }
+  }
+  return out;
+}
+
+function traceTailPayload(session: SessionState, tailCount: number, includeData: boolean): Array<Record<string, unknown>> {
+  return session.trace.events.slice(-tailCount).map((event) => {
+    const base: Record<string, unknown> = {
+      tsIso: event.tsIso,
+      lane: event.lane,
+      type: event.type,
+      severity: event.severity,
+    };
+    if (event.code) {
+      base.code = event.code;
+    }
+    if (includeData) {
+      base.data = summarizeTraceData(event.data);
+    }
+    return base;
+  });
 }
 
 function toSeedDiagnostics(
@@ -380,6 +668,41 @@ function resolveOwnerId(params: Record<string, unknown>, ctx: OpenClawPluginTool
   return resolveActorId(params, ctx) || "owner:unknown";
 }
 
+function resolveSessionContextId(params: Record<string, unknown>, ctx: OpenClawPluginToolContext, channelKey: string): string {
+  const fromContext = readString(ctx.sessionId);
+  if (fromContext) {
+    return fromContext;
+  }
+  const fromParam = readString(params.sessionId);
+  if (fromParam) {
+    return fromParam;
+  }
+  return channelKey;
+}
+
+function resolveSectionList(value: unknown): SessionDataSection[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    return [...SESSION_DATA_SECTIONS];
+  }
+
+  const allowed = new Set<SessionDataSection>(SESSION_DATA_SECTIONS);
+  const selected: SessionDataSection[] = [];
+  for (const raw of value) {
+    if (typeof raw !== "string") {
+      continue;
+    }
+    if (!allowed.has(raw as SessionDataSection)) {
+      continue;
+    }
+    const typed = raw as SessionDataSection;
+    if (!selected.includes(typed)) {
+      selected.push(typed);
+    }
+  }
+
+  return selected.length > 0 ? selected : [...SESSION_DATA_SECTIONS];
+}
+
 function normalizeSession(session: SessionState): SessionState {
   const nowIso = readString((session as Record<string, unknown>).updatedAt) || new Date().toISOString();
   const deterministicLoop = ensureDeterministicSceneLoopState((session as Record<string, unknown>).deterministicLoop, {
@@ -387,6 +710,7 @@ function normalizeSession(session: SessionState): SessionState {
     nowIso,
   });
   const runtimeMetadata = ensureRuntimeMetadata((session as Record<string, unknown>).runtimeMetadata);
+  const presentation = ensureSessionPresentationState((session as Record<string, unknown>).presentation);
   const sceneId = deterministicLoop.scene.sceneId;
   const ownerId = readString((session as Record<string, unknown>).ownerId) || "owner:unknown";
   const actionSeq = Math.max(
@@ -396,7 +720,8 @@ function normalizeSession(session: SessionState): SessionState {
   );
   const turnIndex = readInteger((session as Record<string, unknown>).turnIndex) ?? 0;
   const lastActionId = readString((session as Record<string, unknown>).lastActionId) || null;
-  const lastActionSummary = readString((session as Record<string, unknown>).lastActionSummary) || null;
+  const lastActionSummary =
+    sanitizeLegacyBootstrapTemplateText(readString((session as Record<string, unknown>).lastActionSummary)) || null;
   const normalized: SessionState = {
     ...session,
     sceneId,
@@ -407,6 +732,7 @@ function normalizeSession(session: SessionState): SessionState {
     lastActionSummary,
     deterministicLoop,
     runtimeMetadata,
+    presentation,
     panelDispatch: {
       pending: session.panelDispatch?.pending ?? null,
       committedDispatchIds: Array.isArray(session.panelDispatch?.committedDispatchIds)
@@ -504,6 +830,81 @@ async function resolveSessionTarget(params: {
     }
   }
   return null;
+}
+
+async function resolveSessionWorkspaceGuard(params: {
+  canonicalWorldRoot: string;
+  sessionContextId: string;
+  runtime: ReturnType<typeof createRuntimeContext>;
+  actorId: string;
+  command: string;
+  sessionId?: string;
+  channelKey?: string;
+}): Promise<
+  | {
+      ok: true;
+      current: SessionState;
+      workspaceRoot: string;
+    }
+  | {
+      ok: false;
+      payload: Record<string, unknown>;
+    }
+> {
+  const current = await resolveSessionTarget({
+    store: params.runtime.store,
+    sessionId: params.sessionId,
+    channelKey: params.channelKey,
+  });
+
+  if (!current || current.status !== "active") {
+    return {
+      ok: false,
+      payload: runtimeError({
+        command: params.command,
+        errorCode: "session_missing",
+        message: "No active session found for the given session/channel key.",
+        recoverable: true,
+        recoveryHint: "Run /trpg new to create a fresh session.",
+      }),
+    };
+  }
+
+  const ownerCheck = assertOwner(current, params.actorId);
+  if (!ownerCheck.ok) {
+    return {
+      ok: false,
+      payload: runtimeError({
+        command: params.command,
+        errorCode: "owner_mismatch",
+        message: ownerCheck.error,
+        recoverable: false,
+      }),
+    };
+  }
+
+  const workspace = await readSessionWorkspaceRecord({
+    canonicalWorldRoot: params.canonicalWorldRoot,
+    sessionContextId: params.sessionContextId,
+  });
+  if (!workspace?.workspaceRoot) {
+    return {
+      ok: false,
+      payload: runtimeError({
+        command: params.command,
+        errorCode: "workspace_missing",
+        message: "No temp workspace is mapped for this session context.",
+        recoverable: true,
+        recoveryHint: "Run /trpg new to initialize temp workspace first.",
+      }),
+    };
+  }
+
+  return {
+    ok: true,
+    current,
+    workspaceRoot: workspace.workspaceRoot,
+  };
 }
 
 async function syncMessageMetadata(params: {
@@ -691,7 +1092,8 @@ function preparePanelDispatch(params: {
   const mode: PanelMessageMode =
     params.mode ?? (params.session.panels.main.messageId ? "edit" : "send");
   const loop = params.session.deterministicLoop;
-  const debugRuntimeSignals = params.runtimeSafetyFlags.debugRuntimeSignals;
+  const verboseMode = params.session.presentation.verboseMode === true || params.runtimeSafetyFlags.traceVerbose;
+  const debugRuntimeSignals = params.runtimeSafetyFlags.debugRuntimeSignals && verboseMode;
   const telemetryExtended = params.runtimeSafetyFlags.telemetryExtended;
   const availableButtons = collectPanelRouteActionIds(params.session).filter(
     (actionId) => actionId !== "action.free_input.submit",
@@ -710,6 +1112,8 @@ function preparePanelDispatch(params: {
     anchorSummaryOnly: params.runtimeSafetyFlags.anchorSummaryOnly,
     telemetryExtended,
     canonicalSyncEnabled: params.runtimeSafetyFlags.canonicalSyncEnabled,
+    recommendationWhimEnabled: params.runtimeSafetyFlags.recommendationWhimEnabled,
+    verboseMode,
   });
   const temporalSummary = buildTemporalQualitativeSummary({
     temporal: loop.temporal,
@@ -789,6 +1193,9 @@ function preparePanelDispatch(params: {
     }),
   );
 
+  const panelDispatchMessage =
+    params.session.status === "active" ? `${panel.message} · 데이터 관리 명령: /trpg help` : panel.message;
+
   const payload = {
     sourceOfTruth: "state-store",
     panel: {
@@ -815,6 +1222,10 @@ function preparePanelDispatch(params: {
       sub: {
         availableButtons,
         modalSubmitAction: "action.free_input.submit",
+        dataManagementGuide: {
+          text: "데이터 관리 명령 안내: /trpg save · /trpg load · /trpg data-delete",
+          helpCommand: "/trpg help",
+        },
         blockedActions: loop.actionPalette
           .filter((entry) => entry.availability === "currently_impossible" || entry.availability === "impossible")
           .map((entry) => ({ actionId: entry.actionId, reason: entry.reason })),
@@ -823,9 +1234,14 @@ function preparePanelDispatch(params: {
     panelDispatch: {
       action: panel.mode,
       dispatchId,
-      message: panel.message,
+      message: panelDispatchMessage,
       messageId: panel.messageId,
       components: panel.components,
+    },
+    verbose: {
+      enabled: verboseMode,
+      source: params.session.presentation.verboseMode ? "session" : "global",
+      traceTail: verboseMode ? traceTailPayload(preparedSession, 6, true) : [],
     },
     panelCommitTemplate: {
       tool: "trpg_panel_message_commit",
@@ -875,6 +1291,22 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
   const cfg = parseTrpgRuntimeConfig(api.pluginConfig);
 
   api.registerTool(
+    (_ctx) => ({
+      name: "trpg_session_help",
+      description: "Checkpoint 1 command guide for /trpg help. Returns visible command list and minimal usage examples.",
+      parameters: SESSION_HELP_PARAMETERS,
+      async execute() {
+        return jsonToolResult({
+          ok: true,
+          command: "/trpg help",
+          commandHints: buildVisibleCommandHints(),
+        });
+      },
+    }),
+    { name: "trpg_session_help" },
+  );
+
+  api.registerTool(
     (ctx) => ({
       name: "trpg_session_new",
       description:
@@ -891,8 +1323,106 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
           const channelKey = resolveChannelKey(input, ctx);
           const ownerId = resolveOwnerId(input, ctx);
           const sceneId = readString(input.sceneId);
+          const sessionContextId = resolveSessionContextId(input, ctx, channelKey);
+          const confirmReset = readBoolean(input.confirmReset, false);
+          const confirmToken = readString(input.confirmToken);
+          const wipeMode = readString(input.wipeMode) === "force" ? "force" : "ask";
 
           const runtime = createRuntimeContext(gate.worldRoot, cfg);
+          const currentActive = await runtime.store.readActiveSessionByChannel(channelKey);
+          const workspaceRecord = await readSessionWorkspaceRecord({
+            canonicalWorldRoot: gate.worldRoot,
+            sessionContextId,
+          });
+          const contaminationDetected = Boolean(currentActive) || Boolean(workspaceRecord);
+
+          if (contaminationDetected) {
+            if (!confirmReset) {
+              const confirmation = await issueSessionResetConfirmation({
+                canonicalWorldRoot: gate.worldRoot,
+                sessionContextId,
+                channelKey,
+                ownerId,
+                ttlMs: NEW_CONFIRM_TOKEN_TTL_MS,
+              });
+              return jsonToolResult({
+                ok: false,
+                command: "/trpg new",
+                errorCode: "confirmation_required",
+                confirmationRequired: true,
+                wipeMode,
+                commandHints: buildVisibleCommandHints(),
+                contamination: {
+                  activeSession: Boolean(currentActive),
+                  existingTempWorkspace: Boolean(workspaceRecord),
+                },
+                confirmToken: confirmation.token,
+                confirmExpiresAt: confirmation.expiresAt,
+                nextActions: buildNewConfirmationActionHints(confirmation.token),
+                components: {
+                  type: "actions",
+                  title: "기존 세션이 있어 확인이 필요합니다.",
+                  token: confirmation.token,
+                  buttons: [
+                    {
+                      id: "trpg_new_confirm_yes",
+                      label: "YES",
+                      style: "danger",
+                      tool: "trpg_session_new",
+                      params: {
+                        confirmReset: true,
+                        confirmToken: confirmation.token,
+                        wipeMode: "force",
+                      },
+                    },
+                    {
+                      id: "trpg_new_confirm_no",
+                      label: "NO",
+                      style: "secondary",
+                      tool: "trpg_session_new",
+                      params: {
+                        confirmReset: false,
+                        wipeMode: "ask",
+                      },
+                    },
+                  ],
+                },
+              });
+            }
+
+            const verified = await consumeSessionResetConfirmation({
+              canonicalWorldRoot: gate.worldRoot,
+              token: confirmToken,
+              sessionContextId,
+              channelKey,
+              ownerId,
+            });
+            if (!verified.ok) {
+              return jsonToolResult(
+                runtimeError({
+                  command: "/trpg new",
+                  errorCode: "invalid_confirm_token",
+                  message: "confirmToken is invalid, expired, or mismatched with current context.",
+                  recoverable: true,
+                  recoveryHint: "Run /trpg new again and use the latest YES token.",
+                }),
+              );
+            }
+
+            if (currentActive) {
+              await runtime.engine.endSession({
+                sessionId: currentActive.sessionId,
+                channelKey,
+                reason: "reset_by_new_confirm",
+              });
+            }
+
+            await wipeSessionWorkspace({
+              canonicalWorldRoot: gate.worldRoot,
+              sessionContextId,
+            });
+          }
+
           const seedBootstrap = await loadRuntimeBootstrapFromWorldSeed({
             worldRoot: gate.worldRoot,
             cfg,
@@ -940,11 +1470,26 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
             runtimeSafetyFlags: cfg.runtimeSafetyFlags,
           });
           await runtime.store.upsertSession(prepared.session);
+          const workspace = await ensureSessionWorkspace({
+            canonicalWorldRoot: gate.worldRoot,
+            sessionContextId,
+            sessionId: prepared.session.sessionId,
+          });
 
           const payload = {
             ok: true,
             command: "/trpg new",
+            commandHints: buildVisibleCommandHints(),
+            actionableComponents: buildSessionStartActionComponents(prepared.session.sessionId, ownerId),
+            canonicalWorldRoot: gate.worldRoot,
+            effectiveWorldRoot: workspace.workspaceRoot,
             storeRoot: runtime.storeRoot,
+            workspace: {
+              sessionContextId,
+              workspaceRoot: workspace.workspaceRoot,
+              createdAt: workspace.createdAt,
+              updatedAt: workspace.updatedAt,
+            },
             session: prepared.session,
             routes: result.routes,
             seedBootstrap: {
@@ -1049,6 +1594,8 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
           const payload = {
             ok: true,
             command: "/trpg resume",
+            commandHints: buildVisibleCommandHints(),
+            actionableComponents: buildSessionResumeActionComponents(prepared.session.sessionId, actorId),
             storeRoot: runtime.storeRoot,
             session: prepared.session,
             recoveryPlan: resumed.recoveryPlan,
@@ -1157,6 +1704,288 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
       },
     }),
     { name: "trpg_session_end" },
+  );
+
+  api.registerTool(
+    (ctx) => ({
+      name: "trpg_session_verbose",
+      description:
+        "Owner-only verbose toggle for active session. Applies immediately and returns compact trace tail for Discord diagnostics.",
+      parameters: SESSION_VERBOSE_PARAMETERS,
+      async execute(_toolCallId, params) {
+        const gate = createGate({ cfg, ctx, api });
+        if (!gate.ok) {
+          return jsonToolResult(gate.payload);
+        }
+
+        try {
+          const input = toObject(params);
+          const runtime = createRuntimeContext(gate.worldRoot, cfg);
+          const actorId = resolveActorId(input, ctx);
+          const sessionId = readString(input.sessionId) || undefined;
+          const channelKey = resolveChannelKey(input, ctx);
+          const tailCount = clampTraceTailCount(input.tailCount, 6);
+
+          const current = await resolveSessionTarget({
+            store: runtime.store,
+            sessionId,
+            channelKey,
+          });
+
+          if (!current || current.status !== "active") {
+            return jsonToolResult({
+              ok: false,
+              command: "/trpg verbose",
+              error: "No active session found for the given session/channel key.",
+            });
+          }
+
+          const ownerCheck = assertOwner(current, actorId);
+          if (!ownerCheck.ok) {
+            return jsonToolResult({
+              ok: false,
+              command: "/trpg verbose",
+              error: ownerCheck.error,
+            });
+          }
+
+          const beforeEnabled = current.presentation.verboseMode === true;
+          const nextEnabled = typeof input.enabled === "boolean" ? input.enabled : beforeEnabled;
+          const nowIso = new Date().toISOString();
+
+          let nextSession: SessionState = current;
+          if (beforeEnabled !== nextEnabled) {
+            nextSession = appendTraceEvent(
+              {
+                ...current,
+                presentation: {
+                  ...current.presentation,
+                  verboseMode: nextEnabled,
+                },
+                updatedAt: nowIso,
+              },
+              createTraceEvent({
+                lane: "adapter",
+                type: "session.verbose.updated",
+                tsIso: nowIso,
+                data: {
+                  previous: beforeEnabled,
+                  current: nextEnabled,
+                },
+              }),
+            );
+            await runtime.store.upsertSession(nextSession);
+          }
+
+          const effectiveVerbose = nextSession.presentation.verboseMode === true || cfg.runtimeSafetyFlags.traceVerbose;
+          return jsonToolResult({
+            ok: true,
+            command: "/trpg verbose",
+            sessionId: nextSession.sessionId,
+            changed: beforeEnabled !== nextEnabled,
+            verbose: {
+              enabled: nextEnabled,
+              effectiveVerbose,
+              source: nextSession.presentation.verboseMode ? "session" : "global",
+            },
+            traceTail: traceTailPayload(nextSession, tailCount, effectiveVerbose),
+            note: "변경 내용은 동일 세션의 다음 /trpg resume 또는 다음 인터랙션 렌더부터 즉시 반영된다.",
+          });
+        } catch (error) {
+          return jsonToolResult({
+            ok: false,
+            command: "/trpg verbose",
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
+    }),
+    { name: "trpg_session_verbose" },
+  );
+
+  api.registerTool(
+    (ctx) => ({
+      name: "trpg_session_save",
+      description:
+        "Checkpoint 1 utility for /trpg save. Copies selected data sections from temp workspace into canonical world root.",
+      parameters: SESSION_SECTION_TOOL_PARAMETERS,
+      async execute(_toolCallId, params) {
+        const gate = createGate({ cfg, ctx, api });
+        if (!gate.ok) {
+          return jsonToolResult(gate.payload);
+        }
+
+        try {
+          const input = toObject(params);
+          const runtime = createRuntimeContext(gate.worldRoot, cfg);
+          const actorId = resolveActorId(input, ctx);
+          const channelKey = resolveChannelKey(input, ctx);
+          const sessionId = readString(input.sessionId) || undefined;
+          const sessionContextId = resolveSessionContextId(input, ctx, channelKey);
+          const sections = resolveSectionList(input.sections);
+
+          const guard = await resolveSessionWorkspaceGuard({
+            canonicalWorldRoot: gate.worldRoot,
+            sessionContextId,
+            runtime,
+            actorId,
+            command: "/trpg save",
+            sessionId,
+            channelKey,
+          });
+          if (!guard.ok) {
+            return jsonToolResult(guard.payload);
+          }
+
+          const sectionResults = await copySectionData({
+            fromWorldRoot: guard.workspaceRoot,
+            toWorldRoot: gate.worldRoot,
+            sections,
+          });
+
+          return jsonToolResult({
+            ok: true,
+            command: "/trpg save",
+            sessionId: guard.current.sessionId,
+            sessionContextId,
+            canonicalWorldRoot: gate.worldRoot,
+            workspaceRoot: guard.workspaceRoot,
+            sections,
+            sectionResults,
+          });
+        } catch (error) {
+          return jsonToolResult({
+            ok: false,
+            command: "/trpg save",
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
+    }),
+    { name: "trpg_session_save" },
+  );
+
+  api.registerTool(
+    (ctx) => ({
+      name: "trpg_session_load",
+      description:
+        "Checkpoint 1 utility for /trpg load. Copies selected sections from canonical world root back into temp workspace.",
+      parameters: SESSION_SECTION_TOOL_PARAMETERS,
+      async execute(_toolCallId, params) {
+        const gate = createGate({ cfg, ctx, api });
+        if (!gate.ok) {
+          return jsonToolResult(gate.payload);
+        }
+
+        try {
+          const input = toObject(params);
+          const runtime = createRuntimeContext(gate.worldRoot, cfg);
+          const actorId = resolveActorId(input, ctx);
+          const channelKey = resolveChannelKey(input, ctx);
+          const sessionId = readString(input.sessionId) || undefined;
+          const sessionContextId = resolveSessionContextId(input, ctx, channelKey);
+          const sections = resolveSectionList(input.sections);
+
+          const guard = await resolveSessionWorkspaceGuard({
+            canonicalWorldRoot: gate.worldRoot,
+            sessionContextId,
+            runtime,
+            actorId,
+            command: "/trpg load",
+            sessionId,
+            channelKey,
+          });
+          if (!guard.ok) {
+            return jsonToolResult(guard.payload);
+          }
+
+          const sectionResults = await copySectionData({
+            fromWorldRoot: gate.worldRoot,
+            toWorldRoot: guard.workspaceRoot,
+            sections,
+          });
+
+          return jsonToolResult({
+            ok: true,
+            command: "/trpg load",
+            sessionId: guard.current.sessionId,
+            sessionContextId,
+            canonicalWorldRoot: gate.worldRoot,
+            workspaceRoot: guard.workspaceRoot,
+            sections,
+            sectionResults,
+          });
+        } catch (error) {
+          return jsonToolResult({
+            ok: false,
+            command: "/trpg load",
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
+    }),
+    { name: "trpg_session_load" },
+  );
+
+  api.registerTool(
+    (ctx) => ({
+      name: "trpg_session_data_delete",
+      description:
+        "Checkpoint 1 utility for /trpg data-delete. Deletes selected sections from temp workspace without touching canonical files.",
+      parameters: SESSION_SECTION_TOOL_PARAMETERS,
+      async execute(_toolCallId, params) {
+        const gate = createGate({ cfg, ctx, api });
+        if (!gate.ok) {
+          return jsonToolResult(gate.payload);
+        }
+
+        try {
+          const input = toObject(params);
+          const runtime = createRuntimeContext(gate.worldRoot, cfg);
+          const actorId = resolveActorId(input, ctx);
+          const channelKey = resolveChannelKey(input, ctx);
+          const sessionId = readString(input.sessionId) || undefined;
+          const sessionContextId = resolveSessionContextId(input, ctx, channelKey);
+          const sections = resolveSectionList(input.sections);
+
+          const guard = await resolveSessionWorkspaceGuard({
+            canonicalWorldRoot: gate.worldRoot,
+            sessionContextId,
+            runtime,
+            actorId,
+            command: "/trpg data-delete",
+            sessionId,
+            channelKey,
+          });
+          if (!guard.ok) {
+            return jsonToolResult(guard.payload);
+          }
+
+          const sectionResults = await deleteSectionDataFromWorkspace({
+            workspaceRoot: guard.workspaceRoot,
+            sections,
+          });
+
+          return jsonToolResult({
+            ok: true,
+            command: "/trpg data-delete",
+            sessionId: guard.current.sessionId,
+            sessionContextId,
+            canonicalWorldRoot: gate.worldRoot,
+            workspaceRoot: guard.workspaceRoot,
+            sections,
+            sectionResults,
+          });
+        } catch (error) {
+          return jsonToolResult({
+            ok: false,
+            command: "/trpg data-delete",
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
+    }),
+    { name: "trpg_session_data_delete" },
   );
 
   api.registerTool(
@@ -1692,6 +2521,6 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
   );
 
   api.logger.info(
-    "[trpg-runtime] checkpoint1 lifecycle tools registered: trpg_session_new, trpg_session_resume, trpg_session_end, trpg_panel_interact, trpg_panel_message_commit",
+    "[trpg-runtime] checkpoint1 lifecycle tools registered: trpg_session_help, trpg_session_new, trpg_session_resume, trpg_session_end, trpg_session_verbose, trpg_session_save, trpg_session_load, trpg_session_data_delete, trpg_panel_interact, trpg_panel_message_commit",
   );
 }

@@ -38,8 +38,11 @@ import {
 import {
   buildSceneComponents,
   COMPONENT_USAGE_GUIDE,
+  type RuntimePhase,
   type SceneComponentInput,
 } from "./discord-components.js";
+import { resolveEffectiveWorldRootForSessionSync } from "./runtime-core/session-workspaces.js";
+import { emitRuntimeDiagnostic } from "./runtime-core/runtime-diagnostics.js";
 
 const STORE_GET_PARAMETERS = {
   type: "object",
@@ -219,6 +222,13 @@ type BootstrapUpdate = Partial<Record<BootstrapFieldKey, string>>;
 type BootstrapGateResult = {
   bootstrapComplete: boolean;
   justCompleted: boolean;
+  runtimePhase: RuntimePhase;
+  phaseSignals: {
+    characterCreated: boolean;
+    bootstrapComplete: boolean;
+    playerSetupComplete: boolean;
+    introShown: boolean;
+  };
   contextChunk?: string;
 };
 
@@ -238,6 +248,7 @@ type StatusPanelData = {
   carriedItems: string[];
   equippedItems: string[];
   inventoryNotes: string[];
+  worldTime: string;
 };
 
 type NpcMemorySummary = {
@@ -382,6 +393,7 @@ function buildPromptSurfaceChunk(params: {
     { mandatory: boolean; priority: number; maxLines: number; maxChars: number }
   > = {
     TRPG_RUNTIME_CHARACTER_BOOTSTRAP: { mandatory: true, priority: 100, maxLines: 22, maxChars: 1800 },
+    TRPG_DISCORD_COMPONENTS_BOOTSTRAP: { mandatory: true, priority: 100, maxLines: 14, maxChars: 1400 },
     TRPG_RUNTIME_BOOTSTRAP_COMPLETED: { mandatory: true, priority: 96, maxLines: 12, maxChars: 1200 },
     TRPG_RUNTIME_INTRO_GUARD: { mandatory: true, priority: 94, maxLines: 16, maxChars: 1700 },
     TRPG_RUNTIME_SCENE_PERSISTENCE_GUARD: { mandatory: true, priority: 92, maxLines: 11, maxChars: 1300 },
@@ -1142,6 +1154,15 @@ function extractBootstrapFreeform(message: string): string {
     if (line.startsWith("/")) {
       return false;
     }
+    if (/^(?:current\s*time|conversation\s*info|sender\s*\(|sender\s*:|untrusted\s*context|source\s*:|system\s*:)/i.test(line)) {
+      return false;
+    }
+    if (/^<{3}|^>{3}|<\/?.+?>/.test(line)) {
+      return false;
+    }
+    if (/\b(?:doc_id|session_id|message_id|sender_id|group_channel|group_space|is_group_chat)\b/i.test(line)) {
+      return false;
+    }
     return true;
   });
 
@@ -1169,6 +1190,43 @@ function mergeFreeformDescription(existingValue: string, incomingValue: string):
   return `${existing}${String.fromCharCode(10)}${incoming}`;
 }
 
+function hasLegacyBootstrapTemplateLeak(value: string): boolean {
+  if (!value) {
+    return false;
+  }
+  return (
+    /PART\s*A|PART\s*B/i.test(value) ||
+    /숨기고\s*있는\s*비밀/i.test(value) ||
+    /(?:^|\n)\s*(?:1|2|3|4|5|6)\s*[\).:：\-]/.test(value)
+  );
+}
+
+function sanitizeLegacyBootstrapTemplateText(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  if (hasLegacyBootstrapTemplateLeak(trimmed)) {
+    return "캐릭터 준비 정보를 자유롭게 입력해 주세요.";
+  }
+
+  const collapsed = trimmed
+    .replace(/PART\s*A\/?B[^\n]*/gi, "")
+    .replace(/PART\s*A[^\n]*/gi, "")
+    .replace(/PART\s*B[^\n]*/gi, "")
+    .replace(/숨기고\s*있는\s*비밀/gi, "")
+    .replace(/(?:^|\n)\s*(?:1|2|3|4|5|6)\s*[\).:：\-].*/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  if (!collapsed || hasLegacyBootstrapTemplateLeak(collapsed)) {
+    return "캐릭터 준비 정보를 자유롭게 입력해 주세요.";
+  }
+
+  return collapsed;
+}
+
 function relationshipKey(value: Record<string, unknown>): string {
   const from = readString(value.from).toLowerCase();
   const to = readString(value.to).toLowerCase();
@@ -1187,12 +1245,99 @@ async function applyBootstrapAuditedPersistence(params: {
   cfg: ReturnType<typeof parseTrpgRuntimeConfig>;
   worldRoot: string;
   agentId: string;
+  sessionId?: string;
   patchCache: ReturnType<typeof createPatchCache>;
   title: string;
   operations: Array<Record<string, unknown>>;
 }): Promise<{ ok: boolean; error?: string }> {
   if (params.operations.length === 0) {
     return { ok: true };
+  }
+
+  const canUseAuditedPatch = params.cfg.allowPatchApply && params.cfg.runtimeSafetyFlags.canonicalWriteBackEnabled;
+  await emitRuntimeDiagnostic({
+    cfg: params.cfg,
+    worldRoot: params.worldRoot,
+    sessionId: params.sessionId,
+    event: "bootstrap_persistence_attempt",
+    severity: "info",
+    runtimePhase: "BOOTSTRAP",
+    route: "before_prompt_build",
+    gate: "bootstrap_persistence",
+    result: canUseAuditedPatch ? "audited" : "fallback",
+    details: {
+      title: params.title,
+      operationCount: params.operations.length,
+    },
+  });
+
+  if (!canUseAuditedPatch) {
+    await emitRuntimeDiagnostic({
+      cfg: params.cfg,
+      worldRoot: params.worldRoot,
+      sessionId: params.sessionId,
+      event: "bootstrap_persistence_fallback",
+      severity: "warn",
+      runtimePhase: "BOOTSTRAP",
+      route: "before_prompt_build",
+      gate: "bootstrap_persistence",
+      result: "fallback_direct_write",
+      details: {
+        allowPatchApply: params.cfg.allowPatchApply,
+        canonicalWriteBackEnabled: params.cfg.runtimeSafetyFlags.canonicalWriteBackEnabled,
+      },
+    });
+    try {
+      for (const operation of params.operations) {
+        const op = readString(operation.op);
+        const file = readString(operation.file);
+        const pointer = readString(operation.pointer);
+        if (op !== "set" || pointer !== "/" || !file) {
+          continue;
+        }
+        const absolute = resolveWorldAbsolutePath(params.worldRoot, file);
+        const ext = file.toLowerCase().endsWith(".json") ? "json" : "yaml";
+        const rendered = renderStructuredContent(ext, operation.value);
+        await fs.writeFile(absolute, rendered, "utf8");
+      }
+      await emitRuntimeDiagnostic({
+        cfg: params.cfg,
+        worldRoot: params.worldRoot,
+        sessionId: params.sessionId,
+        event: "bootstrap_persistence_success",
+        severity: "info",
+        runtimePhase: "BOOTSTRAP",
+        route: "before_prompt_build",
+        gate: "bootstrap_persistence",
+        result: "success",
+        details: {
+          title: params.title,
+          mode: "fallback_direct_write",
+        },
+      });
+      return { ok: true };
+    } catch (error) {
+      await emitRuntimeDiagnostic({
+        cfg: params.cfg,
+        worldRoot: params.worldRoot,
+        sessionId: params.sessionId,
+        event: "bootstrap_persistence_failed",
+        severity: "error",
+        runtimePhase: "BOOTSTRAP",
+        route: "before_prompt_build",
+        gate: "bootstrap_persistence",
+        result: "failed",
+        details: {
+          title: params.title,
+          mode: "fallback_direct_write",
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   const dryRunResult = await runPatchDryRun({
@@ -1226,6 +1371,7 @@ async function applyBootstrapAuditedPersistence(params: {
     worldRoot: params.worldRoot,
     cfg: params.cfg,
     agentId: params.agentId,
+    sessionId: params.sessionId,
     cache: params.patchCache,
     input: {
       validatedPatchId,
@@ -1241,11 +1387,44 @@ async function applyBootstrapAuditedPersistence(params: {
   });
   const applyRoot = toObject(applyResult);
   if (applyRoot.ok !== true) {
+    await emitRuntimeDiagnostic({
+      cfg: params.cfg,
+      worldRoot: params.worldRoot,
+      sessionId: params.sessionId,
+      event: "bootstrap_persistence_failed",
+      severity: "error",
+      runtimePhase: "BOOTSTRAP",
+      route: "before_prompt_build",
+      gate: "bootstrap_persistence",
+      result: "failed",
+      details: {
+        title: params.title,
+        mode: "audited_apply",
+        error: readString(applyRoot.error) || "bootstrap audited apply failed",
+      },
+    });
     return {
       ok: false,
       error: readString(applyRoot.error) || "bootstrap audited apply failed",
     };
   }
+
+  await emitRuntimeDiagnostic({
+    cfg: params.cfg,
+    worldRoot: params.worldRoot,
+    sessionId: params.sessionId,
+    event: "bootstrap_persistence_success",
+    severity: "info",
+    runtimePhase: "BOOTSTRAP",
+    route: "before_prompt_build",
+    gate: "bootstrap_persistence",
+    result: "success",
+    details: {
+      title: params.title,
+      mode: "audited_apply",
+      patchId: readString(applyRoot.appliedPatchId),
+    },
+  });
 
   return { ok: true };
 }
@@ -2352,12 +2531,42 @@ async function loadStatusPanelData(params: {
   cfg: ReturnType<typeof parseTrpgRuntimeConfig>;
   worldRoot: string;
 }): Promise<StatusPanelData> {
-  const [statusLoaded, inventoryLoaded] = await Promise.all([
-    loadStructuredWorldFile(params.worldRoot, "state/player-status.yaml", {
-      allowMissing: true,
-      maxReadBytes: params.cfg.maxReadBytes,
+  const nowIso = new Date().toISOString();
+  const loadOrRepair = async (relativePath: string, fallbackRoot: Record<string, unknown>) => {
+    try {
+      return await loadStructuredWorldFile(params.worldRoot, relativePath, {
+        allowMissing: true,
+        maxReadBytes: params.cfg.maxReadBytes,
+      });
+    } catch {
+      const rendered = renderStructuredContent("yaml", fallbackRoot);
+      await fs.writeFile(resolveWorldAbsolutePath(params.worldRoot, relativePath), rendered, "utf8");
+      return {
+        exists: true,
+        format: "yaml" as const,
+        sourceText: rendered,
+        parsed: fallbackRoot,
+        sha256: "",
+      };
+    }
+  };
+
+  const [statusLoaded, inventoryLoaded, sceneLoaded] = await Promise.all([
+    loadOrRepair("state/player-status.yaml", {
+      meta: { schema_version: 1, last_updated: nowIso },
+      player_status: { money: 0, stamina: "normal", condition: "healthy", tags: [] },
+      status: {
+        health: { current: 12, max: 12 },
+        stamina: { current: 10, max: 10 },
+        stress: { current: 0, max: 10 },
+        economy: { money: 0, funds: 0 },
+      },
     }),
-    loadStructuredWorldFile(params.worldRoot, "state/inventory.yaml", {
+    loadOrRepair("state/inventory.yaml", {
+      meta: { schema_version: 1, last_updated: nowIso },
+      inventory: { carried: [], equipped: [], notes: [] },
+    }),
+    loadStructuredWorldFile(params.worldRoot, "state/current-scene.yaml", {
       allowMissing: true,
       maxReadBytes: params.cfg.maxReadBytes,
     }),
@@ -2393,6 +2602,80 @@ async function loadStatusPanelData(params: {
       ? `coins ${String(Math.round(money))}`
       : readString(economy.funds) || readString(economy.currency) || "unknown";
 
+  let statusNeedsRepair = false;
+  if (readFiniteNumber(health.current) === null || readFiniteNumber(health.max) === null) {
+    statusNeedsRepair = true;
+  }
+  if (readFiniteNumber(playerStatus.money) === null && readFiniteNumber(economy.money) === null) {
+    statusNeedsRepair = true;
+  }
+  if (!readString(playerStatus.stamina) && !readString(playerStatus.stamina_state)) {
+    statusNeedsRepair = true;
+  }
+
+  if (statusNeedsRepair) {
+    statusRoot.meta = {
+      ...toObject(statusRoot.meta),
+      schema_version: 1,
+      last_updated: nowIso,
+    };
+    statusRoot.player_status = {
+      ...toObject(statusRoot.player_status),
+      money: readFiniteNumber(playerStatus.money) ?? readFiniteNumber(economy.money) ?? 0,
+      stamina_state: readString(playerStatus.stamina_state) || readString(playerStatus.stamina) || "normal",
+      stamina: readString(playerStatus.stamina) || readString(playerStatus.stamina_state) || "normal",
+      condition: readString(playerStatus.condition) || "healthy",
+      tags: toStringArray(playerStatus.tags),
+    };
+    statusRoot.status = {
+      ...toObject(statusRoot.status),
+      health: {
+        current: readFiniteNumber(health.current) ?? 12,
+        max: readFiniteNumber(health.max) ?? 12,
+      },
+      stamina: {
+        current: readFiniteNumber(staminaGauge.current) ?? 10,
+        max: readFiniteNumber(staminaGauge.max) ?? 10,
+      },
+      stress: {
+        current: readFiniteNumber(stress.current) ?? 0,
+        max: readFiniteNumber(stress.max) ?? 10,
+      },
+      economy: {
+        money: readFiniteNumber(economy.money) ?? readFiniteNumber(playerStatus.money) ?? 0,
+        funds: readFiniteNumber(economy.funds) ?? readFiniteNumber(playerStatus.money) ?? 0,
+      },
+    };
+    await fs.writeFile(
+      resolveWorldAbsolutePath(params.worldRoot, "state/player-status.yaml"),
+      renderStructuredContent(statusLoaded.format, statusRoot),
+      "utf8",
+    );
+  }
+
+  const inventoryNeedsRepair = !Array.isArray(inventoryNode.carried) || !Array.isArray(inventoryNode.notes);
+  if (inventoryNeedsRepair) {
+    inventoryRoot.meta = {
+      ...toObject(inventoryRoot.meta),
+      schema_version: 1,
+      last_updated: nowIso,
+    };
+    inventoryRoot.inventory = {
+      carried: Array.isArray(inventoryNode.carried) ? toStringArray(inventoryNode.carried) : [],
+      equipped: Array.isArray(inventoryNode.equipped) ? toStringArray(inventoryNode.equipped) : [],
+      notes: Array.isArray(inventoryNode.notes) ? toStringArray(inventoryNode.notes) : [],
+    };
+    await fs.writeFile(
+      resolveWorldAbsolutePath(params.worldRoot, "state/inventory.yaml"),
+      renderStructuredContent(inventoryLoaded.format, inventoryRoot),
+      "utf8",
+    );
+  }
+
+  const statusMeta = toObject(statusRoot.meta);
+  const sceneMeta = toObject(toObject(sceneLoaded.parsed).meta);
+  const worldTime = readString(statusMeta.last_updated) || readString(sceneMeta.last_updated) || nowIso;
+
   return {
     hpCurrent: readFiniteNumber(health.current),
     hpMax: readFiniteNumber(health.max),
@@ -2409,6 +2692,7 @@ async function loadStatusPanelData(params: {
     carriedItems: authoritativeCarried,
     equippedItems: authoritativeEquipped,
     inventoryNotes: notes,
+    worldTime,
   };
 }
 
@@ -2428,6 +2712,7 @@ function buildStatusPanelGuardChunk(params: {
 }): string {
   const lines: string[] = [
     "[TRPG_RUNTIME_STATUS_PANEL_V1]",
+    `World time: ${params.status.worldTime}`,
     "Keep a compact status panel available every turn.",
     "Panel placement policy: after NPC posture and before freeform invitation.",
     `${formatGauge("HP", params.status.hpCurrent, params.status.hpMax)} | ${formatGauge("Stamina", params.status.staminaCurrent, params.status.staminaMax)} | ${formatGauge("Stress", params.status.stressCurrent, params.status.stressMax)}`,
@@ -3356,6 +3641,7 @@ async function runCharacterBootstrapGate(params: {
   cfg: ReturnType<typeof parseTrpgRuntimeConfig>;
   worldRoot: string;
   agentId: string;
+  sessionId?: string;
   patchCache: ReturnType<typeof createPatchCache>;
   messages: unknown[];
   prompt: string;
@@ -3373,7 +3659,40 @@ async function runCharacterBootstrapGate(params: {
   const latestUserMessage =
     extractLatestUserMessageFromPrompt(params.prompt) || extractLatestUserMessage(params.messages);
 
-  const bootstrapUpdate = parseBootstrapUpdate(latestUserMessage);
+  let bootstrapUpdate: BootstrapUpdate = {};
+  try {
+    bootstrapUpdate = parseBootstrapUpdate(latestUserMessage);
+    await emitRuntimeDiagnostic({
+      cfg: params.cfg,
+      worldRoot: params.worldRoot,
+      sessionId: params.sessionId,
+      event: "bootstrap_gate_update_parse_success",
+      severity: "info",
+      runtimePhase: "BOOTSTRAP",
+      route: "before_prompt_build",
+      gate: "bootstrap_update_parse",
+      result: "success",
+      details: {
+        messagePresent: Boolean(latestUserMessage),
+        extractedFields: Object.keys(bootstrapUpdate).length,
+      },
+    });
+  } catch (error) {
+    await emitRuntimeDiagnostic({
+      cfg: params.cfg,
+      worldRoot: params.worldRoot,
+      sessionId: params.sessionId,
+      event: "bootstrap_gate_update_parse_failed",
+      severity: "warn",
+      runtimePhase: "BOOTSTRAP",
+      route: "before_prompt_build",
+      gate: "bootstrap_update_parse",
+      result: "failed",
+      details: {
+        error: error instanceof Error ? error.message : String(error),
+      },
+    });
+  }
 
   let changed = false;
   for (const field of ["name", "background", "motive", "secret", "fear", "goal"] as const) {
@@ -3385,7 +3704,13 @@ async function runCharacterBootstrapGate(params: {
     changed = true;
   }
 
-  const incomingFreeform = extractBootstrapFreeform(latestUserMessage);
+  const sanitizedStoredFreeform = sanitizeLegacyBootstrapTemplateText(readString(player.freeform_description));
+  if (readString(player.freeform_description) !== sanitizedStoredFreeform) {
+    player.freeform_description = sanitizedStoredFreeform;
+    changed = true;
+  }
+
+  const incomingFreeform = sanitizeLegacyBootstrapTemplateText(extractBootstrapFreeform(latestUserMessage));
   const mergedFreeform = mergeFreeformDescription(
     readString(player.freeform_description),
     incomingFreeform,
@@ -3468,6 +3793,7 @@ async function runCharacterBootstrapGate(params: {
       cfg: params.cfg,
       worldRoot: params.worldRoot,
       agentId: params.agentId,
+      sessionId: params.sessionId,
       patchCache: params.patchCache,
       title: "bootstrap player canon persistence",
       operations: [
@@ -3561,6 +3887,7 @@ async function runCharacterBootstrapGate(params: {
       cfg: params.cfg,
       worldRoot: params.worldRoot,
       agentId: params.agentId,
+      sessionId: params.sessionId,
       patchCache: params.patchCache,
       title: "bootstrap seed and relationship persistence",
       operations: ops,
@@ -3570,42 +3897,68 @@ async function runCharacterBootstrapGate(params: {
     }
   }
 
+  const playerSetupComplete = sceneLoaded.exists
+    ? toObject(toObject(toObject(sceneLoaded.parsed).scene).scene_flow).player_setup_complete === true
+    : false;
+  const introShown = sceneLoaded.exists
+    ? toObject(toObject(toObject(sceneLoaded.parsed).scene).scene_flow).intro_shown === true
+    : false;
+  const runtimePhase: RuntimePhase = !characterCreated || !bootstrapComplete
+    ? "BOOTSTRAP"
+    : !playerSetupComplete || !introShown
+      ? "READY_FOR_INTRO"
+      : "IN_GAME";
+
+  await emitRuntimeDiagnostic({
+    cfg: params.cfg,
+    worldRoot: params.worldRoot,
+    sessionId: params.sessionId,
+    event: "bootstrap_phase_judgement",
+    severity: "info",
+    runtimePhase,
+    route: "before_prompt_build",
+    gate: "phase",
+    result: runtimePhase,
+    details: {
+      intro_shown: introShown,
+      player_setup_complete: playerSetupComplete,
+      bootstrap_complete: bootstrapComplete,
+      character_created: characterCreated,
+      justCompleted,
+    },
+  });
+
   if (bootstrapComplete) {
     return {
       bootstrapComplete,
       justCompleted,
+      runtimePhase,
+      phaseSignals: {
+        characterCreated,
+        bootstrapComplete,
+        playerSetupComplete,
+        introShown,
+      },
     };
   }
 
   const missingFields = collectMissingBootstrapFields(player);
   const contextLines: string[] = [
-    "[TRPG_RUNTIME_CHARACTER_BOOTSTRAP]",
-    "game_state.bootstrap_complete=false. Character bootstrap phase is mandatory.",
-    "For this response, output order is mandatory:",
-    "1) character creation 안내 한 줄",
-    "2) PART A structured prompts (exact questions)",
-    "3) PART B freeform prompt",
-    "4) missing fields may remain open",
-    "Do NOT output scene narration, clues, NPC posture, travel, or action resolution in this phase.",
-    "Even if user says '게임 시작', remain in bootstrap question flow until bootstrap_complete=true.",
-    "PART A structured prompts:",
-    "1. 이름",
-    "2. 출신 / 배경",
-    "3. 지금 이 세계에 들어온 이유",
-    "4. 숨기고 있는 비밀",
-    "5. 두려워하는 것",
-    "6. 지금 당장의 목표",
-    "PART B freeform prompt:",
-    "캐릭터의 성격, 과거 사건, 관계, 외형, 또는 세계와의 연결고리를 자유롭게 설명해도 된다.",
-    "Partial answers are valid. Keep missing items open for later turns.",
+    "[TRPG_DISCORD_COMPONENTS_BOOTSTRAP]",
+    "Non-IN_GAME bootstrap phase is active. Enforce system-safe UI only.",
+    gameState.character_created === true
+      ? "character_created=true AND bootstrap_complete=false"
+      : "character_created=false",
+    "Use only bootstrap controls: 이름 입력, 배경/출신 입력, 현재 목표 입력, 완료/다음 단계, 자유서술 입력.",
+    "Do not emit in-game recommendation buttons (예: 조사/이동/전투/인벤토리).",
+    "Keep explanation short and let player continue with freeform input.",
   ];
 
   if (readString(player.name)) contextLines.push(`Known 이름: ${readString(player.name)}`);
   if (readString(player.background)) contextLines.push(`Known 출신 / 배경: ${readString(player.background)}`);
   if (readString(player.motive))
     contextLines.push(`Known 지금 이 세계에 들어온 이유: ${readString(player.motive)}`);
-  if (readString(player.secret))
-    contextLines.push(`Known 숨기고 있는 비밀: ${readString(player.secret)}`);
+  if (readString(player.secret)) contextLines.push(`Known 비밀: ${readString(player.secret)}`);
   if (readString(player.fear)) contextLines.push(`Known 두려워하는 것: ${readString(player.fear)}`);
   if (readString(player.goal)) contextLines.push(`Known 지금 당장의 목표: ${readString(player.goal)}`);
 
@@ -3616,6 +3969,13 @@ async function runCharacterBootstrapGate(params: {
   return {
     bootstrapComplete,
     justCompleted,
+    runtimePhase,
+    phaseSignals: {
+      characterCreated,
+      bootstrapComplete,
+      playerSetupComplete,
+      introShown,
+    },
     contextChunk: joinLines(contextLines),
   };
 }
@@ -3649,16 +4009,137 @@ function toolGate(params: {
     };
   }
 
-  const worldRoot = resolveWorldRootForContext({
+  const canonicalWorldRoot = resolveWorldRootForContext({
     cfg: params.cfg,
     ctx: params.ctx,
     resolvePath: params.api.resolvePath,
+  });
+  const worldRoot = resolveEffectiveWorldRootForSessionSync({
+    canonicalWorldRoot,
+    sessionContextId: params.ctx.sessionId,
+  });
+
+  void emitRuntimeDiagnostic({
+    cfg: params.cfg,
+    worldRoot,
+    sessionId: params.ctx.sessionId,
+    event: "session_world_root_resolved",
+    severity: "info",
+    route: "tool_gate",
+    gate: "world_root_resolution",
+    result: worldRoot === canonicalWorldRoot ? "canonical_world_root" : "session_workspace_root",
+    details: {
+      canonicalWorldRoot,
+      effectiveWorldRoot: worldRoot,
+      usedSessionWorkspace: worldRoot !== canonicalWorldRoot,
+    },
   });
 
   return {
     ok: true,
     worldRoot,
     agentId: params.ctx.agentId as string,
+  };
+}
+
+async function detectRuntimePhase(params: {
+  cfg: ReturnType<typeof parseTrpgRuntimeConfig>;
+  worldRoot: string;
+  sessionId?: string;
+}): Promise<RuntimePhase> {
+  const [playerLoaded, sceneLoaded] = await Promise.all([
+    loadStructuredWorldFile(params.worldRoot, "canon/player.yaml", {
+      allowMissing: true,
+      maxReadBytes: params.cfg.maxReadBytes,
+    }),
+    loadStructuredWorldFile(params.worldRoot, "state/current-scene.yaml", {
+      allowMissing: true,
+      maxReadBytes: params.cfg.maxReadBytes,
+    }),
+  ]);
+
+  const playerRoot = toObject(playerLoaded.parsed);
+  const gameState = toObject(playerRoot.game_state);
+  const player = toObject(playerRoot.player);
+  const sceneRoot = toObject(sceneLoaded.parsed);
+  const sceneFlow = toObject(toObject(sceneRoot.scene).scene_flow);
+
+  const characterCreated = gameState.character_created === true || Boolean(readString(player.name));
+  const bootstrapComplete = gameState.bootstrap_complete === true;
+  const setupComplete = sceneFlow.player_setup_complete === true;
+  const introShown = sceneFlow.intro_shown === true;
+  const runtimePhase: RuntimePhase = !characterCreated || !bootstrapComplete
+    ? "BOOTSTRAP"
+    : !setupComplete || !introShown
+      ? "READY_FOR_INTRO"
+      : "IN_GAME";
+
+  await emitRuntimeDiagnostic({
+    cfg: params.cfg,
+    worldRoot: params.worldRoot,
+    sessionId: params.sessionId,
+    event: "runtime_phase_detected",
+    severity: "info",
+    runtimePhase,
+    route: "phase_detection",
+    gate: "phase",
+    result: runtimePhase,
+    details: {
+      intro_shown: introShown,
+      player_setup_complete: setupComplete,
+      bootstrap_complete: bootstrapComplete,
+      character_created: characterCreated,
+    },
+  });
+
+  return runtimePhase;
+}
+
+function normalizeSceneComponentInputByPhase(input: SceneComponentInput, runtimePhase: RuntimePhase): SceneComponentInput {
+  const sanitizedDescription = sanitizeLegacyBootstrapTemplateText(readString(input.description));
+  const safeDescription = sanitizedDescription || "캐릭터 준비 정보를 입력해 주세요.";
+  if (runtimePhase === "IN_GAME") {
+    return {
+      ...input,
+      description: safeDescription,
+      runtimePhase,
+    };
+  }
+
+  const safeChoices = (input.choices ?? [])
+    .map((choice) => ({
+      label: readString(choice.label),
+      description: readString(choice.description),
+      value: readString(choice.value),
+      emoji: readString(choice.emoji),
+    }))
+    .filter((choice) => choice.label && choice.value)
+    .filter((choice) => choice.label.length <= 80 && choice.value.length <= 80);
+
+  if (input.scene === "choice" && safeChoices.length > 0 && safeChoices.length === (input.choices ?? []).length) {
+    return {
+      ...input,
+      scene: "choice",
+      description: safeDescription,
+      choices: safeChoices,
+      includeInput: true,
+      runtimePhase,
+    };
+  }
+
+  return {
+    ...input,
+    scene: "system",
+    description: safeDescription,
+    buttons: [
+      { label: "🪪 이름 입력", style: "primary" },
+      { label: "🌍 배경/출신 입력", style: "secondary" },
+      { label: "🎯 현재 목표 입력", style: "secondary" },
+      { label: "✅ 완료/다음 단계", style: "success" },
+      { label: "🆕 새 캐릭터 시작", style: "primary" },
+    ],
+    includeInput: true,
+    runtimePhase,
   };
 }
 
@@ -3677,10 +4158,45 @@ const trpgRuntimePlugin = {
       }
 
       try {
-        const worldRoot = resolveWorldRootForContext({
+        await emitRuntimeDiagnostic({
+          cfg,
+          worldRoot: cfg.worldRoot,
+          sessionId: hookCtx.sessionId,
+          event: "before_prompt_build_start",
+          severity: "info",
+          route: "before_prompt_build",
+          gate: "entry",
+          result: "started",
+          details: {
+            hasPrompt: typeof event.prompt === "string" && event.prompt.length > 0,
+            messageCount: Array.isArray(event.messages) ? event.messages.length : 0,
+          },
+        });
+
+        const canonicalWorldRoot = resolveWorldRootForContext({
           cfg,
           ctx: hookCtx as OpenClawPluginToolContext,
           resolvePath: api.resolvePath,
+        });
+        const worldRoot = resolveEffectiveWorldRootForSessionSync({
+          canonicalWorldRoot,
+          sessionContextId: hookCtx.sessionId,
+        });
+
+        await emitRuntimeDiagnostic({
+          cfg,
+          worldRoot,
+          sessionId: hookCtx.sessionId,
+          event: "session_world_root_resolved",
+          severity: "info",
+          route: "before_prompt_build",
+          gate: "world_root_resolution",
+          result: worldRoot === canonicalWorldRoot ? "canonical_world_root" : "session_workspace_root",
+          details: {
+            canonicalWorldRoot,
+            effectiveWorldRoot: worldRoot,
+            usedSessionWorkspace: worldRoot !== canonicalWorldRoot,
+          },
         });
 
         const appendChunks: string[] = [];
@@ -3695,9 +4211,23 @@ const trpgRuntimePlugin = {
           cfg,
           worldRoot,
           agentId: hookCtx.agentId as string,
+          sessionId: hookCtx.sessionId,
           patchCache,
           messages: promptMessages,
           prompt: event.prompt,
+        });
+
+        await emitRuntimeDiagnostic({
+          cfg,
+          worldRoot,
+          sessionId: hookCtx.sessionId,
+          event: "before_prompt_build_phase_detected",
+          severity: "info",
+          runtimePhase: bootstrap.runtimePhase,
+          route: "before_prompt_build",
+          gate: "phase",
+          result: bootstrap.runtimePhase,
+          details: bootstrap.phaseSignals,
         });
 
         if (bootstrap.contextChunk) {
@@ -3705,6 +4235,21 @@ const trpgRuntimePlugin = {
         }
 
         if (!bootstrap.bootstrapComplete) {
+          await emitRuntimeDiagnostic({
+            cfg,
+            worldRoot,
+            sessionId: hookCtx.sessionId,
+            event: "before_prompt_build_branch_selected",
+            severity: "info",
+            runtimePhase: bootstrap.runtimePhase,
+            route: "before_prompt_build",
+            gate: "branch",
+            result: "bootstrap",
+            details: {
+              bootstrapComplete: bootstrap.bootstrapComplete,
+              justCompleted: bootstrap.justCompleted,
+            },
+          });
           api.logger.info("[trpg-runtime] scene intro/travel/faction gated until character bootstrap completes");
           if (appendChunks.length === 0) {
             return;
@@ -3723,6 +4268,22 @@ const trpgRuntimePlugin = {
             appendSystemContext: bootstrapBudgeted.selected.join(String.fromCharCode(10) + String.fromCharCode(10)),
           };
         }
+
+        await emitRuntimeDiagnostic({
+          cfg,
+          worldRoot,
+          sessionId: hookCtx.sessionId,
+          event: "before_prompt_build_branch_selected",
+          severity: "info",
+          runtimePhase: bootstrap.runtimePhase,
+          route: "before_prompt_build",
+          gate: "branch",
+          result: "in_game",
+          details: {
+            bootstrapComplete: bootstrap.bootstrapComplete,
+            justCompleted: bootstrap.justCompleted,
+          },
+        });
 
         if (bootstrap.justCompleted) {
           appendChunks.push(
@@ -3952,6 +4513,19 @@ const trpgRuntimePlugin = {
           appendSystemContext: budgeted.selected.join(String.fromCharCode(10) + String.fromCharCode(10)),
         };
       } catch (error) {
+        await emitRuntimeDiagnostic({
+          cfg,
+          worldRoot: cfg.worldRoot,
+          sessionId: hookCtx.sessionId,
+          event: "before_prompt_build_failed",
+          severity: "warn",
+          route: "before_prompt_build",
+          gate: "execution",
+          result: "failed",
+          details: {
+            error: error instanceof Error ? error.message : String(error),
+          },
+        });
         api.logger.warn(
           `[trpg-runtime] prompt hook skipped: ${error instanceof Error ? error.message : String(error)}`,
         );
@@ -4076,6 +4650,7 @@ const trpgRuntimePlugin = {
             worldRoot: gate.worldRoot,
             cfg,
             agentId: gate.agentId,
+            sessionId: ctx.sessionId,
             cache: patchCache,
             input: params as PatchApplyInput,
           });
@@ -4183,7 +4758,7 @@ const trpgRuntimePlugin = {
       properties: {
         scene: {
           type: "string",
-          enum: ["exploration", "npc_encounter", "combat", "choice", "dialogue"],
+          enum: ["exploration", "npc_encounter", "combat", "choice", "dialogue", "system"],
           description: "Scene type determines template",
         },
         description: {
@@ -4281,9 +4856,43 @@ const trpgRuntimePlugin = {
           }
 
           try {
-            const components = buildSceneComponents(params as SceneComponentInput);
+            const runtimePhase = await detectRuntimePhase({
+              cfg,
+              worldRoot: gate.worldRoot,
+              sessionId: ctx.sessionId,
+            });
+            const normalizedInput = normalizeSceneComponentInputByPhase(params as SceneComponentInput, runtimePhase);
+            const components = buildSceneComponents(normalizedInput);
+            const requestedButtons = Array.isArray((params as SceneComponentInput).buttons)
+              ? (params as SceneComponentInput).buttons?.length ?? 0
+              : 0;
+            const normalizedButtons = Array.isArray(normalizedInput.buttons) ? normalizedInput.buttons.length : 0;
+            const requestedScene = readString((params as SceneComponentInput).scene);
+            const blockedButtons = normalizedInput.scene !== requestedScene
+              ? requestedButtons
+              : Math.max(0, requestedButtons - normalizedButtons);
+            await emitRuntimeDiagnostic({
+              cfg,
+              worldRoot: gate.worldRoot,
+              sessionId: ctx.sessionId,
+              event: "scene_components_normalized",
+              severity: "info",
+              runtimePhase,
+              route: "trpg_scene_components",
+              gate: "normalization",
+              result: "ok",
+              details: {
+                requestedScene,
+                normalizedScene: normalizedInput.scene,
+                requestedButtons,
+                normalizedButtons,
+                blockedButtons,
+                includeInput: normalizedInput.includeInput !== false,
+              },
+            });
             return jsonToolResult({
               ok: true,
+              runtimePhase,
               components,
               instructions:
                 "Pass this 'components' object to the message tool: message(action='send', message='scene update', components=<this.components>)",
@@ -4303,6 +4912,11 @@ const trpgRuntimePlugin = {
       "[trpg-runtime] registered tools: trpg_store_get, trpg_patch_dry_run, trpg_patch_apply, trpg_state_compact, trpg_faction_tick, trpg_hooks_query, trpg_dice_roll, trpg_scene_components",
     );
   },
+};
+
+export const __internalTestHooks = {
+  extractLatestUserMessageFromPrompt,
+  extractBootstrapFreeform,
 };
 
 export default trpgRuntimePlugin;

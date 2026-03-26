@@ -16,6 +16,16 @@
         "default": false,
         "description": "When false, trpg_patch_apply always denies writes."
       },
+      "diagnosticsEnabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable runtime JSONL diagnostic logging across bootstrap/tool/runtime paths."
+      },
+      "diagnosticsConsoleMirror": {
+        "type": "boolean",
+        "default": true,
+        "description": "Mirror runtime diagnostic events to console in addition to diagnostics.jsonl."
+      },
       "maxReadBytes": {
         "type": "integer",
         "minimum": 4096,
@@ -141,6 +151,11 @@
         "type": "boolean",
         "default": false,
         "description": "Allow canonical write-back targets in audited patch apply path."
+      },
+      "recommendationWhimEnabled": {
+        "type": "boolean",
+        "default": false,
+        "description": "Enable deterministic whim adjustment for recommendation scores."
       }
     }
   },
@@ -154,6 +169,16 @@
     "allowPatchApply": {
       "label": "Allow Patch Apply",
       "help": "Keep disabled unless you intentionally allow writes from trpg_patch_apply."
+    },
+    "diagnosticsEnabled": {
+      "label": "Diagnostics Enabled",
+      "help": "Write structured runtime diagnostics to state/runtime-core/diagnostics.jsonl.",
+      "advanced": true
+    },
+    "diagnosticsConsoleMirror": {
+      "label": "Diagnostics Console Mirror",
+      "help": "Also print diagnostics to console for rapid operations debugging.",
+      "advanced": true
     },
     "allowedAgentIds": {
       "label": "Allowed Agent IDs",
@@ -248,6 +273,11 @@
     "canonicalWriteBackEnabled": {
       "label": "Canonical Write-Back Enabled",
       "help": "Allow canonical file write-back in audited apply path.",
+      "advanced": true
+    },
+    "recommendationWhimEnabled": {
+      "label": "Recommendation Whim Enabled",
+      "help": "Apply small deterministic whim adjustment to recommendation scoring.",
       "advanced": true
     }
   }

@@ -1,0 +1,10 @@
+inventory:
+  carried:
+    - travel cloak
+    - water flask
+  equipped: []
+  notes:
+    - "start: local rumors pending"
+meta:
+  schema_version: 1
+  last_updated: 2026-03-25T17:01:37.797Z

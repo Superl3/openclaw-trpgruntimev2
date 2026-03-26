@@ -3,18 +3,18 @@
     "list": [
       {
         "id": "trpg",
-        "workspace": "~/.openclaw/extensions/trpg-runtime/workspace",
-        "agentDir": "~/.openclaw/extensions/trpg-runtime/agent"
+        "workspace": "~/.openclaw/extensions/trpg-runtime-v2/workspace",
+        "agentDir": "~/.openclaw/extensions/trpg-runtime-v2/agent"
       }
     ]
   },
   "plugins": {
     "load": {
-      "paths": ["~/.openclaw/extensions/trpg-runtime"],
-      "allow": ["trpg-runtime"]
+      "paths": ["~/.openclaw/extensions/trpg-runtime-v2"],
+      "allow": ["trpg-runtime-v2"]
     },
     "entries": {
-      "trpg-runtime": {
+      "trpg-runtime-v2": {
         "enabled": true,
         "config": {
           "allowPatchApply": false,

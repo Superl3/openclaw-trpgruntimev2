@@ -315,12 +315,14 @@ test("default panel hides raw drift and debug panel shows raw drift", async () =
     routes: [],
     mode: "send",
     debugRuntimeSignals: true,
+    verboseMode: true,
   });
   const debugExtended = panel.buildCheckpoint1Panel({
     session,
     routes: [],
     mode: "send",
     debugRuntimeSignals: true,
+    verboseMode: true,
     telemetryExtended: true,
   });
 
@@ -842,4 +844,339 @@ test("dispatch commit idempotent and stale interaction gives standardized error"
   assert.ok(typeof stale.errorCode === "string");
   assert.ok(stale.errorCode === "route_expired" || stale.errorCode === "stale_ui_version");
   assert.ok(typeof stale.recoveryHint === "string");
+});
+
+test("session verbose toggle applies immediately to next panel render", async () => {
+  const { plugin } = await modulesPromise;
+  const worldRoot = "/tmp/trpg-runtime-v2-verbose-toggle-world";
+  await fs.rm(worldRoot, { recursive: true, force: true });
+  await fs.mkdir(path.resolve(worldRoot, "state/runtime-core"), { recursive: true });
+
+  const tools = new Map();
+  const api = {
+    pluginConfig: {
+      allowedAgentIds: ["trpg"],
+      panelDispatchTtlSec: 120,
+      debugRuntimeSignals: true,
+      traceVerbose: false,
+    },
+    resolvePath: (input) => (input === "world" ? worldRoot : path.resolve(input)),
+    logger: { info: () => {}, warn: () => {} },
+    on: () => {},
+    registerTool: (factory, options) => {
+      tools.set(options.name, factory({ agentId: "trpg", sessionId: "discord-channel", userId: "owner-1" }));
+    },
+  };
+
+  plugin.register(api);
+
+  const newTool = tools.get("trpg_session_new");
+  const resumeTool = tools.get("trpg_session_resume");
+  const verboseTool = tools.get("trpg_session_verbose");
+  assert.ok(newTool && resumeTool && verboseTool);
+
+  const parse = (result) => JSON.parse(result.content[0].text);
+
+  const created = parse(await newTool.execute("new", { channelKey: "discord:room-verbose", ownerId: "owner-1" }));
+  const compactText = JSON.stringify(created.panelDispatch.components);
+  assert.equal(compactText.includes("debug.quest_hook_text.raw"), false);
+  assert.equal(compactText.includes("변덕 보정:"), false);
+
+  const verboseOn = parse(
+    await verboseTool.execute("verbose-on", {
+      sessionId: created.session.sessionId,
+      actorId: "owner-1",
+      enabled: true,
+      tailCount: 4,
+    }),
+  );
+  assert.equal(verboseOn.ok, true);
+  assert.equal(verboseOn.verbose.enabled, true);
+  assert.ok(Array.isArray(verboseOn.traceTail));
+
+  const resumedVerbose = parse(
+    await resumeTool.execute("resume-verbose", {
+      sessionId: created.session.sessionId,
+      actorId: "owner-1",
+    }),
+  );
+  const verbosePanelText = JSON.stringify(resumedVerbose.panelDispatch.components);
+  assert.equal(verbosePanelText.includes("trace.tail:"), true);
+  assert.equal(verbosePanelText.includes("debug.quest_hook_text.raw"), true);
+
+  await verboseTool.execute("verbose-off", {
+    sessionId: created.session.sessionId,
+    actorId: "owner-1",
+    enabled: false,
+  });
+  const resumedCompact = parse(
+    await resumeTool.execute("resume-compact", {
+      sessionId: created.session.sessionId,
+      actorId: "owner-1",
+    }),
+  );
+  const compactAfterOffText = JSON.stringify(resumedCompact.panelDispatch.components);
+  assert.equal(compactAfterOffText.includes("trace.tail:"), false);
+  assert.equal(compactAfterOffText.includes("debug.quest_hook_text.raw"), false);
+});
+
+test("resume path sanitizes legacy PART A/B bootstrap summary text", async () => {
+  const { plugin } = await modulesPromise;
+  const worldRoot = "/tmp/trpg-runtime-v2-resume-sanitize-world";
+  await fs.rm(worldRoot, { recursive: true, force: true });
+  await fs.mkdir(path.resolve(worldRoot, "state/runtime-core"), { recursive: true });
+
+  const tools = new Map();
+  const api = {
+    pluginConfig: {
+      allowedAgentIds: ["trpg"],
+      panelDispatchTtlSec: 120,
+    },
+    resolvePath: (input) => (input === "world" ? worldRoot : path.resolve(input)),
+    logger: { info: () => {}, warn: () => {} },
+    on: () => {},
+    registerTool: (factory, options) => {
+      tools.set(options.name, factory({ agentId: "trpg", sessionId: "discord-channel", userId: "owner-1" }));
+    },
+  };
+
+  plugin.register(api);
+  const newTool = tools.get("trpg_session_new");
+  const resumeTool = tools.get("trpg_session_resume");
+  assert.ok(newTool && resumeTool);
+
+  const parse = (result) => JSON.parse(result.content[0].text);
+  const created = parse(await newTool.execute("new", { channelKey: "discord:room-sanitize", ownerId: "owner-1" }));
+  const sessionId = created.session.sessionId;
+
+  const storePath = path.resolve(worldRoot, "state/runtime-core/checkpoint0-store.json");
+  const snapshot = JSON.parse(await fs.readFile(storePath, "utf8"));
+  snapshot.sessions[sessionId].lastActionSummary =
+    "좋아요, 새 캐릭터 생성을 시작할게요. PART A / PART B. 1) 이름 2) 배경 3) 이유 4) 숨기고 있는 비밀 5) 두려움 6) 목표";
+  await fs.writeFile(storePath, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
+
+  const resumed = parse(await resumeTool.execute("resume", { sessionId, actorId: "owner-1" }));
+  const summary = resumed?.panel?.main?.lastActionSummary || "";
+  assert.equal(/PART\s*A/i.test(summary), false);
+  assert.equal(/숨기고\s*있는\s*비밀/i.test(summary), false);
+  assert.equal(summary.includes("캐릭터 준비"), true);
+});
+
+test("/trpg new requires confirmation token on contamination and validates token", async () => {
+  const { plugin } = await modulesPromise;
+  const worldRoot = "/tmp/trpg-runtime-v2-new-confirmation-world";
+  await fs.rm(worldRoot, { recursive: true, force: true });
+  await fs.mkdir(path.resolve(worldRoot, "state/runtime-core"), { recursive: true });
+
+  const tools = new Map();
+  const api = {
+    pluginConfig: {
+      allowedAgentIds: ["trpg"],
+      panelDispatchTtlSec: 120,
+    },
+    resolvePath: (input) => (input === "world" ? worldRoot : path.resolve(input)),
+    logger: { info: () => {}, warn: () => {} },
+    on: () => {},
+    registerTool: (factory, options) => {
+      tools.set(options.name, factory({ agentId: "trpg", sessionId: "discord-confirm", userId: "owner-1" }));
+    },
+  };
+
+  plugin.register(api);
+  const newTool = tools.get("trpg_session_new");
+  assert.ok(newTool);
+  const parse = (result) => JSON.parse(result.content[0].text);
+
+  const first = parse(await newTool.execute("new-1", { channelKey: "discord:confirm-room", ownerId: "owner-1" }));
+  assert.equal(first.ok, true);
+
+  const confirmRequired = parse(
+    await newTool.execute("new-2", {
+      channelKey: "discord:confirm-room",
+      ownerId: "owner-1",
+    }),
+  );
+  assert.equal(confirmRequired.ok, false);
+  assert.equal(confirmRequired.errorCode, "confirmation_required");
+  assert.ok(typeof confirmRequired.confirmToken === "string" && confirmRequired.confirmToken.length >= 8);
+  assert.equal(Array.isArray(confirmRequired?.components?.buttons), true);
+  const confirmLabels = (confirmRequired?.components?.buttons ?? []).map((entry) => entry?.label);
+  assert.equal(confirmLabels.includes("YES"), true);
+  assert.equal(confirmLabels.includes("NO"), true);
+  assert.equal(typeof confirmRequired?.nextActions?.yes?.manualExample, "string");
+  assert.equal(typeof confirmRequired?.nextActions?.no?.manualExample, "string");
+  assert.equal(String(confirmRequired?.nextActions?.yes?.manualExample).includes("confirmToken="), true);
+  assert.equal(typeof confirmRequired?.commandHints?.dataManagementNote, "string");
+
+  const invalid = parse(
+    await newTool.execute("new-invalid", {
+      channelKey: "discord:confirm-room",
+      ownerId: "owner-1",
+      confirmReset: true,
+      confirmToken: "invalid-token",
+      wipeMode: "force",
+    }),
+  );
+  assert.equal(invalid.ok, false);
+  assert.equal(invalid.errorCode, "invalid_confirm_token");
+
+  const confirmed = parse(
+    await newTool.execute("new-3", {
+      channelKey: "discord:confirm-room",
+      ownerId: "owner-1",
+      confirmReset: true,
+      confirmToken: confirmRequired.confirmToken,
+      wipeMode: "force",
+    }),
+  );
+  assert.equal(confirmed.ok, true);
+  assert.notEqual(confirmed.session.sessionId, first.session.sessionId);
+  assert.equal(Array.isArray(confirmed?.actionableComponents?.buttons), true);
+  const confirmedActionLabels = (confirmed?.actionableComponents?.buttons ?? []).map((entry) => entry?.label);
+  assert.equal(confirmedActionLabels.includes("▶️ 패널 시작/갱신"), true);
+  assert.equal(typeof confirmed.workspace?.workspaceRoot, "string");
+});
+
+test("/trpg help returns visible command list and examples", async () => {
+  const { plugin } = await modulesPromise;
+  const worldRoot = "/tmp/trpg-runtime-v2-help-world";
+  await fs.rm(worldRoot, { recursive: true, force: true });
+  await fs.mkdir(path.resolve(worldRoot, "state/runtime-core"), { recursive: true });
+
+  const tools = new Map();
+  const api = {
+    pluginConfig: {
+      allowedAgentIds: ["trpg"],
+      panelDispatchTtlSec: 120,
+    },
+    resolvePath: (input) => (input === "world" ? worldRoot : path.resolve(input)),
+    logger: { info: () => {}, warn: () => {} },
+    on: () => {},
+    registerTool: (factory, options) => {
+      tools.set(options.name, factory({ agentId: "trpg", sessionId: "discord-help", userId: "owner-1" }));
+    },
+  };
+  plugin.register(api);
+
+  const parse = (result) => JSON.parse(result.content[0].text);
+  const helpTool = tools.get("trpg_session_help");
+  const newTool = tools.get("trpg_session_new");
+  const resumeTool = tools.get("trpg_session_resume");
+  assert.ok(helpTool && newTool && resumeTool);
+
+  const help = parse(await helpTool.execute("help", {}));
+  assert.equal(help.ok, true);
+  assert.equal(help.command, "/trpg help");
+  assert.equal(Array.isArray(help?.commandHints?.commands), true);
+  assert.equal(help.commandHints.commands.length > 0, true);
+  const commandNames = help.commandHints.commands.map((entry) => entry.command);
+  assert.equal(commandNames.includes("/trpg save"), true);
+  assert.equal(commandNames.includes("/trpg load"), true);
+  assert.equal(commandNames.includes("/trpg data-delete"), true);
+
+  const created = parse(await newTool.execute("new", { channelKey: "discord:help-room", ownerId: "owner-1" }));
+  assert.equal(typeof created?.commandHints?.dataManagementNote, "string");
+  assert.equal(Array.isArray(created?.actionableComponents?.buttons), true);
+  assert.equal(typeof created?.panel?.sub?.dataManagementGuide?.text, "string");
+  assert.equal(String(created?.panelDispatch?.message).includes("/trpg help"), true);
+
+  const resumed = parse(
+    await resumeTool.execute("resume", {
+      sessionId: created.session.sessionId,
+      actorId: "owner-1",
+    }),
+  );
+  assert.equal(typeof resumed?.commandHints?.dataManagementNote, "string");
+  assert.equal(Array.isArray(resumed?.actionableComponents?.buttons), true);
+  const resumeActionLabels = (resumed?.actionableComponents?.buttons ?? []).map((entry) => entry?.label);
+  assert.equal(resumeActionLabels.includes("🔄 패널 새로고침"), true);
+});
+
+test("save/load/data-delete copy selected sections between temp and canonical", async () => {
+  const { plugin } = await modulesPromise;
+  const worldRoot = "/tmp/trpg-runtime-v2-session-data-world";
+  await fs.rm(worldRoot, { recursive: true, force: true });
+  await fs.mkdir(path.resolve(worldRoot, "state/runtime-core"), { recursive: true });
+  await fs.mkdir(path.resolve(worldRoot, "canon"), { recursive: true });
+  await fs.mkdir(path.resolve(worldRoot, "state"), { recursive: true });
+
+  await fs.writeFile(path.resolve(worldRoot, "canon/player.yaml"), "player:\n  name: CanonBefore\n", "utf8");
+  await fs.writeFile(path.resolve(worldRoot, "state/player-status.yaml"), "status:\n  hp: 10\n", "utf8");
+  await fs.writeFile(path.resolve(worldRoot, "state/inventory.yaml"), "inventory:\n  carried:\n    - torch\n", "utf8");
+  await fs.writeFile(path.resolve(worldRoot, "state/current-scene.yaml"), "scene:\n  id: scene-canon-before\n", "utf8");
+
+  const tools = new Map();
+  const api = {
+    pluginConfig: {
+      allowedAgentIds: ["trpg"],
+      panelDispatchTtlSec: 120,
+    },
+    resolvePath: (input) => (input === "world" ? worldRoot : path.resolve(input)),
+    logger: { info: () => {}, warn: () => {} },
+    on: () => {},
+    registerTool: (factory, options) => {
+      tools.set(options.name, factory({ agentId: "trpg", sessionId: "discord-save-load", userId: "owner-1" }));
+    },
+  };
+  plugin.register(api);
+
+  const parse = (result) => JSON.parse(result.content[0].text);
+  const newTool = tools.get("trpg_session_new");
+  const saveTool = tools.get("trpg_session_save");
+  const loadTool = tools.get("trpg_session_load");
+  const deleteTool = tools.get("trpg_session_data_delete");
+  assert.ok(newTool && saveTool && loadTool && deleteTool);
+
+  const created = parse(await newTool.execute("new", { channelKey: "discord:save-load", ownerId: "owner-1" }));
+  assert.equal(created.ok, true);
+  const workspaceRoot = created.workspace.workspaceRoot;
+
+  await fs.writeFile(path.resolve(workspaceRoot, "state/player-status.yaml"), "status:\n  hp: 77\n", "utf8");
+  await fs.writeFile(path.resolve(workspaceRoot, "state/inventory.yaml"), "inventory:\n  carried:\n    - rope\n", "utf8");
+
+  const saved = parse(
+    await saveTool.execute("save", {
+      channelKey: "discord:save-load",
+      actorId: "owner-1",
+      sections: ["status", "inventory"],
+    }),
+  );
+  assert.equal(saved.ok, true);
+
+  const canonicalStatus = await fs.readFile(path.resolve(worldRoot, "state/player-status.yaml"), "utf8");
+  const canonicalInventory = await fs.readFile(path.resolve(worldRoot, "state/inventory.yaml"), "utf8");
+  const canonicalPlayerAfterSave = await fs.readFile(path.resolve(worldRoot, "canon/player.yaml"), "utf8");
+  assert.equal(canonicalStatus.includes("77"), true);
+  assert.equal(canonicalInventory.includes("rope"), true);
+  assert.equal(canonicalPlayerAfterSave.includes("CanonBefore"), true);
+
+  await fs.writeFile(path.resolve(worldRoot, "canon/player.yaml"), "player:\n  name: CanonAfter\n", "utf8");
+  await fs.writeFile(path.resolve(worldRoot, "state/current-scene.yaml"), "scene:\n  id: scene-canon-after\n", "utf8");
+
+  const loaded = parse(
+    await loadTool.execute("load", {
+      channelKey: "discord:save-load",
+      actorId: "owner-1",
+      sections: ["player", "scene"],
+    }),
+  );
+  assert.equal(loaded.ok, true);
+
+  const workspacePlayer = await fs.readFile(path.resolve(workspaceRoot, "canon/player.yaml"), "utf8");
+  const workspaceScene = await fs.readFile(path.resolve(workspaceRoot, "state/current-scene.yaml"), "utf8");
+  assert.equal(workspacePlayer.includes("CanonAfter"), true);
+  assert.equal(workspaceScene.includes("scene-canon-after"), true);
+
+  const deleted = parse(
+    await deleteTool.execute("delete", {
+      channelKey: "discord:save-load",
+      actorId: "owner-1",
+      sections: ["scene"],
+    }),
+  );
+  assert.equal(deleted.ok, true);
+
+  await assert.rejects(fs.readFile(path.resolve(workspaceRoot, "state/current-scene.yaml"), "utf8"));
+  const canonicalSceneAfterDelete = await fs.readFile(path.resolve(worldRoot, "state/current-scene.yaml"), "utf8");
+  assert.equal(canonicalSceneAfterDelete.includes("scene-canon-after"), true);
 });

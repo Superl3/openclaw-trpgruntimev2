@@ -1,0 +1,9 @@
+scene:
+  scene_flow:
+    scene_persistence: true
+    transition_allowed: false
+    unresolved_tension: high
+    interrogation_active: false
+    disclosure_stage: 1
+    player_setup_complete: true
+    intro_shown: false

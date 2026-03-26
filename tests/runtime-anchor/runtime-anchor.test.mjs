@@ -585,6 +585,7 @@ test("panel shows anchor qualitative text for player and raw anchor debug in deb
     routes: [],
     mode: "send",
     debugRuntimeSignals: true,
+    verboseMode: true,
   });
 
   const playerText = JSON.stringify(playerPanel.components);

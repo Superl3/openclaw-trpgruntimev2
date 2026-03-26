@@ -2,8 +2,8 @@
 
 ## 1) Overview
 
-`trpg-runtime`은 구조화된 TRPG 월드 상태 도구를 제공하는 로컬 OpenClaw 확장입니다.
-`~/.openclaw/extensions/trpg-runtime` 경로에서 plugin-only 오버레이 또는 전용 `trpg` 에이전트 모드로 사용할 수 있습니다.
+`trpg-runtime-v2`는 구조화된 TRPG 월드 상태 도구를 제공하는 로컬 OpenClaw 확장입니다.
+`~/.openclaw/extensions/trpg-runtime-v2` 경로에서 plugin-only 오버레이 또는 전용 `trpg` 에이전트 모드로 사용할 수 있습니다.
 
 ## 2) Features
 
@@ -17,7 +17,7 @@
 8. `trpg_scene_components`: Discord 컴포넌트 페이로드 생성.
 9. `trpg_session_new`, `trpg_session_resume`, `trpg_session_end`: 체크포인트 패널 라이프사이클.
 10. `trpg_panel_interact`, `trpg_panel_message_commit`: owner 제한 패널 갱신/edit 루프.
-11. `plugins.entries.trpg-runtime.config.allowedAgentIds` 기반 에이전트 실행 제한.
+11. `plugins.entries.trpg-runtime-v2.config.allowedAgentIds` 기반 에이전트 실행 제한.
 12. world root 해석/패치 작업에 대한 경로 및 쓰기 가드.
 
 ## 2.2) Runtime hardening 메모
@@ -159,11 +159,11 @@
 
 ## 3) Install / Onboard steps
 
-1. 확장 파일을 `~/.openclaw/extensions/trpg-runtime`에 둡니다.
+1. 확장 파일을 `~/.openclaw/extensions/trpg-runtime-v2`에 둡니다.
 2. 1회 설치/링크를 실행합니다:
 
 ```bash
-openclaw plugins install -l ~/.openclaw/extensions/trpg-runtime
+openclaw plugins install -l ~/.openclaw/extensions/trpg-runtime-v2
 ```
 
 3. 이 저장소에서 온보딩 오버레이 하나를 선택합니다:
@@ -174,12 +174,12 @@ openclaw plugins install -l ~/.openclaw/extensions/trpg-runtime
 
 ```bash
 openclaw config validate --json
-openclaw plugins info trpg-runtime
+openclaw plugins info trpg-runtime-v2
 ```
 
 ## 4) Config modes (plugin-only vs dedicated agent)
 
-- Plugin-only: 기존 agents/bindings를 유지하고 `plugins.load`, `plugins.entries.trpg-runtime`만 추가합니다.
+- Plugin-only: 기존 agents/bindings를 유지하고 `plugins.load`, `plugins.entries.trpg-runtime-v2`만 추가합니다.
 - Dedicated agent: `agents.list`에 `id: "trpg"` 추가 + Discord `bindings` route 추가 + `allowedAgentIds: ["trpg"]`로 제한합니다.
 - 두 모드 모두 안전한 온보딩을 위해 기본값은 `allowPatchApply: false`입니다.
 
@@ -195,7 +195,7 @@ openclaw plugins info trpg-runtime
 - 제외 파일:
   - 실제 API 키/토큰/OAuth 인증정보
   - 로컬 세션, lock 파일, 개인 계정 메타데이터
-- 전용 에이전트 오버레이는 `agentDir: "~/.openclaw/extensions/trpg-runtime/agent"`를 사용합니다.
+- 전용 에이전트 오버레이는 `agentDir: "~/.openclaw/extensions/trpg-runtime-v2/agent"`를 사용합니다.
 - plugin-only 온보딩은 전용 `agentDir` 자산을 사용하지 않아도 동작합니다.
 
 설치 후 온보딩 순서:
@@ -206,7 +206,7 @@ openclaw plugins info trpg-runtime
 2. 설정 검증:
    - `openclaw config validate --json`
 3. 플러그인 확인:
-   - `openclaw plugins info trpg-runtime`
+   - `openclaw plugins info trpg-runtime-v2`
 4. 전용 모드 바인딩 확인:
    - `openclaw agents bindings --agent trpg --json`
 
@@ -226,19 +226,32 @@ npm run smoke:manifest
 기대 핵심 출력:
 - `ok: plugin-only json`
 - `ok: trpg-agent json`
-- `manifest ok: trpg-runtime`
+- `manifest ok: trpg-runtime-v2`
 
 ## 6) Common failures & fixes
 
-- 플러그인이 보이지 않음: `plugins.load.paths`에 `~/.openclaw/extensions/trpg-runtime` 포함 여부 확인.
-- 플러그인 차단됨: `plugins.load.allow`에 `trpg-runtime` 포함 여부 확인.
+- 플러그인이 보이지 않음: `plugins.load.paths`에 `~/.openclaw/extensions/trpg-runtime-v2` 포함 여부 확인.
+- 플러그인 차단됨: `plugins.load.allow`에 `trpg-runtime-v2` 포함 여부 확인.
 - 에이전트 도구 호출 실패: 호출 에이전트 id와 `allowedAgentIds` 일치 여부 확인(전용 모드 기본값 `trpg`).
 - Discord 라우팅 미동작: `bindings`의 `<discord_account_id>`, `<discord_channel_id>`를 실제 값으로 교체.
 - 쓰기 거부: `allowPatchApply=true` 전에는 정상 동작입니다.
-- 월드 파일 경로 오류: `~/.openclaw/extensions/trpg-runtime/world`를 사용하거나 유효한 `worldRoot`를 지정.
+- 월드 파일 경로 오류: `~/.openclaw/extensions/trpg-runtime-v2/world`를 사용하거나 유효한 `worldRoot`를 지정.
 
 ## 7) Security/guardrails (`allowPatchApply`, `allowedAgentIds`, world path)
 
-- `allowPatchApply`: 온보딩 단계에서는 `false` 유지, 감사된 쓰기 플로우에서만 `true` 사용.
+- `allowPatchApply`: 온보딩 단계에서는 `false` 유지, 감사된 쓰기 플로우에서만 `true` 사용. `false`인 동안 런타임은 `trpg_patch_apply` 쓰기를 차단합니다.
 - `allowedAgentIds`: plugin-only는 `[]`로 광범위 허용, 전용 에이전트 모드는 `["trpg"]` 권장.
-- World path: 기본 world root는 `~/.openclaw/extensions/trpg-runtime/world`; 무관한 디렉터리 지정은 피하세요.
+- World path: 기본 world root는 `~/.openclaw/extensions/trpg-runtime-v2/world`; 무관한 디렉터리 지정은 피하세요.
+
+## 8) Agent 모델 설정 + reasoning 메모
+
+- 모델 템플릿의 단일 기준 소스는 `agent/config/models.template.json`입니다.
+- `agent/models.template.json`, `agent/models.json`은 하위 호환용 편의 복사본이며, 서로 다른 값을 따로 유지하지 않는 것을 권장합니다.
+- 모델 `reasoning` 옵션은 provider/client 측 권고 설정입니다.
+- 런타임 안전 강제는 `plugins.entries.trpg-runtime-v2.config.*` 및 deterministic guard가 담당합니다.
+
+## 9) 컴포넌트 정책 메모 (버튼/모달/select)
+
+- 온보딩/bootstrap에는 select-menu 지원이 필수가 아닙니다.
+- 버튼 + 모달 우선 플로우만으로 정상 동작합니다.
+- select-menu 컴포넌트는 선택적으로 사용할 수 있지만 bootstrap 의존성은 아닙니다.

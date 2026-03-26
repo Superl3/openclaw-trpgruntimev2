@@ -2,6 +2,7 @@ import { actionLabelFor, collectButtonActionIds, feasibilityLabel } from "./scen
 import { buildQuestEconomyQualitativeSummary } from "./quest-economy.js";
 import { buildTemporalQualitativeSummary } from "./temporal-systems.js";
 import { buildAnchorQualitativeSummary } from "./anchor-layer.js";
+import { applyWhimAdjustment } from "./recommendation-whim.js";
 import type { InteractionRouteKey, InteractionRouteRecord, SessionState } from "./types.js";
 
 export type PanelMessageMode = "send" | "edit";
@@ -25,9 +26,55 @@ type PanelRenderInput = {
   anchorSummaryOnly?: boolean;
   telemetryExtended?: boolean;
   canonicalSyncEnabled?: boolean;
+  recommendationWhimEnabled?: boolean;
+  verboseMode?: boolean;
 };
 
 export const PANEL_MODAL_SUBMIT_ACTION_ID = "action.free_input.submit";
+const PANEL_RECOMMEND_LABEL = "🎯 성향 추천 선택";
+const PANEL_FREE_INPUT_TRIGGER_LABEL = "✏️ 자유 입력";
+
+type RecommendationFactorKey =
+  | "traitFit"
+  | "questUrgency"
+  | "riskFit"
+  | "timePressure"
+  | "resourceFit"
+  | "contextFit";
+
+type RecommendationFactorScore = {
+  fit: number;
+  weight: number;
+  contribution: number;
+  detail: string;
+};
+
+type RecommendationActionScore = {
+  actionId: string;
+  baseScore: number;
+  whimAdjustment: number;
+  totalScore: number;
+  factors: Record<RecommendationFactorKey, RecommendationFactorScore>;
+};
+
+type RecommendationDecision = {
+  actionId: string | null;
+  reasonText: string | null;
+  whimEnabled: boolean;
+  scores: RecommendationActionScore[];
+};
+
+// Conservative initial weights for deterministic v1 recommendation.
+// Requested defaults: trait=0.35, quest=0.20, risk=0.20, time=0.15, resource=0.10.
+// contextFit is kept as a small additive weight to avoid over-steering.
+const RECOMMEND_WEIGHTS: Record<RecommendationFactorKey, number> = {
+  traitFit: 0.35,
+  questUrgency: 0.2,
+  riskFit: 0.2,
+  timePressure: 0.15,
+  resourceFit: 0.1,
+  contextFit: 0.05,
+};
 
 const PANEL_CUSTOM_ID_PREFIX = "trpg:v1";
 
@@ -50,6 +97,316 @@ function readString(value: unknown, fallback = ""): string {
 
 function routeMapByAction(routes: InteractionRouteRecord[]): Map<string, InteractionRouteRecord> {
   return new Map(routes.map((route) => [route.actionId, route]));
+}
+
+function clampUnit(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(1, value));
+}
+
+function signedToUnit(value: number): number {
+  return clampUnit((value + 1) / 2);
+}
+
+function riskLevel(session: SessionState): number {
+  const loop = session.deterministicLoop;
+  const tierBias = loop.scene.riskTier === "high" ? 0.08 : loop.scene.riskTier === "medium" ? 0 : -0.08;
+  return clampUnit(loop.scene.pressure / 100 + tierBias);
+}
+
+function questUrgencyLevel(session: SessionState): { level: number; label: string } {
+  const slots = session.deterministicLoop.questEconomy.presentation.hookSlots;
+  const topActive = slots.find((slot) => slot.lifecycle === "active" || slot.lifecycle === "stalled") ?? null;
+  if (topActive) {
+    const byBand: Record<string, number> = {
+      low: 0.25,
+      moderate: 0.5,
+      high: 0.75,
+      critical: 1,
+    };
+    const level = byBand[topActive.urgencyBand] ?? 0.5;
+    return { level, label: `활성 과제 urgency=${topActive.urgencyBand}` };
+  }
+  const avg = session.deterministicLoop.questEconomy.presentation.tuning.averageUrgency;
+  return { level: clampUnit(avg / 100), label: `퀘스트 평균 긴급도=${String(avg)}` };
+}
+
+function timePressureLevel(session: SessionState, questUrgency: number): { level: number; label: string } {
+  const loop = session.deterministicLoop;
+  const elapsed = clampUnit(loop.time.worldElapsedSec / 2400);
+  const ongoing = loop.ongoingAction
+    ? clampUnit(loop.ongoingAction.elapsedSec / Math.max(1, loop.ongoingAction.requiredSec))
+    : 0;
+  const level = clampUnit(questUrgency * 0.45 + elapsed * 0.3 + ongoing * 0.25);
+  return {
+    level,
+    label: `긴급=${questUrgency.toFixed(2)} 누적시간=${elapsed.toFixed(2)} 진행행동=${ongoing.toFixed(2)}`,
+  };
+}
+
+function traitFit(actionId: string, session: SessionState): RecommendationFactorScore {
+  const drift = session.deterministicLoop.behavioralDrift.drift;
+  let raw = 0;
+  switch (actionId) {
+    case "action.observe":
+      raw = drift.caution * 0.6 + drift.altruism * 0.2 - drift.aggression * 0.2;
+      break;
+    case "action.move":
+      raw = drift.boldness * 0.55 + drift.humor * 0.05 - drift.caution * 0.15;
+      break;
+    case "action.wait":
+      raw = drift.caution * 0.6 - drift.boldness * 0.1 - drift.aggression * 0.2;
+      break;
+    case "action.talk":
+      raw = drift.warmth * 0.55 + drift.altruism * 0.3 + drift.humor * 0.1 - drift.aggression * 0.1;
+      break;
+    case "action.rush":
+      raw = drift.aggression * 0.55 + drift.boldness * 0.35 - drift.caution * 0.4;
+      break;
+    default:
+      raw = 0;
+      break;
+  }
+  const fit = signedToUnit(raw);
+  return {
+    fit,
+    weight: RECOMMEND_WEIGHTS.traitFit,
+    contribution: fit * RECOMMEND_WEIGHTS.traitFit,
+    detail: `성향 적합도=${fit.toFixed(2)}`,
+  };
+}
+
+function fitFromPreference(current: number, preferred: number): number {
+  return clampUnit(1 - Math.abs(current - preferred));
+}
+
+function questUrgencyFit(actionId: string, urgencyLevel: number): RecommendationFactorScore {
+  const preferred: Record<string, number> = {
+    "action.observe": 0.55,
+    "action.move": 0.75,
+    "action.wait": 0.2,
+    "action.talk": 0.45,
+    "action.rush": 0.95,
+  };
+  const fit = fitFromPreference(urgencyLevel, preferred[actionId] ?? 0.5);
+  return {
+    fit,
+    weight: RECOMMEND_WEIGHTS.questUrgency,
+    contribution: fit * RECOMMEND_WEIGHTS.questUrgency,
+    detail: `퀘스트 긴급 적합도=${fit.toFixed(2)}`,
+  };
+}
+
+function riskFit(actionId: string, risk: number): RecommendationFactorScore {
+  const preferred: Record<string, number> = {
+    "action.observe": 0.75,
+    "action.move": 0.5,
+    "action.wait": 0.65,
+    "action.talk": 0.35,
+    "action.rush": 0.25,
+  };
+  const fit = fitFromPreference(risk, preferred[actionId] ?? 0.5);
+  return {
+    fit,
+    weight: RECOMMEND_WEIGHTS.riskFit,
+    contribution: fit * RECOMMEND_WEIGHTS.riskFit,
+    detail: `위험도 적합도=${fit.toFixed(2)}`,
+  };
+}
+
+function timePressureFit(actionId: string, pressure: number): RecommendationFactorScore {
+  const preferred: Record<string, number> = {
+    "action.observe": 0.45,
+    "action.move": 0.7,
+    "action.wait": 0.1,
+    "action.talk": 0.4,
+    "action.rush": 0.9,
+  };
+  const fit = fitFromPreference(pressure, preferred[actionId] ?? 0.5);
+  return {
+    fit,
+    weight: RECOMMEND_WEIGHTS.timePressure,
+    contribution: fit * RECOMMEND_WEIGHTS.timePressure,
+    detail: `시간 압박 적합도=${fit.toFixed(2)}`,
+  };
+}
+
+function resourceFit(
+  actionId: string,
+  session: SessionState,
+  paletteEntry: { availability?: string } | null,
+): RecommendationFactorScore {
+  let fit = 0.5;
+  const availability = paletteEntry?.availability;
+  if (availability === "possible" || availability === "reckless") {
+    fit = 0.68;
+  } else if (availability === "currently_impossible" || availability === "impossible") {
+    fit = 0.12;
+  }
+  if (actionId === "action.talk") {
+    fit += session.deterministicLoop.scene.npcAvailable ? 0.22 : -0.34;
+  }
+  if (actionId === "action.wait" && session.deterministicLoop.ongoingAction?.status === "in_progress") {
+    fit += 0.14;
+  }
+  if (
+    actionId === "action.move" &&
+    session.deterministicLoop.ongoingAction?.status === "in_progress" &&
+    session.deterministicLoop.ongoingAction.interruptible === false &&
+    session.deterministicLoop.ongoingAction.kind !== "move"
+  ) {
+    fit -= 0.35;
+  }
+  fit = clampUnit(fit);
+  return {
+    fit,
+    weight: RECOMMEND_WEIGHTS.resourceFit,
+    contribution: fit * RECOMMEND_WEIGHTS.resourceFit,
+    detail: `자원/가용 적합도=${fit.toFixed(2)}`,
+  };
+}
+
+function contextFit(actionId: string, session: SessionState): RecommendationFactorScore {
+  const loop = session.deterministicLoop;
+  let fit = 0.5;
+  if (!loop.exchange && actionId === "action.observe") {
+    fit += 0.2;
+  }
+  if (loop.scene.phase === "transitioning" && actionId === "action.move") {
+    fit += 0.25;
+  }
+  if (loop.scene.phase === "resolved" && actionId === "action.wait") {
+    fit += 0.18;
+  }
+  if (loop.exchange?.classification === "reckless" && (actionId === "action.observe" || actionId === "action.wait")) {
+    fit += 0.16;
+  }
+  if (loop.beat.objective.includes("접근") && actionId === "action.move") {
+    fit += 0.14;
+  }
+  if (loop.beat.objective.includes("리스크") && (actionId === "action.observe" || actionId === "action.wait")) {
+    fit += 0.14;
+  }
+  fit = clampUnit(fit);
+  return {
+    fit,
+    weight: RECOMMEND_WEIGHTS.contextFit,
+    contribution: fit * RECOMMEND_WEIGHTS.contextFit,
+    detail: `상황 맥락 적합도=${fit.toFixed(2)}`,
+  };
+}
+
+function recommendationReason(
+  score: RecommendationActionScore,
+  sourceLabel: string,
+  whimEnabled: boolean,
+  params?: {
+    concise?: boolean;
+    includeWhimDetail?: boolean;
+    maxFactors?: number;
+  },
+): string {
+  const maxFactors = Math.max(1, Math.min(3, Math.trunc(params?.maxFactors ?? 2)));
+  const ranked = (Object.entries(score.factors) as Array<[RecommendationFactorKey, RecommendationFactorScore]>)
+    .slice()
+    .sort((a, b) => b[1].contribution - a[1].contribution)
+    .slice(0, maxFactors);
+  const labels: Record<RecommendationFactorKey, string> = {
+    traitFit: "성향",
+    questUrgency: "퀘스트 긴급도",
+    riskFit: "현재 위험도",
+    timePressure: "시간 압박",
+    resourceFit: "자원/가용 상태",
+    contextFit: "장면 맥락",
+  };
+  const reasons = ranked
+    .map(([key, value]) => `${labels[key]} ${value.fit.toFixed(2)}`)
+    .join(" · ");
+  const whimSuffix = whimEnabled && params?.includeWhimDetail
+    ? ` · 변덕보정 ${score.whimAdjustment >= 0 ? "+" : ""}${score.whimAdjustment.toFixed(3)}`
+    : "";
+  if (params?.concise) {
+    return `근거: ${reasons}`;
+  }
+  return `근거: ${reasons} (${sourceLabel})${whimSuffix}`;
+}
+
+function recommendedDecision(
+  session: SessionState,
+  palette: Array<{ actionId: string; availability?: string }>,
+  params?: {
+    whimEnabled?: boolean;
+    verboseMode?: boolean;
+  },
+): RecommendationDecision {
+  if (palette.length === 0) {
+    return {
+      actionId: null,
+      reasonText: null,
+      whimEnabled: params?.whimEnabled === true,
+      scores: [],
+    };
+  }
+  const questUrgency = questUrgencyLevel(session);
+  const risk = riskLevel(session);
+  const timePressure = timePressureLevel(session, questUrgency.level);
+  const baseScored = palette.map((entry) => {
+    const factors: Record<RecommendationFactorKey, RecommendationFactorScore> = {
+      traitFit: traitFit(entry.actionId, session),
+      questUrgency: questUrgencyFit(entry.actionId, questUrgency.level),
+      riskFit: riskFit(entry.actionId, risk),
+      timePressure: timePressureFit(entry.actionId, timePressure.level),
+      resourceFit: resourceFit(entry.actionId, session, entry),
+      contextFit: contextFit(entry.actionId, session),
+    };
+    const totalScore = Object.values(factors).reduce((sum, factor) => sum + factor.contribution, 0);
+    return {
+      actionId: entry.actionId,
+      baseScore: totalScore,
+      whimAdjustment: 0,
+      totalScore,
+      factors,
+      availability: entry.availability,
+    };
+  });
+  const whimEnabled = params?.whimEnabled === true;
+  const leaderBaseScore = baseScored.reduce((max, row) => Math.max(max, row.baseScore), Number.NEGATIVE_INFINITY);
+  const scored = baseScored.map((row) => {
+    const whim = applyWhimAdjustment({
+      actionId: row.actionId,
+      availability: row.availability,
+      baseScore: row.baseScore,
+      leaderBaseScore,
+      riskLevel: risk,
+      config: {
+        enabled: whimEnabled,
+      },
+    });
+    return {
+      actionId: row.actionId,
+      baseScore: row.baseScore,
+      whimAdjustment: whim.adjustment,
+      totalScore: whim.adjustedScore,
+      factors: row.factors,
+    };
+  });
+  const best = scored
+    .slice()
+    .sort((a, b) => b.totalScore - a.totalScore || a.actionId.localeCompare(b.actionId))[0];
+  return {
+    actionId: best?.actionId ?? null,
+    reasonText: best
+      ? recommendationReason(best, `${questUrgency.label}, ${timePressure.label}`, whimEnabled, {
+          concise: params?.verboseMode !== true,
+          includeWhimDetail: params?.verboseMode === true,
+          maxFactors: params?.verboseMode ? 3 : 2,
+        })
+      : null,
+    whimEnabled,
+    scores: scored,
+  };
 }
 
 function fixedSectionText(session: SessionState): string {
@@ -130,11 +487,15 @@ function driftQualitativeLabel(value: number): string {
 }
 
 function subSectionText(session: SessionState, params: {
+  verboseMode: boolean;
   debugRuntimeSignals: boolean;
   behavioralDriftEnabled: boolean;
   anchorLifecycleEnabled: boolean;
   telemetryExtended: boolean;
   canonicalSyncEnabled: boolean;
+  recommendationReason: string | null;
+  recommendationWhimEnabled: boolean;
+  recommendationScores: RecommendationActionScore[];
 }): string {
   const loop = session.deterministicLoop;
   const lines = ["**Sub UI**"];
@@ -159,8 +520,19 @@ function subSectionText(session: SessionState, params: {
   const visibleButtons = loop.actionPalette.filter((entry) => entry.showInButtons);
   lines.push(
     `가능 버튼: ${visibleButtons.length > 0 ? visibleButtons.map((entry) => entry.label).join(" | ") : "없음"}`,
-    "모달: ✏️ 직접 입력",
+    `추천 버튼: ${PANEL_RECOMMEND_LABEL}`,
+    `추천 근거: ${params.recommendationReason ?? "근거 없음(선택 가능한 액션 부족)"}`,
+    `모달: ${PANEL_FREE_INPUT_TRIGGER_LABEL}`,
   );
+
+  if (params.verboseMode) {
+    const compact = session.trace.events
+      .slice(-4)
+      .map((event) => `${event.lane}:${event.type}${event.code ? `(${event.code})` : ""}`)
+      .join(" / ");
+    lines.push(`trace.tail: ${compact || "없음"}`);
+    lines.push(`변덕 보정: ${params.recommendationWhimEnabled ? "ON" : "OFF"}`);
+  }
 
   const blocked = loop.actionPalette
     .filter((entry) => entry.availability === "currently_impossible" || entry.availability === "impossible")
@@ -211,7 +583,7 @@ function subSectionText(session: SessionState, params: {
     );
   }
 
-  if (params.debugRuntimeSignals) {
+  if (params.debugRuntimeSignals && params.verboseMode) {
     const hookDebug = questSummary.debug.hookText;
     const canonicalSync = session.runtimeMetadata?.canonicalSync;
     if (params.behavioralDriftEnabled) {
@@ -242,6 +614,14 @@ function subSectionText(session: SessionState, params: {
       lines.push(
         `debug.canonical_sync.raw: policy=${canonicalSync?.sourcePolicy ?? "seed_bootstrap_only"} drift=${canonicalSync?.driftStatus ?? "unknown"} drift_counts=added:${String(canonicalSync?.driftCounts.addedInSeed ?? 0)}/missing:${String(canonicalSync?.driftCounts.missingInSeed ?? 0)}/changed:${String(canonicalSync?.driftCounts.changedScaffold ?? 0)}/incompatible:${String(canonicalSync?.driftCounts.incompatible ?? 0)} seed_fp=${canonicalSync?.seedFingerprint ?? "none"} canon_fp=${canonicalSync?.canonFingerprint ?? "none"}`,
       );
+    }
+    if (params.recommendationScores.length > 0) {
+      const compact = params.recommendationScores
+        .slice()
+        .sort((a, b) => b.totalScore - a.totalScore || a.actionId.localeCompare(b.actionId))
+        .map((row) => `${row.actionId}:${row.totalScore.toFixed(3)}(base=${row.baseScore.toFixed(3)},whim=${row.whimAdjustment.toFixed(3)})`)
+        .join(" / ");
+      lines.push(`debug.recommendation.score.raw: ${compact}`);
     }
   }
 
@@ -306,7 +686,7 @@ export function actionLabel(actionId: string, freeInput?: string): string {
   const normalized = readString(actionId);
   if (normalized === PANEL_MODAL_SUBMIT_ACTION_ID) {
     const input = readString(freeInput);
-    return input ? `직접 입력: ${input}` : "직접 입력(빈 입력)";
+    return input ? `자유 입력: ${input}` : "자유 입력(빈 입력)";
   }
   return actionLabelFor(normalized);
 }
@@ -319,24 +699,45 @@ export function buildCheckpoint1Panel(input: PanelRenderInput): PanelRenderOutpu
   const anchorLifecycleEnabled = input.anchorLifecycleEnabled !== false;
   const telemetryExtended = input.telemetryExtended === true;
   const canonicalSyncEnabled = input.canonicalSyncEnabled === true;
+  const recommendationWhimEnabled = input.recommendationWhimEnabled === true;
+  const verboseMode = input.verboseMode === true;
   const visiblePalette = input.session.deterministicLoop.actionPalette
     .filter((entry) => entry.showInButtons)
     .slice(0, 4);
-
-  const buttons = ended
-    ? []
-    : visiblePalette.map((entry) => {
-        const route = routeByAction.get(entry.actionId);
-        const customId = route ? formatPanelCustomId(route) : null;
-        return {
-          label: entry.label,
-          style: entry.style,
-          actionId: entry.actionId,
-          customId,
-          custom_id: customId,
-          disabled: !customId,
-        };
+  const recommendation = ended
+    ? { actionId: null, reasonText: null, whimEnabled: recommendationWhimEnabled, scores: [] }
+    : recommendedDecision(input.session, visiblePalette, {
+        whimEnabled: recommendationWhimEnabled,
+        verboseMode,
       });
+  const recommendedId = recommendation.actionId;
+
+  const buttonSpecs = ended
+    ? []
+    : [
+        ...(recommendedId
+          ? visiblePalette.filter((entry) => entry.actionId === recommendedId).map((entry) => {
+              return {
+                label: PANEL_RECOMMEND_LABEL,
+                style: "primary",
+                actionId: entry.actionId,
+              };
+            })
+          : []),
+        ...visiblePalette.filter((entry) => entry.actionId !== recommendedId),
+      ];
+  const buttons = buttonSpecs.map((entry) => {
+    const route = routeByAction.get(entry.actionId);
+    const customId = route ? formatPanelCustomId(route) : null;
+    return {
+      label: entry.label,
+      style: entry.style,
+      actionId: entry.actionId,
+      customId,
+      custom_id: customId,
+      disabled: !customId,
+    };
+  });
 
   const modalRoute = routeByAction.get(PANEL_MODAL_SUBMIT_ACTION_ID);
   const modalCustomId = modalRoute ? formatPanelCustomId(modalRoute) : null;
@@ -348,11 +749,15 @@ export function buildCheckpoint1Panel(input: PanelRenderInput): PanelRenderOutpu
     {
       type: "text",
       text: subSectionText(input.session, {
+        verboseMode,
         debugRuntimeSignals,
         behavioralDriftEnabled,
         anchorLifecycleEnabled,
         telemetryExtended,
         canonicalSyncEnabled,
+        recommendationReason: recommendation.reasonText,
+        recommendationWhimEnabled: recommendation.whimEnabled,
+        recommendationScores: recommendation.scores,
       }),
     },
   ];
@@ -380,9 +785,32 @@ export function buildCheckpoint1Panel(input: PanelRenderInput): PanelRenderOutpu
   };
 
   if (!ended) {
+    if (recommendedId) {
+      components.recommendation = {
+        label: PANEL_RECOMMEND_LABEL,
+        actionId: recommendedId,
+        reason: recommendation.reasonText,
+        scores: recommendation.scores.map((entry) => ({
+          actionId: entry.actionId,
+          base: Number(entry.baseScore.toFixed(6)),
+          whimAdjustment: Number(entry.whimAdjustment.toFixed(6)),
+          total: Number(entry.totalScore.toFixed(6)),
+          factors: Object.fromEntries(
+            Object.entries(entry.factors).map(([key, factor]) => [
+              key,
+              {
+                fit: Number(factor.fit.toFixed(6)),
+                weight: factor.weight,
+                contribution: Number(factor.contribution.toFixed(6)),
+              },
+            ]),
+          ),
+        })),
+      };
+    }
     components.modal = {
-      title: "직접 입력",
-      triggerLabel: "✏️ 직접 입력",
+      title: "자유 입력",
+      triggerLabel: PANEL_FREE_INPUT_TRIGGER_LABEL,
       submitLabel: "반영",
       submitActionId: PANEL_MODAL_SUBMIT_ACTION_ID,
       submitCustomId: modalCustomId,

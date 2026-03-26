@@ -164,6 +164,7 @@ export type PanelMetadata = {
 export type RuntimeTraceEventType =
   | "session.new"
   | "session.resume"
+  | "session.verbose.updated"
   | "session.end"
   | "interaction.received"
   | "interaction.rejected"
@@ -223,6 +224,10 @@ export type PanelDispatchState = {
   committedDispatchIds: string[];
 };
 
+export type SessionPresentationState = {
+  verboseMode: boolean;
+};
+
 export type SessionState = {
   schemaVersion: typeof RUNTIME_SCHEMA_VERSION;
   sessionId: string;
@@ -240,6 +245,7 @@ export type SessionState = {
   lastActionSummary: string | null;
   deterministicLoop: DeterministicSceneLoopState;
   runtimeMetadata: RuntimeMetadata;
+  presentation: SessionPresentationState;
   panelDispatch: PanelDispatchState;
   trace: RuntimeTraceState;
   panels: Record<PanelId, PanelMetadata>;
@@ -436,6 +442,13 @@ function normalizeRuntimeBootstrapDiagnostics(value: unknown): RuntimeBootstrapD
     }
   }
   return diagnostics;
+}
+
+export function ensureSessionPresentationState(value: unknown): SessionPresentationState {
+  const node = toRecord(value);
+  return {
+    verboseMode: node.verboseMode === true,
+  };
 }
 
 export function ensureRuntimeMetadata(value: unknown): RuntimeMetadata {

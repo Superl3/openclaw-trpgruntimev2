@@ -8,7 +8,7 @@
         {
           "id": "auto",
           "name": "OpenRouter Auto",
-          "reasoning": false,
+          "reasoning": true,
           "input": ["text", "image"],
           "cost": {
             "input": 0,
@@ -30,7 +30,7 @@
           "id": "auto-fastest",
           "name": "Auto Fastest",
           "api": "openai-completions",
-          "reasoning": false,
+          "reasoning": true,
           "input": ["text"],
           "cost": {
             "input": 0,

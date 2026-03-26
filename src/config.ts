@@ -9,6 +9,8 @@ import {
 export type TrpgRuntimeConfig = {
   worldRoot?: string;
   allowPatchApply: boolean;
+  diagnosticsEnabled: boolean;
+  diagnosticsConsoleMirror: boolean;
   maxReadBytes: number;
   maxFilesPerQuery: number;
   maxOperationsPerPatch: number;
@@ -30,6 +32,8 @@ export type TrpgRuntimeConfig = {
 const DEFAULT_CONFIG: TrpgRuntimeConfig = {
   worldRoot: undefined,
   allowPatchApply: false,
+  diagnosticsEnabled: true,
+  diagnosticsConsoleMirror: true,
   maxReadBytes: 262_144,
   maxFilesPerQuery: 40,
   maxOperationsPerPatch: 64,
@@ -94,6 +98,8 @@ export function parseTrpgRuntimeConfig(raw: unknown): TrpgRuntimeConfig {
   const obj = asRecord(raw);
   const worldRoot = typeof obj.worldRoot === "string" && obj.worldRoot.trim() ? obj.worldRoot : undefined;
   const allowPatchApply = typeof obj.allowPatchApply === "boolean" ? obj.allowPatchApply : false;
+  const diagnosticsEnabled = readBoolean(obj.diagnosticsEnabled, DEFAULT_CONFIG.diagnosticsEnabled);
+  const diagnosticsConsoleMirror = readBoolean(obj.diagnosticsConsoleMirror, DEFAULT_CONFIG.diagnosticsConsoleMirror);
   const legacyRichHookTextEnabled =
     typeof obj.richHookTextEnabled === "boolean" ? obj.richHookTextEnabled : undefined;
   const runtimeSafetyFlags = normalizeRuntimeSafetyFlags({
@@ -130,12 +136,18 @@ export function parseTrpgRuntimeConfig(raw: unknown): TrpgRuntimeConfig {
       obj.canonicalWriteBackEnabled,
       DEFAULT_RUNTIME_SAFETY_FLAGS.canonicalWriteBackEnabled,
     ),
+    recommendationWhimEnabled: readBoolean(
+      obj.recommendationWhimEnabled,
+      DEFAULT_RUNTIME_SAFETY_FLAGS.recommendationWhimEnabled,
+    ),
   });
   const richHookTextEnabled = runtimeSafetyFlags.richHookActionableEnabled || runtimeSafetyFlags.richHookWorldPulseEnabled;
 
   return {
     worldRoot,
     allowPatchApply,
+    diagnosticsEnabled,
+    diagnosticsConsoleMirror,
     maxReadBytes: readInteger(
       obj.maxReadBytes,
       DEFAULT_CONFIG.maxReadBytes,

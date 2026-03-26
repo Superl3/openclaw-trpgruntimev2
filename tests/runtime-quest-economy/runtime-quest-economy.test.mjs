@@ -554,12 +554,14 @@ test("panel clearly separates active and surfaced quest summaries", async () => 
     routes: [],
     mode: "send",
     debugRuntimeSignals: true,
+    verboseMode: true,
   });
   const debugExtendedPanel = panel.buildCheckpoint1Panel({
     session,
     routes: [],
     mode: "send",
     debugRuntimeSignals: true,
+    verboseMode: true,
     telemetryExtended: true,
   });
 
@@ -850,6 +852,7 @@ test("worldPulse rich text applies as single-line replacement only", async () =>
     routes: [],
     mode: "send",
     debugRuntimeSignals: true,
+    verboseMode: true,
   });
   const debugText = JSON.stringify(debugPanelOut.components);
   assert.equal(debugText.includes("worldPulse"), true);

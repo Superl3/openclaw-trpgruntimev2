@@ -1,0 +1,22 @@
+status:
+  health:
+    max: 12
+    current: 12
+  stamina:
+    max: 10
+    current: 10
+  stress:
+    max: 10
+    current: 0
+  economy:
+    money: 30
+    funds: 30
+player_status:
+  money: 30
+  stamina_state: normal
+  stamina: normal
+  condition: healthy
+  tags: []
+meta:
+  schema_version: 1
+  last_updated: 2026-03-25T12:37:48.194Z

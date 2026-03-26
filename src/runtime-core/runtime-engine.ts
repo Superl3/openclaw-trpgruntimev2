@@ -70,6 +70,7 @@ import {
   type RuntimeMetadata,
   type ResumeSessionResult,
   type SessionState,
+  ensureSessionPresentationState,
   ensureRuntimeMetadata,
 } from "./types.js";
 import {
@@ -313,6 +314,7 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
 
     const sceneId = loop.scene.sceneId;
     const runtimeMetadata = ensureRuntimeMetadata((session as Record<string, unknown>).runtimeMetadata);
+    const presentation = ensureSessionPresentationState((session as Record<string, unknown>).presentation);
     const normalized: SessionState = {
       ...session,
       sceneId,
@@ -320,6 +322,7 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
       turnIndex: actionSeq,
       deterministicLoop: loop,
       runtimeMetadata,
+      presentation,
       panelDispatch: {
         pending,
         committedDispatchIds,
@@ -393,6 +396,9 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
       lastActionSummary: null,
       deterministicLoop,
       runtimeMetadata,
+      presentation: {
+        verboseMode: false,
+      },
       panelDispatch: {
         pending: null,
         committedDispatchIds: [],
@@ -687,6 +693,7 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
   async processSceneAction(input: ProcessSceneActionInput): Promise<ProcessSceneActionResult> {
     const nowIso = this.clock.nowIso();
     const sessionBase = this.normalizeSessionLoop(input.session, nowIso);
+    const traceVerbose = this.runtimeSafetyFlags.traceVerbose || sessionBase.presentation.verboseMode;
     const routeActionId = readNonEmptyString(input.routeActionId, "action.unknown");
     const freeInput = readNonEmptyString(input.freeInput, "");
     const isFreeSentenceInput = routeActionId === PANEL_MODAL_SUBMIT_ACTION_ID && freeInput.length > 0;
@@ -1194,7 +1201,7 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
             lane: "engine",
             type: anchorEventTypeToTraceType(anchorEvent.eventType),
             tsIso: nowIso,
-            data: this.runtimeSafetyFlags.traceVerbose
+            data: traceVerbose
               ? {
                   anchorId: anchorEvent.anchorId,
                   pressureId: anchorEvent.pressureId,
@@ -1215,7 +1222,7 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
       }
     }
 
-    const temporalTraceData = this.runtimeSafetyFlags.traceVerbose
+    const temporalTraceData = traceVerbose
       ? {
           locationId: resolution.temporalSummary.locationId,
           memoryTouched: resolution.temporalSummary.memoryTouched,
@@ -1284,7 +1291,7 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
         },
       },
     };
-    if (this.runtimeSafetyFlags.traceVerbose) {
+    if (traceVerbose) {
       questLifecycleTraceData.transitions = resolution.questSummary.transitions.slice(0, 6);
       questLifecycleTraceData.panelSummary = {
         actionable: {
@@ -1337,11 +1344,11 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
       recentOutcomesRichRequested,
       recentOutcomesRichApplied,
     };
-    if (this.runtimeSafetyFlags.traceVerbose || this.runtimeSafetyFlags.telemetryExtended) {
+    if (traceVerbose || this.runtimeSafetyFlags.telemetryExtended) {
       hookTraceData.cacheHitCount = hookTextCacheHitCount;
       hookTraceData.cacheMissCount = hookTextCacheMissCount;
     }
-    if (this.runtimeSafetyFlags.traceVerbose) {
+    if (traceVerbose) {
       hookTraceData.slotMeta = hookTextSlotMeta;
     }
 

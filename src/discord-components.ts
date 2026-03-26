@@ -11,7 +11,10 @@ export type SceneType =
   | "npc_encounter"
   | "combat"
   | "choice"
-  | "dialogue";
+  | "dialogue"
+  | "system";
+
+export type RuntimePhase = "BOOTSTRAP" | "READY_FOR_INTRO" | "IN_GAME";
 
 export interface SceneComponentInput {
   /** Scene type determines template */
@@ -68,17 +71,64 @@ export interface SceneComponentInput {
 
   /** Whether to include the freeform input modal (default: true) */
   includeInput?: boolean;
+
+  /** Runtime phase contract for UI gating */
+  runtimePhase?: RuntimePhase;
 }
 
 // ─── Template Builders ──────────────────────────────────────────────
 
 function progressBar(current: number, max: number, length = 10): string {
-  const filled = Math.round((current / max) * length);
+  if (!Number.isFinite(max) || max <= 0) {
+    return "`" + "░".repeat(length) + "`";
+  }
+  const filled = Math.max(0, Math.min(length, Math.round((current / max) * length)));
   const empty = length - filled;
   return "`" + "█".repeat(filled) + "░".repeat(empty) + "`";
 }
 
-function freeformModal(title?: string) {
+function freeformModal(title?: string, runtimePhase: RuntimePhase = "IN_GAME") {
+  if (runtimePhase !== "IN_GAME") {
+    return {
+      title: title || "캐릭터 준비",
+      triggerLabel: "✍️ 자유서술 입력",
+      fields: [
+        {
+          type: "text",
+          name: "name",
+          label: "이름 입력",
+          placeholder: "예: 슈슈",
+          style: "short",
+          required: false,
+        },
+        {
+          type: "text",
+          name: "background",
+          label: "배경/출신 입력",
+          placeholder: "예: 항구 출신 견습 탐정",
+          style: "paragraph",
+          required: false,
+        },
+        {
+          type: "text",
+          name: "goal",
+          label: "현재 목표 입력",
+          placeholder: "예: 길드 의뢰를 받아 정착하기",
+          style: "paragraph",
+          required: false,
+        },
+        {
+          type: "text",
+          name: "freeform",
+          label: "자유서술 입력",
+          placeholder: "성격/과거/관계/분위기를 자유롭게 적어주세요",
+          style: "paragraph",
+          required: false,
+        },
+      ],
+    };
+  }
+
   return {
     title: title || "🗣️ 직접 행동/대사 입력",
     triggerLabel: "✏️ 직접 입력",
@@ -156,6 +206,12 @@ const DEFAULT_BUTTONS: Record<SceneType, Array<{ label: string; style: string }>
   ],
   choice: [],
   dialogue: [],
+  system: [
+    { label: "🪪 이름 입력", style: "primary" },
+    { label: "🌍 배경/출신 입력", style: "secondary" },
+    { label: "🎯 현재 목표 입력", style: "secondary" },
+    { label: "✅ 완료/다음 단계", style: "success" },
+  ],
 };
 
 const ACCENT_COLORS: Record<SceneType, string> = {
@@ -164,6 +220,7 @@ const ACCENT_COLORS: Record<SceneType, string> = {
   combat: "#e74c3c",
   choice: "#9b59b6",
   dialogue: "#f39c12",
+  system: "#6c7a89",
 };
 
 const BLOCK_TITLES: Record<SceneType, string> = {
@@ -172,16 +229,50 @@ const BLOCK_TITLES: Record<SceneType, string> = {
   combat: "⚔️ 전투 중",
   choice: "🔀 선택",
   dialogue: "💬 대화 진행 중",
+  system: "⚙️ 시스템 안내",
 };
+
+function isValidSelectOptionLabel(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed.length >= 1 && trimmed.length <= 80;
+}
+
+function normalizeSelectChoices(
+  choices: SceneComponentInput["choices"],
+): Array<{ label: string; description?: string; value: string; emoji?: string }> {
+  return dedupeByKey(
+    (choices ?? [])
+      .map((choice) => ({
+        label: choice.label?.trim() || "",
+        description: choice.description,
+        value: choice.value?.trim() || "",
+        emoji: choice.emoji,
+      }))
+      .filter((choice) => choice.label && choice.value)
+      .filter((choice) => !isFreeInputOptionLabel(choice.label) && !isFreeInputOptionLabel(choice.value))
+      .filter((choice) => isValidSelectOptionLabel(choice.label)),
+    (choice) => `${choice.label}|${choice.value}`,
+  );
+}
 
 // ─── Main Builder ───────────────────────────────────────────────────
 
 export function buildSceneComponents(input: SceneComponentInput): Record<string, unknown> {
   const { scene, npc, combat } = input;
   const includeInput = input.includeInput !== false;
+  const runtimePhase = input.runtimePhase ?? "IN_GAME";
   const blocks: unknown[] = [];
+  const normalizedScene: SceneType =
+    scene === "exploration" ||
+    scene === "npc_encounter" ||
+    scene === "combat" ||
+    scene === "choice" ||
+    scene === "dialogue" ||
+    scene === "system"
+      ? scene
+      : "system";
   const container: Record<string, unknown> = {
-    accentColor: npc?.color || ACCENT_COLORS[scene],
+    accentColor: npc?.color || ACCENT_COLORS[normalizedScene],
   };
 
   // ── Main description block ──
@@ -190,7 +281,7 @@ export function buildSceneComponents(input: SceneComponentInput): Record<string,
     mainText += "\n\n" + input.locationInfo;
   }
 
-  if (scene === "npc_encounter" && npc) {
+  if (normalizedScene === "npc_encounter" && npc) {
     const statusLine = [
       npc.disposition ? `\`호감도: ${npc.disposition}\`` : null,
       npc.status ? `\`상태: ${npc.status}\`` : null,
@@ -198,7 +289,7 @@ export function buildSceneComponents(input: SceneComponentInput): Record<string,
       .filter(Boolean)
       .join(" · ");
     mainText = `**🗡️ ${npc.name} - ${npc.title}**\n\n${npc.dialogue ? `*\"${npc.dialogue}\"*\n\n` : ""}${statusLine}`;
-  } else if (scene === "dialogue" && npc) {
+  } else if (normalizedScene === "dialogue" && npc) {
     const changeLine =
       npc.oldDisposition && npc.newDisposition
         ? `\n\n**호감도 변화:** \`${npc.oldDisposition} → ${npc.newDisposition}\` ${npc.oldDisposition < npc.newDisposition ? "⬆️" : npc.oldDisposition > npc.newDisposition ? "⬇️" : "➡️"}`
@@ -206,7 +297,7 @@ export function buildSceneComponents(input: SceneComponentInput): Record<string,
     mainText = `**🗡️ ${npc.name}**${npc.action ? ` ${npc.action}` : ""}:\n\n*\"${npc.dialogue}\"*${changeLine}`;
   }
 
-  if (scene === "combat" && combat) {
+  if (normalizedScene === "combat" && combat) {
     const acLine = combat.acBuff ? `(+${combat.acBuff})` : "";
     const effects = combat.effects || "없음";
     mainText = [
@@ -235,25 +326,14 @@ export function buildSceneComponents(input: SceneComponentInput): Record<string,
 
   // ── Action buttons or select menu ──
   const buttons = dedupeByKey(
-    input.buttons || DEFAULT_BUTTONS[scene],
+    input.buttons || DEFAULT_BUTTONS[normalizedScene],
     (button) => button.label,
   )
     .filter((button) => !isFreeInputOptionLabel(button.label))
     .slice(0, 5);
 
-  if (scene === "choice" && input.choices) {
-    const normalizedChoices = dedupeByKey(
-      input.choices
-        .map((choice) => ({
-          label: choice.label?.trim() || "",
-          description: choice.description,
-          value: choice.value?.trim() || "",
-          emoji: choice.emoji,
-        }))
-        .filter((choice) => choice.label && choice.value)
-        .filter((choice) => !isFreeInputOptionLabel(choice.label) && !isFreeInputOptionLabel(choice.value)),
-      (choice) => `${choice.label}|${choice.value}`,
-    );
+  if (normalizedScene === "choice" && input.choices) {
+    const normalizedChoices = normalizeSelectChoices(input.choices);
 
     blocks.push({
       type: "actions",
@@ -281,12 +361,19 @@ export function buildSceneComponents(input: SceneComponentInput): Record<string,
 
   // ── Assemble components payload ──
   const components: Record<string, unknown> = {
-    text: BLOCK_TITLES[scene],
+    text: BLOCK_TITLES[normalizedScene],
+    embeds: [
+      {
+        title: BLOCK_TITLES[normalizedScene],
+        description: input.description,
+        color: npc?.color || ACCENT_COLORS[normalizedScene],
+      },
+    ],
     blocks,
   };
 
   if (includeInput) {
-    components.modal = freeformModal(input.modalTitle);
+    components.modal = freeformModal(input.modalTitle, runtimePhase);
   }
 
   components.container = container;

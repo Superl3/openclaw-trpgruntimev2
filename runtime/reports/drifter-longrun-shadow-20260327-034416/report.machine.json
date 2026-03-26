@@ -1,0 +1,605 @@
+{
+  "runId": "run-20260327-033857-3668388",
+  "generatedAt": "2026-03-26T18:44:16.410Z",
+  "runnerConfig": {
+    "lane": "bridge",
+    "scenarios": [
+      "happy"
+    ],
+    "turns": 2,
+    "improveMode": "shadow",
+    "improveWindow": 3,
+    "watch": true,
+    "maxCycles": 10,
+    "cyclesExecuted": 10
+  },
+  "summary": {
+    "passed": 10,
+    "failed": 0,
+    "turns": 20
+  },
+  "proposals": [],
+  "turnTranscripts": [
+    {
+      "cycle": 1,
+      "scenario": "happy",
+      "turn": 1,
+      "received": {
+        "sessionId": "sess-3eaa4797-ac6b-4e68-a18c-8898eeb4c9e4",
+        "uiVersion": 1,
+        "sceneId": "scene-bootstrap",
+        "originalText": "**Fixed UI**\n- status: active\n- sessionId: sess-3eaa4797-ac6b-4e68-a18c-8898eeb4c9e4\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:39:16.205Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n🎯 성향 추천 선택\n조사\n이동\n강행\n자유 입력\n반영",
+        "textSummary": "**Fixed UI**\n- status: active\n- sessionId: sess-3eaa4797-ac6b-4e68-a18c-8898eeb4c9e4\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:39:16.205Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다."
+      },
+      "sent": {
+        "type": "button",
+        "customId": "trpg:v1:sess-3eaa4797-ac6b-4e68-a18c-8898eeb4c9e4:1:scene-bootstrap:action.wait",
+        "actionId": "action.wait",
+        "label": "🎯 성향 추천 선택",
+        "reason": "모델 응답이 구조화 형식을 벗어나 안전 fallback 적용"
+      },
+      "response": {
+        "ok": true,
+        "errorCode": null
+      },
+      "recovered": false
+    },
+    {
+      "cycle": 1,
+      "scenario": "happy",
+      "turn": 2,
+      "received": {
+        "sessionId": "sess-3eaa4797-ac6b-4e68-a18c-8898eeb4c9e4",
+        "uiVersion": 2,
+        "sceneId": "scene-bootstrap",
+        "originalText": "**Fixed UI**\n- status: active\n- sessionId: sess-3eaa4797-ac6b-4e68-a18c-8898eeb4c9e4\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 2\n- world_time: 2026-03-26T18:41:31.205Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 29 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n최근 Exchange #1: 가능\ndelta_time: +135s (누적 135s)\n결과: 대기를 처리했다.\n반응 체인: 시간이 흘렀다. -> 환경 상태가 미세하게 변했다.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n🎯 성향 추천 선택\n조사\n이동\n강행\n`주의`: 기존 messageId가 없어서 새 패널 전송이 필요하다. 이후 trpg_panel_message_commit을 호출하라.\n자유 입력\n반영",
+        "textSummary": "**Fixed UI**\n- status: active\n- sessionId: sess-3eaa4797-ac6b-4e68-a18c-8898eeb4c9e4\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 2\n- world_time: 2026-03-26T18:41:31.205Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 29 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n최근 Exchange #1: 가능\ndelta_time: +135s (누적 135s)\n결과: 대기를 처리했다.\n반응 체인: 시간이 흘렀다. -> 환경 상태가 미세하게 변했다.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n`주의`: 기존 messageId가 없어서 새 패널 전송이 필요하다. 이후 trpg_panel_message_commit을 호출하라."
+      },
+      "sent": {
+        "type": "button",
+        "customId": "trpg:v1:sess-3eaa4797-ac6b-4e68-a18c-8898eeb4c9e4:2:scene-bootstrap:action.wait",
+        "actionId": "action.wait",
+        "label": "🎯 성향 추천 선택",
+        "reason": "모델 응답이 구조화 형식을 벗어나 안전 fallback 적용"
+      },
+      "response": {
+        "ok": true,
+        "errorCode": null
+      },
+      "recovered": false
+    },
+    {
+      "cycle": 2,
+      "scenario": "happy",
+      "turn": 1,
+      "received": {
+        "sessionId": "sess-bbb89289-e7f9-4042-9cd7-4f22c872bdb9",
+        "uiVersion": 1,
+        "sceneId": "scene-bootstrap",
+        "originalText": "**Fixed UI**\n- status: active\n- sessionId: sess-bbb89289-e7f9-4042-9cd7-4f22c872bdb9\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:39:41.418Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n🎯 성향 추천 선택\n조사\n이동\n강행\n자유 입력\n반영",
+        "textSummary": "**Fixed UI**\n- status: active\n- sessionId: sess-bbb89289-e7f9-4042-9cd7-4f22c872bdb9\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:39:41.418Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다."
+      },
+      "sent": {
+        "type": "button",
+        "customId": "trpg:v1:sess-bbb89289-e7f9-4042-9cd7-4f22c872bdb9:1:scene-bootstrap:action.wait",
+        "actionId": "action.wait",
+        "label": "🎯 성향 추천 선택",
+        "reason": "모델 응답이 구조화 형식을 벗어나 안전 fallback 적용"
+      },
+      "response": {
+        "ok": true,
+        "errorCode": null
+      },
+      "recovered": false
+    },
+    {
+      "cycle": 2,
+      "scenario": "happy",
+      "turn": 2,
+      "received": {
+        "sessionId": "sess-bbb89289-e7f9-4042-9cd7-4f22c872bdb9",
+        "uiVersion": 2,
+        "sceneId": "scene-bootstrap",
+        "originalText": "**Fixed UI**\n- status: active\n- sessionId: sess-bbb89289-e7f9-4042-9cd7-4f22c872bdb9\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 2\n- world_time: 2026-03-26T18:41:56.418Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 29 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n최근 Exchange #1: 가능\ndelta_time: +135s (누적 135s)\n결과: 대기를 처리했다.\n반응 체인: 시간이 흘렀다. -> 환경 상태가 미세하게 변했다.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n🎯 성향 추천 선택\n조사\n이동\n강행\n`주의`: 기존 messageId가 없어서 새 패널 전송이 필요하다. 이후 trpg_panel_message_commit을 호출하라.\n자유 입력\n반영",
+        "textSummary": "**Fixed UI**\n- status: active\n- sessionId: sess-bbb89289-e7f9-4042-9cd7-4f22c872bdb9\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 2\n- world_time: 2026-03-26T18:41:56.418Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 29 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n최근 Exchange #1: 가능\ndelta_time: +135s (누적 135s)\n결과: 대기를 처리했다.\n반응 체인: 시간이 흘렀다. -> 환경 상태가 미세하게 변했다.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n`주의`: 기존 messageId가 없어서 새 패널 전송이 필요하다. 이후 trpg_panel_message_commit을 호출하라."
+      },
+      "sent": {
+        "type": "button",
+        "customId": "trpg:v1:sess-bbb89289-e7f9-4042-9cd7-4f22c872bdb9:2:scene-bootstrap:action.wait",
+        "actionId": "action.wait",
+        "label": "🎯 성향 추천 선택",
+        "reason": "모델 응답이 구조화 형식을 벗어나 안전 fallback 적용"
+      },
+      "response": {
+        "ok": true,
+        "errorCode": null
+      },
+      "recovered": false
+    },
+    {
+      "cycle": 3,
+      "scenario": "happy",
+      "turn": 1,
+      "received": {
+        "sessionId": "sess-28479a0d-d780-4b06-a3b3-77d60f4a143d",
+        "uiVersion": 1,
+        "sceneId": "scene-bootstrap",
+        "originalText": "**Fixed UI**\n- status: active\n- sessionId: sess-28479a0d-d780-4b06-a3b3-77d60f4a143d\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:40:09.697Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n🎯 성향 추천 선택\n조사\n이동\n강행\n자유 입력\n반영",
+        "textSummary": "**Fixed UI**\n- status: active\n- sessionId: sess-28479a0d-d780-4b06-a3b3-77d60f4a143d\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:40:09.697Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다."
+      },
+      "sent": {
+        "type": "button",
+        "customId": "trpg:v1:sess-28479a0d-d780-4b06-a3b3-77d60f4a143d:1:scene-bootstrap:action.wait",
+        "actionId": "action.wait",
+        "label": "🎯 성향 추천 선택",
+        "reason": "모델 응답이 구조화 형식을 벗어나 안전 fallback 적용"
+      },
+      "response": {
+        "ok": true,
+        "errorCode": null
+      },
+      "recovered": false
+    },
+    {
+      "cycle": 3,
+      "scenario": "happy",
+      "turn": 2,
+      "received": {
+        "sessionId": "sess-28479a0d-d780-4b06-a3b3-77d60f4a143d",
+        "uiVersion": 2,
+        "sceneId": "scene-bootstrap",
+        "originalText": "**Fixed UI**\n- status: active\n- sessionId: sess-28479a0d-d780-4b06-a3b3-77d60f4a143d\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 2\n- world_time: 2026-03-26T18:42:24.697Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 29 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n최근 Exchange #1: 가능\ndelta_time: +135s (누적 135s)\n결과: 대기를 처리했다.\n반응 체인: 시간이 흘렀다. -> 환경 상태가 미세하게 변했다.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n🎯 성향 추천 선택\n조사\n이동\n강행\n`주의`: 기존 messageId가 없어서 새 패널 전송이 필요하다. 이후 trpg_panel_message_commit을 호출하라.\n자유 입력\n반영",
+        "textSummary": "**Fixed UI**\n- status: active\n- sessionId: sess-28479a0d-d780-4b06-a3b3-77d60f4a143d\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 2\n- world_time: 2026-03-26T18:42:24.697Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 29 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n최근 Exchange #1: 가능\ndelta_time: +135s (누적 135s)\n결과: 대기를 처리했다.\n반응 체인: 시간이 흘렀다. -> 환경 상태가 미세하게 변했다.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n`주의`: 기존 messageId가 없어서 새 패널 전송이 필요하다. 이후 trpg_panel_message_commit을 호출하라."
+      },
+      "sent": {
+        "type": "button",
+        "customId": "trpg:v1:sess-28479a0d-d780-4b06-a3b3-77d60f4a143d:2:scene-bootstrap:action.wait",
+        "actionId": "action.wait",
+        "label": "🎯 성향 추천 선택",
+        "reason": "모델 응답이 구조화 형식을 벗어나 안전 fallback 적용"
+      },
+      "response": {
+        "ok": true,
+        "errorCode": null
+      },
+      "recovered": false
+    },
+    {
+      "cycle": 4,
+      "scenario": "happy",
+      "turn": 1,
+      "received": {
+        "sessionId": "sess-cf750ae4-17ad-4749-bab8-05b0289f167b",
+        "uiVersion": 1,
+        "sceneId": "scene-bootstrap",
+        "originalText": "**Fixed UI**\n- status: active\n- sessionId: sess-cf750ae4-17ad-4749-bab8-05b0289f167b\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:40:39.191Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n🎯 성향 추천 선택\n조사\n이동\n강행\n자유 입력\n반영",
+        "textSummary": "**Fixed UI**\n- status: active\n- sessionId: sess-cf750ae4-17ad-4749-bab8-05b0289f167b\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:40:39.191Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다."
+      },
+      "sent": {
+        "type": "button",
+        "customId": "trpg:v1:sess-cf750ae4-17ad-4749-bab8-05b0289f167b:1:scene-bootstrap:action.wait",
+        "actionId": "action.wait",
+        "label": "🎯 성향 추천 선택",
+        "reason": "모델 응답이 구조화 형식을 벗어나 안전 fallback 적용"
+      },
+      "response": {
+        "ok": true,
+        "errorCode": null
+      },
+      "recovered": false
+    },
+    {
+      "cycle": 4,
+      "scenario": "happy",
+      "turn": 2,
+      "received": {
+        "sessionId": "sess-cf750ae4-17ad-4749-bab8-05b0289f167b",
+        "uiVersion": 2,
+        "sceneId": "scene-bootstrap",
+        "originalText": "**Fixed UI**\n- status: active\n- sessionId: sess-cf750ae4-17ad-4749-bab8-05b0289f167b\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 2\n- world_time: 2026-03-26T18:42:54.191Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 29 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n최근 Exchange #1: 가능\ndelta_time: +135s (누적 135s)\n결과: 대기를 처리했다.\n반응 체인: 시간이 흘렀다. -> 환경 상태가 미세하게 변했다.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n🎯 성향 추천 선택\n조사\n이동\n강행\n`주의`: 기존 messageId가 없어서 새 패널 전송이 필요하다. 이후 trpg_panel_message_commit을 호출하라.\n자유 입력\n반영",
+        "textSummary": "**Fixed UI**\n- status: active\n- sessionId: sess-cf750ae4-17ad-4749-bab8-05b0289f167b\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 2\n- world_time: 2026-03-26T18:42:54.191Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 29 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n최근 Exchange #1: 가능\ndelta_time: +135s (누적 135s)\n결과: 대기를 처리했다.\n반응 체인: 시간이 흘렀다. -> 환경 상태가 미세하게 변했다.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n`주의`: 기존 messageId가 없어서 새 패널 전송이 필요하다. 이후 trpg_panel_message_commit을 호출하라."
+      },
+      "sent": {
+        "type": "button",
+        "customId": "trpg:v1:sess-cf750ae4-17ad-4749-bab8-05b0289f167b:2:scene-bootstrap:action.wait",
+        "actionId": "action.wait",
+        "label": "🎯 성향 추천 선택",
+        "reason": "모델 응답이 구조화 형식을 벗어나 안전 fallback 적용"
+      },
+      "response": {
+        "ok": true,
+        "errorCode": null
+      },
+      "recovered": false
+    },
+    {
+      "cycle": 5,
+      "scenario": "happy",
+      "turn": 1,
+      "received": {
+        "sessionId": "sess-9dc57dd1-22a5-49df-b000-2661a5fc712d",
+        "uiVersion": 1,
+        "sceneId": "scene-bootstrap",
+        "originalText": "**Fixed UI**\n- status: active\n- sessionId: sess-9dc57dd1-22a5-49df-b000-2661a5fc712d\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:41:08.221Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n🎯 성향 추천 선택\n조사\n이동\n강행\n자유 입력\n반영",
+        "textSummary": "**Fixed UI**\n- status: active\n- sessionId: sess-9dc57dd1-22a5-49df-b000-2661a5fc712d\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:41:08.221Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다."
+      },
+      "sent": {
+        "type": "button",
+        "customId": "trpg:v1:sess-9dc57dd1-22a5-49df-b000-2661a5fc712d:1:scene-bootstrap:action.wait",
+        "actionId": "action.wait",
+        "label": "🎯 성향 추천 선택",
+        "reason": "모델 응답이 구조화 형식을 벗어나 안전 fallback 적용"
+      },
+      "response": {
+        "ok": true,
+        "errorCode": null
+      },
+      "recovered": false
+    },
+    {
+      "cycle": 5,
+      "scenario": "happy",
+      "turn": 2,
+      "received": {
+        "sessionId": "sess-9dc57dd1-22a5-49df-b000-2661a5fc712d",
+        "uiVersion": 2,
+        "sceneId": "scene-bootstrap",
+        "originalText": "**Fixed UI**\n- status: active\n- sessionId: sess-9dc57dd1-22a5-49df-b000-2661a5fc712d\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 2\n- world_time: 2026-03-26T18:43:23.221Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 29 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n최근 Exchange #1: 가능\ndelta_time: +135s (누적 135s)\n결과: 대기를 처리했다.\n반응 체인: 시간이 흘렀다. -> 환경 상태가 미세하게 변했다.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n🎯 성향 추천 선택\n조사\n이동\n강행\n`주의`: 기존 messageId가 없어서 새 패널 전송이 필요하다. 이후 trpg_panel_message_commit을 호출하라.\n자유 입력\n반영",
+        "textSummary": "**Fixed UI**\n- status: active\n- sessionId: sess-9dc57dd1-22a5-49df-b000-2661a5fc712d\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 2\n- world_time: 2026-03-26T18:43:23.221Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 29 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n최근 Exchange #1: 가능\ndelta_time: +135s (누적 135s)\n결과: 대기를 처리했다.\n반응 체인: 시간이 흘렀다. -> 환경 상태가 미세하게 변했다.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n`주의`: 기존 messageId가 없어서 새 패널 전송이 필요하다. 이후 trpg_panel_message_commit을 호출하라."
+      },
+      "sent": {
+        "type": "button",
+        "customId": "trpg:v1:sess-9dc57dd1-22a5-49df-b000-2661a5fc712d:2:scene-bootstrap:action.wait",
+        "actionId": "action.wait",
+        "label": "🎯 성향 추천 선택",
+        "reason": "모델 응답이 구조화 형식을 벗어나 안전 fallback 적용"
+      },
+      "response": {
+        "ok": true,
+        "errorCode": null
+      },
+      "recovered": false
+    },
+    {
+      "cycle": 6,
+      "scenario": "happy",
+      "turn": 1,
+      "received": {
+        "sessionId": "sess-81ba9f81-d7c5-4493-bea1-f42823d1f694",
+        "uiVersion": 1,
+        "sceneId": "scene-bootstrap",
+        "originalText": "**Fixed UI**\n- status: active\n- sessionId: sess-81ba9f81-d7c5-4493-bea1-f42823d1f694\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:41:49.417Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n🎯 성향 추천 선택\n조사\n이동\n강행\n자유 입력\n반영",
+        "textSummary": "**Fixed UI**\n- status: active\n- sessionId: sess-81ba9f81-d7c5-4493-bea1-f42823d1f694\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:41:49.417Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다."
+      },
+      "sent": {
+        "type": "button",
+        "customId": "trpg:v1:sess-81ba9f81-d7c5-4493-bea1-f42823d1f694:1:scene-bootstrap:action.wait",
+        "actionId": "action.wait",
+        "label": "🎯 성향 추천 선택",
+        "reason": "모델 응답이 구조화 형식을 벗어나 안전 fallback 적용"
+      },
+      "response": {
+        "ok": true,
+        "errorCode": null
+      },
+      "recovered": false
+    },
+    {
+      "cycle": 6,
+      "scenario": "happy",
+      "turn": 2,
+      "received": {
+        "sessionId": "sess-81ba9f81-d7c5-4493-bea1-f42823d1f694",
+        "uiVersion": 2,
+        "sceneId": "scene-bootstrap",
+        "originalText": "**Fixed UI**\n- status: active\n- sessionId: sess-81ba9f81-d7c5-4493-bea1-f42823d1f694\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 2\n- world_time: 2026-03-26T18:44:04.417Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 29 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n최근 Exchange #1: 가능\ndelta_time: +135s (누적 135s)\n결과: 대기를 처리했다.\n반응 체인: 시간이 흘렀다. -> 환경 상태가 미세하게 변했다.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n🎯 성향 추천 선택\n조사\n이동\n강행\n`주의`: 기존 messageId가 없어서 새 패널 전송이 필요하다. 이후 trpg_panel_message_commit을 호출하라.\n자유 입력\n반영",
+        "textSummary": "**Fixed UI**\n- status: active\n- sessionId: sess-81ba9f81-d7c5-4493-bea1-f42823d1f694\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 2\n- world_time: 2026-03-26T18:44:04.417Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 29 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n최근 Exchange #1: 가능\ndelta_time: +135s (누적 135s)\n결과: 대기를 처리했다.\n반응 체인: 시간이 흘렀다. -> 환경 상태가 미세하게 변했다.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n`주의`: 기존 messageId가 없어서 새 패널 전송이 필요하다. 이후 trpg_panel_message_commit을 호출하라."
+      },
+      "sent": {
+        "type": "button",
+        "customId": "trpg:v1:sess-81ba9f81-d7c5-4493-bea1-f42823d1f694:2:scene-bootstrap:action.wait",
+        "actionId": "action.wait",
+        "label": "🎯 성향 추천 선택",
+        "reason": "모델 응답이 구조화 형식을 벗어나 안전 fallback 적용"
+      },
+      "response": {
+        "ok": true,
+        "errorCode": null
+      },
+      "recovered": false
+    },
+    {
+      "cycle": 7,
+      "scenario": "happy",
+      "turn": 1,
+      "received": {
+        "sessionId": "sess-be446779-5b30-473c-8b8f-27271359486d",
+        "uiVersion": 1,
+        "sceneId": "scene-bootstrap",
+        "originalText": "**Fixed UI**\n- status: active\n- sessionId: sess-be446779-5b30-473c-8b8f-27271359486d\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:42:25.290Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n🎯 성향 추천 선택\n조사\n이동\n강행\n자유 입력\n반영",
+        "textSummary": "**Fixed UI**\n- status: active\n- sessionId: sess-be446779-5b30-473c-8b8f-27271359486d\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:42:25.290Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다."
+      },
+      "sent": {
+        "type": "button",
+        "customId": "trpg:v1:sess-be446779-5b30-473c-8b8f-27271359486d:1:scene-bootstrap:action.wait",
+        "actionId": "action.wait",
+        "label": "🎯 성향 추천 선택",
+        "reason": "모델 응답이 구조화 형식을 벗어나 안전 fallback 적용"
+      },
+      "response": {
+        "ok": true,
+        "errorCode": null
+      },
+      "recovered": false
+    },
+    {
+      "cycle": 7,
+      "scenario": "happy",
+      "turn": 2,
+      "received": {
+        "sessionId": "sess-be446779-5b30-473c-8b8f-27271359486d",
+        "uiVersion": 2,
+        "sceneId": "scene-bootstrap",
+        "originalText": "**Fixed UI**\n- status: active\n- sessionId: sess-be446779-5b30-473c-8b8f-27271359486d\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 2\n- world_time: 2026-03-26T18:44:40.290Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 29 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n최근 Exchange #1: 가능\ndelta_time: +135s (누적 135s)\n결과: 대기를 처리했다.\n반응 체인: 시간이 흘렀다. -> 환경 상태가 미세하게 변했다.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n🎯 성향 추천 선택\n조사\n이동\n강행\n`주의`: 기존 messageId가 없어서 새 패널 전송이 필요하다. 이후 trpg_panel_message_commit을 호출하라.\n자유 입력\n반영",
+        "textSummary": "**Fixed UI**\n- status: active\n- sessionId: sess-be446779-5b30-473c-8b8f-27271359486d\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 2\n- world_time: 2026-03-26T18:44:40.290Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 29 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n최근 Exchange #1: 가능\ndelta_time: +135s (누적 135s)\n결과: 대기를 처리했다.\n반응 체인: 시간이 흘렀다. -> 환경 상태가 미세하게 변했다.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n`주의`: 기존 messageId가 없어서 새 패널 전송이 필요하다. 이후 trpg_panel_message_commit을 호출하라."
+      },
+      "sent": {
+        "type": "button",
+        "customId": "trpg:v1:sess-be446779-5b30-473c-8b8f-27271359486d:2:scene-bootstrap:action.wait",
+        "actionId": "action.wait",
+        "label": "🎯 성향 추천 선택",
+        "reason": "모델 응답이 구조화 형식을 벗어나 안전 fallback 적용"
+      },
+      "response": {
+        "ok": true,
+        "errorCode": null
+      },
+      "recovered": false
+    },
+    {
+      "cycle": 8,
+      "scenario": "happy",
+      "turn": 1,
+      "received": {
+        "sessionId": "sess-0305043f-eebf-4d47-90eb-8364a732dddf",
+        "uiVersion": 1,
+        "sceneId": "scene-bootstrap",
+        "originalText": "**Fixed UI**\n- status: active\n- sessionId: sess-0305043f-eebf-4d47-90eb-8364a732dddf\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:42:58.193Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n🎯 성향 추천 선택\n조사\n이동\n강행\n자유 입력\n반영",
+        "textSummary": "**Fixed UI**\n- status: active\n- sessionId: sess-0305043f-eebf-4d47-90eb-8364a732dddf\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:42:58.193Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다."
+      },
+      "sent": {
+        "type": "button",
+        "customId": "trpg:v1:sess-0305043f-eebf-4d47-90eb-8364a732dddf:1:scene-bootstrap:action.wait",
+        "actionId": "action.wait",
+        "label": "🎯 성향 추천 선택",
+        "reason": "모델 응답이 구조화 형식을 벗어나 안전 fallback 적용"
+      },
+      "response": {
+        "ok": true,
+        "errorCode": null
+      },
+      "recovered": false
+    },
+    {
+      "cycle": 8,
+      "scenario": "happy",
+      "turn": 2,
+      "received": {
+        "sessionId": "sess-0305043f-eebf-4d47-90eb-8364a732dddf",
+        "uiVersion": 2,
+        "sceneId": "scene-bootstrap",
+        "originalText": "**Fixed UI**\n- status: active\n- sessionId: sess-0305043f-eebf-4d47-90eb-8364a732dddf\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 2\n- world_time: 2026-03-26T18:45:13.193Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 29 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n최근 Exchange #1: 가능\ndelta_time: +135s (누적 135s)\n결과: 대기를 처리했다.\n반응 체인: 시간이 흘렀다. -> 환경 상태가 미세하게 변했다.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n🎯 성향 추천 선택\n조사\n이동\n강행\n`주의`: 기존 messageId가 없어서 새 패널 전송이 필요하다. 이후 trpg_panel_message_commit을 호출하라.\n자유 입력\n반영",
+        "textSummary": "**Fixed UI**\n- status: active\n- sessionId: sess-0305043f-eebf-4d47-90eb-8364a732dddf\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 2\n- world_time: 2026-03-26T18:45:13.193Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 29 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n최근 Exchange #1: 가능\ndelta_time: +135s (누적 135s)\n결과: 대기를 처리했다.\n반응 체인: 시간이 흘렀다. -> 환경 상태가 미세하게 변했다.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n`주의`: 기존 messageId가 없어서 새 패널 전송이 필요하다. 이후 trpg_panel_message_commit을 호출하라."
+      },
+      "sent": {
+        "type": "button",
+        "customId": "trpg:v1:sess-0305043f-eebf-4d47-90eb-8364a732dddf:2:scene-bootstrap:action.wait",
+        "actionId": "action.wait",
+        "label": "🎯 성향 추천 선택",
+        "reason": "모델 응답이 구조화 형식을 벗어나 안전 fallback 적용"
+      },
+      "response": {
+        "ok": true,
+        "errorCode": null
+      },
+      "recovered": false
+    },
+    {
+      "cycle": 9,
+      "scenario": "happy",
+      "turn": 1,
+      "received": {
+        "sessionId": "sess-b22edf7d-b322-4cba-9971-8d682d809ada",
+        "uiVersion": 1,
+        "sceneId": "scene-bootstrap",
+        "originalText": "**Fixed UI**\n- status: active\n- sessionId: sess-b22edf7d-b322-4cba-9971-8d682d809ada\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:43:23.438Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n🎯 성향 추천 선택\n조사\n이동\n강행\n자유 입력\n반영",
+        "textSummary": "**Fixed UI**\n- status: active\n- sessionId: sess-b22edf7d-b322-4cba-9971-8d682d809ada\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:43:23.438Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다."
+      },
+      "sent": {
+        "type": "button",
+        "customId": "trpg:v1:sess-b22edf7d-b322-4cba-9971-8d682d809ada:1:scene-bootstrap:action.wait",
+        "actionId": "action.wait",
+        "label": "🎯 성향 추천 선택",
+        "reason": "모델 응답이 구조화 형식을 벗어나 안전 fallback 적용"
+      },
+      "response": {
+        "ok": true,
+        "errorCode": null
+      },
+      "recovered": false
+    },
+    {
+      "cycle": 9,
+      "scenario": "happy",
+      "turn": 2,
+      "received": {
+        "sessionId": "sess-b22edf7d-b322-4cba-9971-8d682d809ada",
+        "uiVersion": 2,
+        "sceneId": "scene-bootstrap",
+        "originalText": "**Fixed UI**\n- status: active\n- sessionId: sess-b22edf7d-b322-4cba-9971-8d682d809ada\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 2\n- world_time: 2026-03-26T18:45:38.438Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 29 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n최근 Exchange #1: 가능\ndelta_time: +135s (누적 135s)\n결과: 대기를 처리했다.\n반응 체인: 시간이 흘렀다. -> 환경 상태가 미세하게 변했다.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n🎯 성향 추천 선택\n조사\n이동\n강행\n`주의`: 기존 messageId가 없어서 새 패널 전송이 필요하다. 이후 trpg_panel_message_commit을 호출하라.\n자유 입력\n반영",
+        "textSummary": "**Fixed UI**\n- status: active\n- sessionId: sess-b22edf7d-b322-4cba-9971-8d682d809ada\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 2\n- world_time: 2026-03-26T18:45:38.438Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 29 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n최근 Exchange #1: 가능\ndelta_time: +135s (누적 135s)\n결과: 대기를 처리했다.\n반응 체인: 시간이 흘렀다. -> 환경 상태가 미세하게 변했다.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n`주의`: 기존 messageId가 없어서 새 패널 전송이 필요하다. 이후 trpg_panel_message_commit을 호출하라."
+      },
+      "sent": {
+        "type": "button",
+        "customId": "trpg:v1:sess-b22edf7d-b322-4cba-9971-8d682d809ada:2:scene-bootstrap:action.wait",
+        "actionId": "action.wait",
+        "label": "🎯 성향 추천 선택",
+        "reason": "모델 응답이 구조화 형식을 벗어나 안전 fallback 적용"
+      },
+      "response": {
+        "ok": true,
+        "errorCode": null
+      },
+      "recovered": false
+    },
+    {
+      "cycle": 10,
+      "scenario": "happy",
+      "turn": 1,
+      "received": {
+        "sessionId": "sess-3b509a6f-c002-48f6-96ed-ad24ccf6ae59",
+        "uiVersion": 1,
+        "sceneId": "scene-bootstrap",
+        "originalText": "**Fixed UI**\n- status: active\n- sessionId: sess-3b509a6f-c002-48f6-96ed-ad24ccf6ae59\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:43:51.307Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n🎯 성향 추천 선택\n조사\n이동\n강행\n자유 입력\n반영",
+        "textSummary": "**Fixed UI**\n- status: active\n- sessionId: sess-3b509a6f-c002-48f6-96ed-ad24ccf6ae59\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 1\n- world_time: 2026-03-26T18:43:51.307Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 25 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n아직 처리된 Exchange가 없다. 버튼 또는 직접 입력으로 첫 행동을 수행하라.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다."
+      },
+      "sent": {
+        "type": "button",
+        "customId": "trpg:v1:sess-3b509a6f-c002-48f6-96ed-ad24ccf6ae59:1:scene-bootstrap:action.wait",
+        "actionId": "action.wait",
+        "label": "🎯 성향 추천 선택",
+        "reason": "모델 응답이 구조화 형식을 벗어나 안전 fallback 적용"
+      },
+      "response": {
+        "ok": true,
+        "errorCode": null
+      },
+      "recovered": false
+    },
+    {
+      "cycle": 10,
+      "scenario": "happy",
+      "turn": 2,
+      "received": {
+        "sessionId": "sess-3b509a6f-c002-48f6-96ed-ad24ccf6ae59",
+        "uiVersion": 2,
+        "sceneId": "scene-bootstrap",
+        "originalText": "**Fixed UI**\n- status: active\n- sessionId: sess-3b509a6f-c002-48f6-96ed-ad24ccf6ae59\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 2\n- world_time: 2026-03-26T18:46:06.307Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 29 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n최근 Exchange #1: 가능\ndelta_time: +135s (누적 135s)\n결과: 대기를 처리했다.\n반응 체인: 시간이 흘렀다. -> 환경 상태가 미세하게 변했다.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n🎯 성향 추천 선택\n조사\n이동\n강행\n`주의`: 기존 messageId가 없어서 새 패널 전송이 필요하다. 이후 trpg_panel_message_commit을 호출하라.\n자유 입력\n반영",
+        "textSummary": "**Fixed UI**\n- status: active\n- sessionId: sess-3b509a6f-c002-48f6-96ed-ad24ccf6ae59\n- ownerId: owner-1\n- sceneId: scene-bootstrap\n- uiVersion: 2\n- world_time: 2026-03-26T18:46:06.307Z\n**Main UI**\n장면: 장면 001 (scene-bootstrap) / phase=active\n위치: (미지정)\nBeat 1: 현장을 파악한다.\n압력: 29 (low)\n활성 과제: 0건 · 진행 중 과제가 없다.\n접촉 기회: 0건 · 현재 접촉 가능한 기회가 없다.\n장기 축: 장기 충돌 축은 아직 전면화되지 않았다.\n세계 동향: 밀수 압박이 지속 중다.\n최근 변화: 최근 사건 변화는 잠잠하다.\n최근 Exchange #1: 가능\ndelta_time: +135s (누적 135s)\n결과: 대기를 처리했다.\n반응 체인: 시간이 흘렀다. -> 환경 상태가 미세하게 변했다.\n**Sub UI**\n가능 버튼: 조사 | 이동 | 대기 | 강행\n추천 버튼: 🎯 성향 추천 선택\n추천 근거: 근거: 성향 0.50 · 퀘스트 긴급도 0.80\n모달: ✏️ 자유 입력\n제약: 대화(현재 대화 가능한 대상이 없다.)\n행동 성향 추세: warm=안정 bold=안정 caution=안정 altruism=안정 aggression=안정 humor=안정\n시간/기억: No strong NPC memory cue.\n정보 신선도: No tracked freshness cue.\n잔여 흔적: Residual traces are minimal.\n지역 상태: No persistent location link.\n퀘스트(진행): 진행 중 과제가 없다.\n퀘스트(기회): 새로 노출된 기회가 없다.\n앵커 축: 장기 충돌 축은 아직 전면화되지 않았다.\n월드 축: 밀수 압박이 지속 중다.\n`주의`: 기존 messageId가 없어서 새 패널 전송이 필요하다. 이후 trpg_panel_message_commit을 호출하라."
+      },
+      "sent": {
+        "type": "button",
+        "customId": "trpg:v1:sess-3b509a6f-c002-48f6-96ed-ad24ccf6ae59:2:scene-bootstrap:action.wait",
+        "actionId": "action.wait",
+        "label": "🎯 성향 추천 선택",
+        "reason": "모델 응답이 구조화 형식을 벗어나 안전 fallback 적용"
+      },
+      "response": {
+        "ok": true,
+        "errorCode": null
+      },
+      "recovered": false
+    }
+  ],
+  "laneIssues": [],
+  "scenarioSummaries": [
+    {
+      "cycle": 1,
+      "scenario": "happy",
+      "ok": true,
+      "turnsPlayed": 2,
+      "startedAt": "2026-03-26T18:39:16.193Z",
+      "endedAt": "2026-03-26T18:39:41.213Z",
+      "durationMs": 25020
+    },
+    {
+      "cycle": 2,
+      "scenario": "happy",
+      "ok": true,
+      "turnsPlayed": 2,
+      "startedAt": "2026-03-26T18:39:41.413Z",
+      "endedAt": "2026-03-26T18:40:09.493Z",
+      "durationMs": 28080
+    },
+    {
+      "cycle": 3,
+      "scenario": "happy",
+      "ok": true,
+      "turnsPlayed": 2,
+      "startedAt": "2026-03-26T18:40:09.693Z",
+      "endedAt": "2026-03-26T18:40:38.985Z",
+      "durationMs": 29292
+    },
+    {
+      "cycle": 4,
+      "scenario": "happy",
+      "ok": true,
+      "turnsPlayed": 2,
+      "startedAt": "2026-03-26T18:40:39.185Z",
+      "endedAt": "2026-03-26T18:41:08.016Z",
+      "durationMs": 28831
+    },
+    {
+      "cycle": 5,
+      "scenario": "happy",
+      "ok": true,
+      "turnsPlayed": 2,
+      "startedAt": "2026-03-26T18:41:08.216Z",
+      "endedAt": "2026-03-26T18:41:49.212Z",
+      "durationMs": 40996
+    },
+    {
+      "cycle": 6,
+      "scenario": "happy",
+      "ok": true,
+      "turnsPlayed": 2,
+      "startedAt": "2026-03-26T18:41:49.413Z",
+      "endedAt": "2026-03-26T18:42:25.086Z",
+      "durationMs": 35673
+    },
+    {
+      "cycle": 7,
+      "scenario": "happy",
+      "ok": true,
+      "turnsPlayed": 2,
+      "startedAt": "2026-03-26T18:42:25.287Z",
+      "endedAt": "2026-03-26T18:42:57.989Z",
+      "durationMs": 32702
+    },
+    {
+      "cycle": 8,
+      "scenario": "happy",
+      "ok": true,
+      "turnsPlayed": 2,
+      "startedAt": "2026-03-26T18:42:58.189Z",
+      "endedAt": "2026-03-26T18:43:23.234Z",
+      "durationMs": 25045
+    },
+    {
+      "cycle": 9,
+      "scenario": "happy",
+      "ok": true,
+      "turnsPlayed": 2,
+      "startedAt": "2026-03-26T18:43:23.435Z",
+      "endedAt": "2026-03-26T18:43:51.102Z",
+      "durationMs": 27667
+    },
+    {
+      "cycle": 10,
+      "scenario": "happy",
+      "ok": true,
+      "turnsPlayed": 2,
+      "startedAt": "2026-03-26T18:43:51.303Z",
+      "endedAt": "2026-03-26T18:44:16.409Z",
+      "durationMs": 25106
+    }
+  ],
+  "scenarioFeedback": [
+    {
+      "scenario": "happy",
+      "reasonSamples": [
+        "모델 응답이 구조화 형식을 벗어나 안전 fallback 적용"
+      ]
+    }
+  ]
+}

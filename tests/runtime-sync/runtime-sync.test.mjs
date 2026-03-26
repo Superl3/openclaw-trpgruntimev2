@@ -445,6 +445,65 @@ test("canonicalWriteBackEnabled=false blocks canonical targets in audited apply"
   assert.match(String(apply.error), /canonical write-back is disabled/i);
 });
 
+test("allowPatchApply=false blocks audited apply writes", async () => {
+  const { config, patchEngine } = await modulesPromise;
+  const worldRoot = "/tmp/trpg-runtime-v2-sync-apply-disabled";
+  await fs.rm(worldRoot, { recursive: true, force: true });
+  await fs.mkdir(path.resolve(worldRoot, "state"), { recursive: true });
+
+  const statusPath = path.resolve(worldRoot, "state/player-status.yaml");
+  await writeYaml(statusPath, {
+    hp: 10,
+  });
+  const before = await fs.readFile(statusPath, "utf8");
+
+  const cfg = config.parseTrpgRuntimeConfig({
+    allowPatchApply: false,
+    canonicalWriteBackEnabled: true,
+  });
+  const cache = patchEngine.createPatchCache();
+  const dryRun = await patchEngine.runPatchDryRun({
+    worldRoot,
+    cfg,
+    agentId: "trpg",
+    cache,
+    input: {
+      title: "apply disabled guard test",
+      operations: [
+        {
+          op: "set",
+          file: "state/player-status.yaml",
+          pointer: "/hp",
+          value: 9,
+        },
+      ],
+    },
+  });
+
+  assert.equal(dryRun.ok, true);
+  const apply = await patchEngine.runPatchApply({
+    worldRoot,
+    cfg,
+    agentId: "trpg",
+    cache,
+    input: {
+      validatedPatchId: dryRun.patchId,
+      audit: {
+        approved: true,
+        approvedBy: "canon-auditor",
+        verdict: "pass",
+        conflictStatus: "non-conflicting",
+      },
+    },
+  });
+
+  assert.equal(apply.ok, false);
+  assert.match(String(apply.error), /allowPatchApply=false/i);
+  assert.equal(apply.policy?.write, false);
+  const after = await fs.readFile(statusPath, "utf8");
+  assert.equal(after, before);
+});
+
 test("runtime canonical provenance persists across new + resume", async () => {
   const { plugin, worldSeed, factionCanon } = await modulesPromise;
   const worldRoot = "/tmp/trpg-runtime-v2-sync-runtime-provenance";
