@@ -115,6 +115,27 @@ function freeformModal(title?: string) {
   };
 }
 
+function dedupeByKey<T>(items: readonly T[] | undefined, keyOf: (entry: T) => string): T[] {
+  const out: T[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of items ?? []) {
+    const key = keyOf(entry).trim();
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    out.push(entry);
+  }
+
+  return out;
+}
+
+const FREE_INPUT_OPTION_PATTERN = /(?:자유\s*입력|직접\s*입력|free\s*input)/i;
+function isFreeInputOptionLabel(value: string): boolean {
+  return FREE_INPUT_OPTION_PATTERN.test(value.trim());
+}
+
 const DEFAULT_BUTTONS: Record<SceneType, Array<{ label: string; style: string }>> = {
   exploration: [
     { label: "🔍 조사", style: "primary" },
@@ -213,18 +234,39 @@ export function buildSceneComponents(input: SceneComponentInput): Record<string,
   }
 
   // ── Action buttons or select menu ──
-  const buttons = input.buttons || DEFAULT_BUTTONS[scene];
+  const buttons = dedupeByKey(
+    input.buttons || DEFAULT_BUTTONS[scene],
+    (button) => button.label,
+  )
+    .filter((button) => !isFreeInputOptionLabel(button.label))
+    .slice(0, 5);
+
   if (scene === "choice" && input.choices) {
+    const normalizedChoices = dedupeByKey(
+      input.choices
+        .map((choice) => ({
+          label: choice.label?.trim() || "",
+          description: choice.description,
+          value: choice.value?.trim() || "",
+          emoji: choice.emoji,
+        }))
+        .filter((choice) => choice.label && choice.value)
+        .filter((choice) => !isFreeInputOptionLabel(choice.label) && !isFreeInputOptionLabel(choice.value)),
+      (choice) => `${choice.label}|${choice.value}`,
+    );
+
     blocks.push({
       type: "actions",
       select: {
         type: "string",
         placeholder: "선택하세요...",
-        options: input.choices.map((c) => ({
-          label: c.emoji ? `${c.emoji} ${c.label}` : c.label,
-          description: c.description,
-          value: c.value,
-        })),
+        options: normalizedChoices
+          .map((c) => ({
+            label: c.emoji ? `${c.emoji} ${c.label}` : c.label,
+            description: c.description,
+            value: c.value,
+          }))
+          .slice(0, 25),
       },
     });
   } else if (buttons.length > 0) {
