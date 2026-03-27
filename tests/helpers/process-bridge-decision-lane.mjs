@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
+const ALLOWED_CONTRACT_STATUS = new Set(["valid_json", "valid_kv", "fallback_unambiguous"]);
 
 function redactSecrets(text) {
   return String(text ?? "")
@@ -36,11 +37,27 @@ function validateSelection(raw) {
     throw new Error("Bridge selection must be an object");
   }
   const reason = typeof raw.reason === "string" ? raw.reason : null;
+  let audit = null;
+  if (raw.audit !== undefined) {
+    if (!raw.audit || typeof raw.audit !== "object") {
+      throw new Error("Bridge selection audit must be an object when provided");
+    }
+    const contractStatus = typeof raw.audit.contractStatus === "string" ? raw.audit.contractStatus.trim() : "";
+    if (!ALLOWED_CONTRACT_STATUS.has(contractStatus)) {
+      throw new Error("Bridge selection audit.contractStatus must be one of valid_json|valid_kv|fallback_unambiguous");
+    }
+    const rawOutputPreview = typeof raw.audit.rawOutputPreview === "string" ? raw.audit.rawOutputPreview : "";
+    audit = {
+      contractStatus,
+      ...(rawOutputPreview ? { rawOutputPreview } : {}),
+    };
+  }
   if (raw.type === "button" && typeof raw.customId === "string" && raw.customId.length > 0) {
     return {
       type: "button",
       customId: raw.customId,
       ...(reason !== null ? { reason } : {}),
+      ...(audit ? { audit } : {}),
     };
   }
   if (raw.type === "modal" && typeof raw.customId === "string" && raw.customId.length > 0) {
@@ -49,6 +66,7 @@ function validateSelection(raw) {
       customId: raw.customId,
       ...(reason !== null ? { reason } : {}),
       ...(typeof raw.freeInput === "string" ? { freeInput: raw.freeInput } : {}),
+      ...(audit ? { audit } : {}),
     };
   }
   throw new Error("Bridge selection must match {type:'button'|'modal', customId, freeInput?}");

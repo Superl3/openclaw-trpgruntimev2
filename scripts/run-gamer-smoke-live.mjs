@@ -740,6 +740,67 @@ function buildScenarioFeedback(turnTranscripts) {
   return scenarioFeedback;
 }
 
+function buildContractAuditSummary(turnTranscripts) {
+  const transcripts = Array.isArray(turnTranscripts) ? turnTranscripts : [];
+  const summary = {
+    totalTurns: transcripts.length,
+    validJsonCount: 0,
+    validKvCount: 0,
+    fallbackCount: 0,
+    unknownCount: 0,
+    contractComplianceRate: 0,
+  };
+
+  for (const transcript of transcripts) {
+    const status = typeof transcript?.sent?.audit?.contractStatus === "string"
+      ? transcript.sent.audit.contractStatus
+      : null;
+    if (status === "valid_json") {
+      summary.validJsonCount += 1;
+      continue;
+    }
+    if (status === "valid_kv") {
+      summary.validKvCount += 1;
+      continue;
+    }
+    if (status === "fallback_unambiguous") {
+      summary.fallbackCount += 1;
+      continue;
+    }
+    summary.unknownCount += 1;
+  }
+
+  if (summary.totalTurns > 0) {
+    summary.contractComplianceRate = (summary.validJsonCount + summary.validKvCount) / summary.totalTurns;
+  }
+
+  return summary;
+}
+
+function buildContractSamples(turnTranscripts, limit = 3) {
+  const transcripts = Array.isArray(turnTranscripts) ? turnTranscripts : [];
+  const samples = [];
+  for (const transcript of transcripts) {
+    if (samples.length >= limit) {
+      break;
+    }
+    const status = typeof transcript?.sent?.audit?.contractStatus === "string"
+      ? transcript.sent.audit.contractStatus
+      : "unknown";
+    const rawOutputPreview = typeof transcript?.sent?.audit?.rawOutputPreview === "string"
+      ? transcript.sent.audit.rawOutputPreview
+      : "";
+    samples.push({
+      scenario: typeof transcript?.scenario === "string" ? transcript.scenario : "unknown",
+      cycle: Number.isFinite(transcript?.cycle) ? transcript.cycle : null,
+      turn: Number.isFinite(transcript?.turn) ? transcript.turn : null,
+      status,
+      rawOutputPreview,
+    });
+  }
+  return samples;
+}
+
 function listIssuesFromProposals(proposals) {
   const reasons = new Set();
   for (const proposal of proposals) {
@@ -867,6 +928,10 @@ function buildImproveMarkdownReport(report) {
   const latest = proposals.length > 0 ? proposals[proposals.length - 1] : null;
   const observedIssues = listIssuesFromProposals(proposals);
   const laneIssueReasons = listLaneIssueReasons(report?.laneIssues);
+  const contractAuditSummary = report?.contractAuditSummary && typeof report.contractAuditSummary === "object"
+    ? report.contractAuditSummary
+    : null;
+  const contractSamples = Array.isArray(report?.contractSamples) ? report.contractSamples : [];
 
   const lines = [];
   lines.push("# 🎮 Gamer Smoke Improve Report");
@@ -932,6 +997,48 @@ function buildImproveMarkdownReport(report) {
         for (const sample of samples) {
           lines.push(`- ${sample}`);
         }
+      }
+    }
+  }
+  lines.push("");
+
+  lines.push("## 계약 준수 감사");
+  if (!contractAuditSummary) {
+    lines.push("> [!NOTE]");
+    lines.push("> 계약 감사 데이터가 없습니다.");
+  } else {
+    const totalTurns = Number.isFinite(contractAuditSummary.totalTurns) ? contractAuditSummary.totalTurns : 0;
+    const validJsonCount = Number.isFinite(contractAuditSummary.validJsonCount) ? contractAuditSummary.validJsonCount : 0;
+    const validKvCount = Number.isFinite(contractAuditSummary.validKvCount) ? contractAuditSummary.validKvCount : 0;
+    const fallbackCount = Number.isFinite(contractAuditSummary.fallbackCount) ? contractAuditSummary.fallbackCount : 0;
+    const unknownCount = Number.isFinite(contractAuditSummary.unknownCount) ? contractAuditSummary.unknownCount : 0;
+    const complianceRateRaw = Number.isFinite(contractAuditSummary.contractComplianceRate)
+      ? contractAuditSummary.contractComplianceRate
+      : 0;
+    const complianceRate = `${(complianceRateRaw * 100).toFixed(1)}%`;
+    const fallbackRate = totalTurns > 0 ? fallbackCount / totalTurns : 0;
+    const gate = fallbackRate > 0.2
+      ? "품질판정: FAIL(구조화 응답 안정성 부족)"
+      : "품질판정: PASS";
+
+    lines.push(`- totalTurns: ${totalTurns}`);
+    lines.push(`- validJsonCount: ${validJsonCount}`);
+    lines.push(`- validKvCount: ${validKvCount}`);
+    lines.push(`- fallbackCount: ${fallbackCount}`);
+    lines.push(`- unknownCount: ${unknownCount}`);
+    lines.push(`- contractComplianceRate: ${complianceRate}`);
+    lines.push(`- ${gate}`);
+
+    if (contractSamples.length > 0) {
+      lines.push("");
+      lines.push("샘플:");
+      for (const sample of contractSamples.slice(0, 3)) {
+        const scenario = typeof sample?.scenario === "string" ? sample.scenario : "unknown";
+        const cycle = Number.isFinite(sample?.cycle) ? sample.cycle : "n/a";
+        const turn = Number.isFinite(sample?.turn) ? sample.turn : "n/a";
+        const status = typeof sample?.status === "string" ? sample.status : "unknown";
+        const rawOutputPreview = typeof sample?.rawOutputPreview === "string" ? sample.rawOutputPreview : "";
+        lines.push(`- [${scenario} c${cycle} t${turn}] status=${status} preview=${rawOutputPreview || "(empty)"}`);
       }
     }
   }
@@ -1506,6 +1613,12 @@ async function main() {
   const scenarioFeedback = improveReportCollector
     ? buildScenarioFeedback(improveReportCollector.turnTranscripts)
     : [];
+  const contractAuditSummary = improveReportCollector
+    ? buildContractAuditSummary(improveReportCollector.turnTranscripts)
+    : null;
+  const contractSamples = improveReportCollector
+    ? buildContractSamples(improveReportCollector.turnTranscripts, 3)
+    : [];
 
   const machineSummary = {
     runId,
@@ -1543,6 +1656,8 @@ async function main() {
       laneIssues: improveReportCollector.laneIssues,
       scenarioSummaries,
       scenarioFeedback,
+      contractAuditSummary,
+      contractSamples,
     };
     await writeImproveReports(args, ui, improveReport);
   }

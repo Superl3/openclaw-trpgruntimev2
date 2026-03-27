@@ -1,4 +1,5 @@
 const STALE_ERROR_CODES = new Set(["route_expired", "route_consumed", "stale_ui_version", "stale_scene"]);
+const AUDIT_CONTRACT_STATUS = new Set(["valid_json", "valid_kv", "fallback_unambiguous"]);
 
 export class BlackboxGamerAgent {
   constructor(input) {
@@ -298,6 +299,24 @@ export class BlackboxGamerAgent {
       null;
     const freeInput = options.freeInput ?? this.defaultFreeInput;
     const reason = typeof rawSelection?.reason === "string" && rawSelection.reason.trim() ? rawSelection.reason.trim() : null;
+    const audit = rawSelection?.audit && typeof rawSelection.audit === "object"
+      ? {
+        contractStatus:
+          typeof rawSelection.audit.contractStatus === "string" && AUDIT_CONTRACT_STATUS.has(rawSelection.audit.contractStatus)
+            ? rawSelection.audit.contractStatus
+            : null,
+        rawOutputPreview:
+          typeof rawSelection.audit.rawOutputPreview === "string" && rawSelection.audit.rawOutputPreview.trim()
+            ? rawSelection.audit.rawOutputPreview.trim()
+            : null,
+      }
+      : null;
+    const normalizedAudit = audit && audit.contractStatus
+      ? {
+        contractStatus: audit.contractStatus,
+        ...(audit.rawOutputPreview ? { rawOutputPreview: audit.rawOutputPreview } : {}),
+      }
+      : null;
     const modalRequired = options.preferModal === true && typeof modalSubmitCustomId === "string";
 
     if (modalRequired && rawSelection.type === "button") {
@@ -315,6 +334,7 @@ export class BlackboxGamerAgent {
         actionId: matched.actionId || null,
         label: matched.label || null,
         ...(reason ? { reason } : {}),
+        ...(normalizedAudit ? { audit: normalizedAudit } : {}),
       };
     }
 
@@ -327,6 +347,7 @@ export class BlackboxGamerAgent {
         customId: rawSelection.customId,
         ...(reason ? { reason } : {}),
         freeInput: typeof rawSelection.freeInput === "string" ? rawSelection.freeInput : freeInput,
+        ...(normalizedAudit ? { audit: normalizedAudit } : {}),
       };
     }
 
@@ -420,6 +441,7 @@ export class BlackboxGamerAgent {
       type: selection?.type || null,
       customId: selection?.customId || null,
       ...(typeof selection?.reason === "string" ? { reason: selection.reason } : {}),
+      ...(selection?.audit && typeof selection.audit === "object" ? { audit: selection.audit } : {}),
       ...(selection?.type === "modal" ? { freeInput: selection?.freeInput ?? this.defaultFreeInput } : {}),
     }, "debug");
     const interactTool = this.getTool("trpg_panel_interact");
@@ -532,6 +554,7 @@ export class BlackboxGamerAgent {
           actionId: retrySelection?.actionId || null,
           label: retrySelection?.label || null,
           ...(typeof retrySelection?.reason === "string" ? { reason: retrySelection.reason } : {}),
+          ...(retrySelection?.audit && typeof retrySelection.audit === "object" ? { audit: retrySelection.audit } : {}),
           ...(retrySelection?.type === "modal" ? { freeInput: retrySelection?.freeInput ?? this.defaultFreeInput } : {}),
         },
         response: {
@@ -567,6 +590,7 @@ export class BlackboxGamerAgent {
         actionId: selection?.actionId || null,
         label: selection?.label || null,
         ...(typeof selection?.reason === "string" ? { reason: selection.reason } : {}),
+        ...(selection?.audit && typeof selection.audit === "object" ? { audit: selection.audit } : {}),
         ...(selection?.type === "modal" ? { freeInput: selection?.freeInput ?? this.defaultFreeInput } : {}),
       },
       response: {

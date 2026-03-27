@@ -11,6 +11,11 @@ const DEFAULT_WSL_DISTRO = "Ubuntu-24.04";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 const OUTPUT_KEYS = ["choice_type", "choice_label", "choice_value", "reason", "free_input"];
+const CONTRACT_STATUS = {
+  VALID_JSON: "valid_json",
+  VALID_KV: "valid_kv",
+  FALLBACK_UNAMBIGUOUS: "fallback_unambiguous",
+};
 
 function readValue(argv, index, flag) {
   const value = String(argv[index + 1] ?? "").trim();
@@ -121,6 +126,11 @@ function bashSingleQuote(value) {
 
 function normalizeText(value) {
   return String(value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function buildRawOutputPreview(rawText, maxLength = 300) {
+  const singleLine = redactSecrets(String(rawText ?? "")).replace(/\s+/g, " ").trim();
+  return singleLine.slice(0, maxLength);
 }
 
 function normalizeBridgePath(inputPath) {
@@ -274,6 +284,193 @@ function extractJsonObject(text) {
   }
 }
 
+function isObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function openClawResultScore(value) {
+  if (!isObject(value)) {
+    return 0;
+  }
+  let score = 0;
+  if (Array.isArray(value.payloads)) {
+    score += 2;
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "meta") && isObject(value.meta)) {
+    score += 1;
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "message") && (typeof value.message === "string" || isObject(value.message))) {
+    score += 1;
+  }
+  return score;
+}
+
+function looksLikeOpenClawResult(value) {
+  return openClawResultScore(value) >= 2;
+}
+
+function selectBestOpenClawResultCandidate(value) {
+  const queue = [value];
+  const seen = new Set();
+  let best = null;
+  let bestScore = 0;
+  while (queue.length > 0) {
+    const next = queue.shift();
+    if (!next || typeof next !== "object" || seen.has(next)) {
+      continue;
+    }
+    seen.add(next);
+    if (Array.isArray(next)) {
+      for (const item of next) {
+        if (item && typeof item === "object") {
+          queue.push(item);
+        }
+      }
+      continue;
+    }
+    const score = openClawResultScore(next);
+    if (score > bestScore) {
+      best = next;
+      bestScore = score;
+    }
+    for (const nested of Object.values(next)) {
+      if (nested && typeof nested === "object") {
+        queue.push(nested);
+      }
+    }
+  }
+  if (!best || !looksLikeOpenClawResult(best)) {
+    return null;
+  }
+  return best;
+}
+
+function extractBalancedJsonObjectCandidates(text) {
+  const source = String(text ?? "");
+  if (!source) {
+    return [];
+  }
+  const candidates = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaping = false;
+  for (let i = 0; i < source.length; i += 1) {
+    const ch = source[i];
+    if (inString) {
+      if (escaping) {
+        escaping = false;
+      } else if (ch === "\\") {
+        escaping = true;
+      } else if (ch === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === "\"") {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") {
+      if (depth === 0) {
+        start = i;
+      }
+      depth += 1;
+      continue;
+    }
+    if (ch === "}" && depth > 0) {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        candidates.push(source.slice(start, i + 1));
+        start = -1;
+      }
+    }
+  }
+  return candidates;
+}
+
+function extractOpenClawResultObject(text) {
+  const trimmed = String(text ?? "").trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    const candidate = selectBestOpenClawResultCandidate(parsed);
+    if (candidate) {
+      return candidate;
+    }
+  } catch {
+    // continue
+  }
+
+  const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    try {
+      const parsed = JSON.parse(lines[i]);
+      const candidate = selectBestOpenClawResultCandidate(parsed);
+      if (candidate) {
+        return candidate;
+      }
+    } catch {
+      // continue
+    }
+  }
+
+  const candidates = extractBalancedJsonObjectCandidates(trimmed);
+  for (let i = candidates.length - 1; i >= 0; i -= 1) {
+    try {
+      const parsed = JSON.parse(candidates[i]);
+      const candidate = selectBestOpenClawResultCandidate(parsed);
+      if (candidate) {
+        return candidate;
+      }
+    } catch {
+      // continue
+    }
+  }
+  return null;
+}
+
+function extractAssistantTextFromOpenClawResult(resultObject) {
+  if (!isObject(resultObject)) {
+    return "";
+  }
+  const candidates = [];
+  if (Array.isArray(resultObject.payloads)) {
+    for (const payload of resultObject.payloads) {
+      if (!isObject(payload)) {
+        continue;
+      }
+      if (typeof payload.text === "string") {
+        candidates.push(payload.text);
+      }
+      if (typeof payload.message === "string") {
+        candidates.push(payload.message);
+      } else if (isObject(payload.message)) {
+        if (typeof payload.message.text === "string") {
+          candidates.push(payload.message.text);
+        }
+      }
+    }
+  }
+  if (typeof resultObject.message === "string") {
+    candidates.push(resultObject.message);
+  } else if (isObject(resultObject.message)) {
+    if (typeof resultObject.message.text === "string") {
+      candidates.push(resultObject.message.text);
+    }
+  }
+  for (let i = candidates.length - 1; i >= 0; i -= 1) {
+    const candidate = String(candidates[i] ?? "").trim();
+    if (candidate) {
+      return candidate;
+    }
+  }
+  return "";
+}
+
 function extractTextCandidates(raw) {
   const candidates = [];
   if (typeof raw === "string") {
@@ -401,42 +598,54 @@ function parseBridgeSelection(rawStdout, context) {
   const parsedJson = extractJsonObject(rawStdout);
   if (parsedJson && typeof parsedJson === "object") {
     if (typeof parsedJson.type === "string" || typeof parsedJson.customId === "string") {
-      return normalizeWithOptionalReason(parsedJson, rawStdout);
+      return {
+        selection: normalizeWithOptionalReason(parsedJson, rawStdout),
+        contractStatus: CONTRACT_STATUS.VALID_JSON,
+      };
     }
     const candidates = extractTextCandidates(parsedJson);
     for (const candidate of candidates) {
       const nestedJson = extractJsonObject(candidate);
       if (nestedJson && typeof nestedJson === "object" && typeof nestedJson.type === "string") {
-        return normalizeWithOptionalReason(nestedJson, candidate);
+        return {
+          selection: normalizeWithOptionalReason(nestedJson, candidate),
+          contractStatus: CONTRACT_STATUS.VALID_JSON,
+        };
       }
       const kv = parseKvChoice(candidate);
       if (kv) {
-        return normalizeWithOptionalReason(
-              {
-                type: kv.type,
-                customId: kv.choiceValue,
-                choiceLabel: kv.choiceLabel,
-                reason: kv.reason,
-                free_input: kv.freeInput,
-              },
-              candidate,
-        );
+        return {
+          selection: normalizeWithOptionalReason(
+            {
+              type: kv.type,
+              customId: kv.choiceValue,
+              choiceLabel: kv.choiceLabel,
+              reason: kv.reason,
+              free_input: kv.freeInput,
+            },
+            candidate,
+          ),
+          contractStatus: CONTRACT_STATUS.VALID_KV,
+        };
       }
     }
   }
 
   const kv = parseKvChoice(rawStdout);
   if (kv) {
-    return normalizeWithOptionalReason(
-      {
-        type: kv.type,
-        customId: kv.choiceValue,
-        choiceLabel: kv.choiceLabel,
-        reason: kv.reason,
-        free_input: kv.freeInput,
-      },
-      rawStdout,
-    );
+    return {
+      selection: normalizeWithOptionalReason(
+        {
+          type: kv.type,
+          customId: kv.choiceValue,
+          choiceLabel: kv.choiceLabel,
+          reason: kv.reason,
+          free_input: kv.freeInput,
+        },
+        rawStdout,
+      ),
+      contractStatus: CONTRACT_STATUS.VALID_KV,
+    };
   }
 
   throw new Error("Unable to parse OpenClaw bridge selection format");
@@ -453,6 +662,11 @@ async function runOpenClawRuntime({
 }) {
   const env = {
     ...process.env,
+    npm_config_loglevel: "error",
+    NPM_CONFIG_LOGLEVEL: "error",
+    NPM_CONFIG_UPDATE_NOTIFIER: "false",
+    npm_config_fund: "false",
+    npm_config_audit: "false",
   };
   const packageRef = `openclaw@${openclawVersion}`;
   const directArgs = ["--yes", packageRef, "agent", "--agent", agentId, "--local", "--session-id", sessionId, "--message", prompt, "--json"];
@@ -542,20 +756,67 @@ async function main() {
     timeoutMs: args.timeoutMs,
     wslDistro: args.bridgeWslDistro,
   });
-  const combinedOutput = `${runtimeResult.stdout ?? ""}\n${runtimeResult.stderr ?? ""}`;
+  const stdoutText = String(runtimeResult.stdout ?? "");
+  const stderrText = String(runtimeResult.stderr ?? "");
+
+  const stdoutResultObject = extractOpenClawResultObject(stdoutText);
+  const stdoutAssistantText = stdoutResultObject
+    ? extractAssistantTextFromOpenClawResult(stdoutResultObject)
+    : "";
+
+  let parseSourceText = stdoutAssistantText || stdoutText;
+  let parseSourcePreview = buildRawOutputPreview(parseSourceText);
   let selection;
   try {
-    selection = parseBridgeSelection(combinedOutput, context);
+    const parsed = parseBridgeSelection(parseSourceText, context);
+    selection = {
+      ...parsed.selection,
+      audit: {
+        contractStatus: parsed.contractStatus,
+        rawOutputPreview: parseSourcePreview,
+      },
+    };
   } catch (error) {
+    if (!stdoutResultObject) {
+      const stderrResultObject = extractOpenClawResultObject(stderrText);
+      if (stderrResultObject) {
+        const stderrAssistantText = extractAssistantTextFromOpenClawResult(stderrResultObject);
+        if (stderrAssistantText) {
+          try {
+            const parsed = parseBridgeSelection(stderrAssistantText, context);
+            selection = {
+              ...parsed.selection,
+              audit: {
+                contractStatus: parsed.contractStatus,
+                rawOutputPreview: buildRawOutputPreview(stderrAssistantText),
+              },
+            };
+            process.stdout.write(`${JSON.stringify(selection)}\n`);
+            return;
+          } catch {
+            // continue to fallback flow
+          }
+        }
+      }
+    }
     const fallback = fallbackSelectionFromContext(context);
     if (!fallback) {
       const reason = error instanceof Error ? error.message : String(error);
-      const sample = redactSecrets(String(combinedOutput ?? "").trim()).slice(0, 5000);
-      throw new Error(`${reason}${sample ? ` stdout=${sample}` : ""}`);
+      const stdoutSample = redactSecrets(stdoutText.trim()).slice(0, 3000);
+      const stderrSample = redactSecrets(stderrText.trim()).slice(0, 1500);
+      const suffix = [
+        stdoutSample ? ` stdout=${stdoutSample}` : "",
+        stderrSample ? ` stderr=${stderrSample}` : "",
+      ].join("");
+      throw new Error(`${reason}${suffix}`);
     }
     selection = {
       ...fallback,
       reason: "모델 응답이 구조화 형식을 벗어나 안전 fallback 적용",
+      audit: {
+        contractStatus: CONTRACT_STATUS.FALLBACK_UNAMBIGUOUS,
+        rawOutputPreview: parseSourcePreview,
+      },
     };
   }
   process.stdout.write(`${JSON.stringify(selection)}\n`);
