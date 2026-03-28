@@ -705,6 +705,37 @@ function parseBridgeSelection(rawStdout, context) {
   throw new Error("Unable to parse OpenClaw bridge selection format");
 }
 
+function buildRuntimeDiagnostics(resultObject, requestedSessionId) {
+  const meta = resultObject && typeof resultObject === "object" ? resultObject.meta : null;
+  const agentMeta = meta && typeof meta === "object" ? meta.agentMeta : null;
+  const systemPromptReport = meta && typeof meta === "object" ? meta.systemPromptReport : null;
+  const actualSessionId = typeof agentMeta?.sessionId === "string" ? agentMeta.sessionId : null;
+  const systemPromptSessionId = typeof systemPromptReport?.sessionId === "string" ? systemPromptReport.sessionId : null;
+  const sessionKey = typeof systemPromptReport?.sessionKey === "string" ? systemPromptReport.sessionKey : null;
+  const promptTokens = Number.isFinite(agentMeta?.promptTokens) ? agentMeta.promptTokens : null;
+  const totalTokens = Number.isFinite(meta?.totalTokens) ? meta.totalTokens : null;
+  const inputTokens = Number.isFinite(meta?.inputTokens) ? meta.inputTokens : null;
+
+  let warning = null;
+  if (requestedSessionId && actualSessionId && requestedSessionId !== actualSessionId) {
+    warning = `Requested bridge session '${requestedSessionId}' executed via physical OpenClaw session '${actualSessionId}'${sessionKey ? ` (sessionKey=${sessionKey})` : ""}; local agent bridge turns may be sharing a long-lived transcript.`;
+  }
+  if (!warning && ((Number.isFinite(inputTokens) && inputTokens >= 100000) || (Number.isFinite(promptTokens) && promptTokens >= 100000))) {
+    warning = `Bridge turn used a very large prompt (inputTokens=${inputTokens ?? "n/a"}, promptTokens=${promptTokens ?? "n/a"}); this is likely transcript-bloat and can cause apparent hangs/timeouts.`;
+  }
+
+  return {
+    requestedSessionId: requestedSessionId || null,
+    actualSessionId,
+    systemPromptSessionId,
+    sessionKey,
+    inputTokens,
+    promptTokens,
+    totalTokens,
+    ...(warning ? { warning } : {}),
+  };
+}
+
 async function runOpenClawRuntime({
   prompt,
   workdir,
@@ -814,9 +845,17 @@ async function main() {
   const stderrText = String(runtimeResult.stderr ?? "");
 
   const stdoutResultObject = extractOpenClawResultObject(stdoutText);
+  const stderrResultObject = extractOpenClawResultObject(stderrText);
   const stdoutAssistantText = stdoutResultObject
     ? extractAssistantTextFromOpenClawResult(stdoutResultObject)
     : "";
+  const runtimeDiagnosticsSource = stdoutResultObject || stderrResultObject || null;
+  const runtimeDiagnostics = runtimeDiagnosticsSource
+    ? buildRuntimeDiagnostics(runtimeDiagnosticsSource, args.bridgeSessionId)
+    : null;
+  if (runtimeDiagnostics?.warning) {
+    process.stderr.write(`[bridge][diag] ${runtimeDiagnostics.warning}\n`);
+  }
 
   let parseSourceText = stdoutAssistantText || stdoutText;
   let parseSourcePreview = buildRawOutputPreview(parseSourceText);
@@ -828,11 +867,11 @@ async function main() {
       audit: {
         contractStatus: parsed.contractStatus,
         rawOutputPreview: parseSourcePreview,
+        ...(runtimeDiagnostics ? { runtimeDiagnostics } : {}),
       },
     };
   } catch (error) {
     if (!stdoutResultObject) {
-      const stderrResultObject = extractOpenClawResultObject(stderrText);
       if (stderrResultObject) {
         const stderrAssistantText = extractAssistantTextFromOpenClawResult(stderrResultObject);
         if (stderrAssistantText) {
@@ -843,6 +882,7 @@ async function main() {
               audit: {
                 contractStatus: parsed.contractStatus,
                 rawOutputPreview: buildRawOutputPreview(stderrAssistantText),
+                ...(runtimeDiagnostics ? { runtimeDiagnostics } : {}),
               },
             };
             process.stdout.write(`${JSON.stringify(selection)}\n`);
@@ -870,6 +910,7 @@ async function main() {
       audit: {
         contractStatus: CONTRACT_STATUS.FALLBACK_UNAMBIGUOUS,
         rawOutputPreview: parseSourcePreview,
+        ...(runtimeDiagnostics ? { runtimeDiagnostics } : {}),
       },
     };
   }
