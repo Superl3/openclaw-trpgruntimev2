@@ -375,3 +375,226 @@ export async function summarizeDrifterSandbox({ sandboxRoot, outputPrefix = "san
   };
 }
 
+function collectFailureSignals(diffSummary, analysisInputs) {
+  const failures = [];
+
+  for (const report of diffSummary.machineReports || []) {
+    if (report.failed > 0) {
+      failures.push({
+        type: "scenario-failure",
+        severity: "high",
+        source: report.relativePath,
+        summary: `machine report recorded ${report.failed} failed turns`,
+        evidence: {
+          failed: report.failed,
+          passed: report.passed,
+          proposalCount: report.proposalCount,
+        },
+      });
+    }
+
+    for (const reason of report.reasons || []) {
+      failures.push({
+        type: "proposal-signal",
+        severity: /stale|invalid|fallback|error/i.test(reason) ? "medium" : "low",
+        source: report.relativePath,
+        summary: reason,
+        evidence: null,
+      });
+    }
+  }
+
+  if (analysisInputs.stderr && analysisInputs.stderr.trim()) {
+    failures.push({
+      type: "stderr",
+      severity: "medium",
+      source: analysisInputs.stderrPath,
+      summary: analysisInputs.stderr.trim().split(/\r?\n/).slice(0, 3).join(" | "),
+      evidence: null,
+    });
+  }
+
+  if ((diffSummary.worldDiff?.changed?.length || 0) > 0 || (diffSummary.worldDiff?.added?.length || 0) > 0) {
+    failures.push({
+      type: "world-drift",
+      severity: "medium",
+      source: diffSummary.sandboxRoot,
+      summary: `sandbox world diverged (changed=${diffSummary.worldDiff.changed.length}, added=${diffSummary.worldDiff.added.length})`,
+      evidence: {
+        changed: diffSummary.worldDiff.changed.length,
+        added: diffSummary.worldDiff.added.length,
+      },
+    });
+  }
+
+  if ((diffSummary.repoStatus?.changedFiles?.length || 0) > 0) {
+    failures.push({
+      type: "repo-drift",
+      severity: "medium",
+      source: diffSummary.repoStatus.repoWorktreeRoot,
+      summary: `sandbox worktree has ${diffSummary.repoStatus.changedFiles.length} changed files`,
+      evidence: diffSummary.repoStatus.changedFiles,
+    });
+  }
+
+  return failures;
+}
+
+function buildPatchCandidates(diffSummary, failures) {
+  const candidates = [];
+
+  for (const report of diffSummary.machineReports || []) {
+    if (!report.latestProposal?.suggestedSettings) {
+      continue;
+    }
+    candidates.push({
+      id: `agent-profile-${report.relativePath.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`,
+      kind: "agent-profile-tuning",
+      title: `Apply latest suggested settings from ${report.relativePath}`,
+      targetPath: diffSummary.launchResult?.agentProfilePath || null,
+      confidence: report.failed > 0 ? "high" : "medium",
+      rationale: report.latestProposal.reasons || [],
+      evidence: {
+        report: report.relativePath,
+        suggestedSettings: report.latestProposal.suggestedSettings,
+      },
+      proposedActions: [
+        "review the suggestedSettings payload against the active sandbox agent profile",
+        "if it still matches operator intent, copy the settings into a sandbox-only profile variant",
+        "rerun the same sandbox scenario before promoting out of sandbox",
+      ],
+      patchTemplate: {
+        applyTo: diffSummary.launchResult?.agentProfilePath || null,
+        merge: report.latestProposal.suggestedSettings,
+      },
+    });
+  }
+
+  for (const worldCandidate of diffSummary.promotionCandidates.filter((candidate) => candidate.kind.startsWith("world-"))) {
+    candidates.push({
+      id: `world-review-${worldCandidate.relativePath.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`,
+      kind: "world-promotion-review",
+      title: `Review sandbox world change ${worldCandidate.relativePath}`,
+      targetPath: worldCandidate.sourcePath,
+      confidence: "medium",
+      rationale: [worldCandidate.reason],
+      evidence: worldCandidate,
+      proposedActions: [
+        "diff the sandbox world file against canonical",
+        "confirm the change represents intended progression rather than test-only noise",
+        "promote manually after review",
+      ],
+      patchTemplate: {
+        applyTo: worldCandidate.sourcePath,
+        fromSandbox: worldCandidate.sandboxPath,
+      },
+    });
+  }
+
+  if (!candidates.length && failures.length) {
+    candidates.push({
+      id: "manual-triage",
+      kind: "manual-triage",
+      title: "No direct patch candidate inferred",
+      targetPath: null,
+      confidence: "low",
+      rationale: failures.map((failure) => failure.summary),
+      evidence: failures,
+      proposedActions: [
+        "inspect sandbox reports/transcripts/logs manually",
+        "capture a narrower failing repro in the sandbox",
+      ],
+      patchTemplate: null,
+    });
+  }
+
+  return candidates;
+}
+
+export async function analyzeDrifterSandboxFailures({ sandboxRoot, diffSummaryPath = null, outputPrefix = "failure-analysis" }) {
+  const manifestPath = path.resolve(sandboxRoot, "sandbox-manifest.json");
+  const manifest = await readJson(manifestPath);
+  if (!manifest) {
+    throw new Error(`Sandbox manifest not found: ${manifestPath}`);
+  }
+
+  const reportsRoot = path.resolve(manifest.layout.reportsRoot);
+  const resolvedDiffSummaryPath = diffSummaryPath
+    ? path.resolve(diffSummaryPath)
+    : path.resolve(reportsRoot, "sandbox-diff-summary.json");
+  const diffSummary = await readJson(resolvedDiffSummaryPath);
+  if (!diffSummary) {
+    throw new Error(`Sandbox diff summary not found: ${resolvedDiffSummaryPath}`);
+  }
+
+  const stderrPath = diffSummary?.launchResult?.stderrPath ? path.resolve(diffSummary.launchResult.stderrPath) : null;
+  const stdoutPath = diffSummary?.launchResult?.stdoutPath ? path.resolve(diffSummary.launchResult.stdoutPath) : null;
+  const stderr = stderrPath && (await pathExists(stderrPath)) ? await fs.readFile(stderrPath, "utf8") : "";
+  const stdout = stdoutPath && (await pathExists(stdoutPath)) ? await fs.readFile(stdoutPath, "utf8") : "";
+
+  const failures = collectFailureSignals(diffSummary, {
+    stderrPath,
+    stdoutPath,
+    stderr,
+    stdout,
+  });
+  const patchCandidates = buildPatchCandidates(diffSummary, failures);
+
+  const analysis = {
+    schemaVersion: 1,
+    kind: "drifter-sandbox-failure-analysis",
+    generatedAt: new Date().toISOString(),
+    sandboxRoot: path.resolve(sandboxRoot),
+    basedOn: {
+      diffSummaryPath: resolvedDiffSummaryPath,
+      stderrPath,
+      stdoutPath,
+    },
+    status: failures.some((failure) => failure.severity === "high") ? "action-needed" : failures.length ? "review-needed" : "clean",
+    failures,
+    patchCandidates,
+    limitations: [
+      "MVP heuristic only: it reads sandbox-local diffs, machine reports, and logs but does not prove causality.",
+      "Promotion is never automatic; all candidates are review-first.",
+      "Repo patch candidates currently rely on git status, not semantic code analysis.",
+    ],
+  };
+
+  const markdownLines = [
+    "# Drifter Sandbox Failure Analysis / Patch Candidates",
+    "",
+    `Generated at: ${analysis.generatedAt}`,
+    `Status: ${analysis.status}`,
+    "",
+    "## Failure signals",
+    analysis.failures.length
+      ? analysis.failures.map((failure) => `- [${failure.severity}] ${failure.type}: ${failure.summary}`).join("\n")
+      : "- none",
+    "",
+    "## Patch candidates",
+    analysis.patchCandidates.length
+      ? analysis.patchCandidates
+          .map(
+            (candidate) =>
+              `- [${candidate.kind}] ${candidate.title}${candidate.targetPath ? ` -> ${candidate.targetPath}` : ""}`,
+          )
+          .join("\n")
+      : "- none",
+    "",
+    "## Limitations",
+    analysis.limitations.map((entry) => `- ${entry}`).join("\n"),
+  ];
+
+  const jsonPath = path.resolve(reportsRoot, `${outputPrefix}.json`);
+  const markdownPath = path.resolve(reportsRoot, `${outputPrefix}.md`);
+  await writeJson(jsonPath, analysis);
+  await writeText(markdownPath, markdownLines.join("\n"));
+
+  return {
+    analysis,
+    output: {
+      jsonPath,
+      markdownPath,
+    },
+  };
+}

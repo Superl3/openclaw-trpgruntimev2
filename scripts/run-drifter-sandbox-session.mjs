@@ -8,7 +8,10 @@ import {
   createDrifterSandbox,
   inspectDrifterSandbox,
 } from "./lib/drifter-sandbox.mjs";
-import { summarizeDrifterSandbox } from "./lib/drifter-sandbox-analysis.mjs";
+import {
+  summarizeDrifterSandbox,
+  analyzeDrifterSandboxFailures,
+} from "./lib/drifter-sandbox-analysis.mjs";
 
 function readValue(argv, index, flag) {
   const value = String(argv[index + 1] ?? "").trim();
@@ -36,6 +39,7 @@ function parseArgs(argv) {
     ref: null,
     keepSandbox: false,
     postReport: true,
+    postAnalyze: true,
     help: false,
     passthrough: [],
   };
@@ -123,6 +127,10 @@ function parseArgs(argv) {
       parsed.postReport = false;
       continue;
     }
+    if (token === "--no-post-analyze") {
+      parsed.postAnalyze = false;
+      continue;
+    }
     if (token === "--") {
       parsed.passthrough = argv.slice(i + 1);
       break;
@@ -156,6 +164,7 @@ function usage() {
     "  --no-worktree            Create sandbox without git worktree",
     "  --keep-sandbox           Keep sandbox after failures/success for inspection",
     "  --no-post-report         Skip sandbox diff/promotion summary generation",
+    "  --no-post-analyze        Skip failure-analysis / patch-candidate generation",
     "  -h, --help",
   ].join("\n");
 }
@@ -287,12 +296,16 @@ async function main() {
   await writeJson(launchStatePath, launchSummary);
 
   let diffSummary = null;
+  let failureAnalysis = null;
   if (args.postReport) {
     const reportResult = await summarizeDrifterSandbox({ sandboxRoot });
     diffSummary = reportResult;
   }
+  if (args.postAnalyze && args.postReport) {
+    failureAnalysis = await analyzeDrifterSandboxFailures({ sandboxRoot });
+  }
 
-  process.stdout.write(`${JSON.stringify({ ok: launchSummary.ok, manifest, launchSummary, diffSummary }, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify({ ok: launchSummary.ok, manifest, launchSummary, diffSummary, failureAnalysis }, null, 2)}\n`);
   if (result.status !== 0) {
     process.stderr.write(result.stderr || result.stdout || "drifter sandbox session failed\n");
     process.exitCode = result.status || 1;

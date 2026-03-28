@@ -11,6 +11,7 @@
     "smoke:gamer-live": "node ./scripts/run-gamer-smoke-live.mjs",
     "session:drifter-sandbox": "node ./scripts/run-drifter-sandbox-session.mjs",
     "sandbox:drifter:report": "node ./scripts/drifter-sandbox-report.mjs",
+    "sandbox:drifter:analyze": "node ./scripts/drifter-sandbox-report.mjs --analyze",
     "scaffold:gamer-profile": "node ./scripts/scaffold-gamer-agent-profile.mjs",
     "seed:validate": "node ./scripts/validate-world-seed.mjs",
     "factions:validate": "node ./scripts/validate-factions-canon.mjs",

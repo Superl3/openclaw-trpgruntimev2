@@ -84,3 +84,83 @@ test("summarizeDrifterSandbox emits diff summary with promotion candidates", asy
   await fs.access(result.output.jsonPath);
   await fs.access(result.output.markdownPath);
 });
+
+test("analyzeDrifterSandboxFailures builds structured patch candidates from summary", async (t) => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "drifter-failure-analysis-"));
+  const sandboxRoot = path.join(tempRoot, "sandbox");
+  const reportsRoot = path.join(sandboxRoot, "reports");
+  const artifactsRoot = path.join(sandboxRoot, "artifacts");
+  const sessionRoot = path.join(sandboxRoot, "session");
+
+  t.after(async () => {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  });
+
+  await fs.mkdir(reportsRoot, { recursive: true });
+  await fs.mkdir(artifactsRoot, { recursive: true });
+  await fs.mkdir(sessionRoot, { recursive: true });
+  await fs.writeFile(path.join(artifactsRoot, "run-gamer-smoke-live.stderr.log"), "bridge error\nretry required\n", "utf8");
+  await fs.writeFile(path.join(artifactsRoot, "run-gamer-smoke-live.stdout.log"), "stdout\n", "utf8");
+  await writeJson(path.join(sandboxRoot, "sandbox-manifest.json"), {
+    layout: {
+      sandboxRoot,
+      reportsRoot,
+      artifactsRoot,
+      sessionRoot,
+    },
+  });
+  await writeJson(path.join(reportsRoot, "sandbox-diff-summary.json"), {
+    sandboxRoot,
+    launchResult: {
+      agentProfilePath: path.join(sessionRoot, "drifter-sandbox.profile.json"),
+      stderrPath: path.join(artifactsRoot, "run-gamer-smoke-live.stderr.log"),
+      stdoutPath: path.join(artifactsRoot, "run-gamer-smoke-live.stdout.log"),
+    },
+    worldDiff: {
+      changed: [
+        {
+          relativePath: "canon/player.yaml",
+          sourcePath: "/canonical/player.yaml",
+          sandboxPath: "/sandbox/player.yaml",
+        },
+      ],
+      added: [],
+    },
+    repoStatus: {
+      changedFiles: [],
+      repoWorktreeRoot: null,
+    },
+    promotionCandidates: [
+      {
+        kind: "world-change",
+        relativePath: "canon/player.yaml",
+        sourcePath: "/canonical/player.yaml",
+        sandboxPath: "/sandbox/player.yaml",
+        reason: "sandbox world file diverged from canonical world snapshot",
+      },
+    ],
+    machineReports: [
+      {
+        relativePath: "report.machine.json",
+        passed: 0,
+        failed: 1,
+        proposalCount: 1,
+        reasons: ["llm invalid/fallback observed (invalid=1, fallback=1)"],
+        latestProposal: {
+          reasons: ["llm invalid/fallback observed (invalid=1, fallback=1)"],
+          suggestedSettings: { temperature: 0, topP: 0.05 },
+        },
+      },
+    ],
+  });
+
+  const mod = await importAnalysisModule();
+  const result = await mod.analyzeDrifterSandboxFailures({ sandboxRoot });
+
+  assert.equal(result.analysis.status, "action-needed");
+  assert.ok(result.analysis.failures.some((entry) => entry.type === "scenario-failure"));
+  assert.ok(result.analysis.patchCandidates.some((entry) => entry.kind === "agent-profile-tuning"));
+  assert.ok(result.analysis.patchCandidates.some((entry) => entry.kind === "world-promotion-review"));
+  await fs.access(result.output.jsonPath);
+  await fs.access(result.output.markdownPath);
+});

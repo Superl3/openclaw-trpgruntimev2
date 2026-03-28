@@ -191,11 +191,33 @@ Current MVP behavior:
 
 Promotion remains review-first. The tool identifies candidates; it does **not** write back into canonical paths.
 
+## Failure analysis -> patch candidate MVP
+
+A second pass can build on the diff summary:
+
+```bash
+node ./scripts/drifter-sandbox-report.mjs --sandbox <sandbox-root> --analyze
+```
+
+It writes:
+
+- `failure-analysis.json`
+- `failure-analysis.md`
+
+Current MVP behavior:
+
+- consumes `sandbox-diff-summary.json`,
+- folds in stderr/stdout logs and machine report proposal signals,
+- emits structured failure signals,
+- proposes practical patch candidates (for example: sandbox agent-profile tuning or manual world-promotion review),
+- documents limitations so operators know this is heuristic guidance, not automatic diagnosis.
+
 ## Current launcher behavior
 
-`node ./scripts/run-drifter-sandbox-session.mjs` now runs the post-run summary step by default after the live smoke/session command completes. You can disable it with:
+`node ./scripts/run-drifter-sandbox-session.mjs` now runs both post steps by default after the live smoke/session command completes. You can disable them with:
 
 - `--no-post-report`
+- `--no-post-analyze`
 
 ## Remaining follow-up
 
@@ -206,4 +228,4 @@ Still not done:
 - richer artifact indexing / transcript search,
 - automatic cleanup / retention policy,
 - automatic promotion flow from sandbox back into canonical world state,
-- failure-analysis / patch-candidate generation on top of the diff summary.
+- semantic code patch generation beyond git-status-level repo drift summaries.

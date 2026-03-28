@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 
 import path from "node:path";
-import { summarizeDrifterSandbox } from "./lib/drifter-sandbox-analysis.mjs";
+import { summarizeDrifterSandbox, analyzeDrifterSandboxFailures } from "./lib/drifter-sandbox-analysis.mjs";
 
 function parseArgs(argv) {
   const args = {
     sandbox: null,
     outputPrefix: null,
+    diffSummaryPath: null,
+    analyze: false,
     help: false,
   };
 
@@ -26,6 +28,15 @@ function parseArgs(argv) {
       i += 1;
       continue;
     }
+    if (token === "--diff-summary") {
+      args.diffSummaryPath = argv[i + 1];
+      i += 1;
+      continue;
+    }
+    if (token === "--analyze") {
+      args.analyze = true;
+      continue;
+    }
     throw new Error(`Unknown argument: ${token}`);
   }
 
@@ -36,8 +47,9 @@ function usage() {
   return [
     "Usage:",
     "  node ./scripts/drifter-sandbox-report.mjs --sandbox <path>",
+    "  node ./scripts/drifter-sandbox-report.mjs --sandbox <path> --analyze [--diff-summary <path>]",
     "",
-    "Writes sandbox-local diff and promotion summary files into <sandbox>/reports/.",
+    "Writes sandbox-local summary files into <sandbox>/reports/.",
   ].join("\n");
 }
 
@@ -49,10 +61,16 @@ async function main() {
   }
 
   const sandboxRoot = path.resolve(args.sandbox);
-  const payload = await summarizeDrifterSandbox({
-    sandboxRoot,
-    outputPrefix: args.outputPrefix || "sandbox-diff-summary",
-  });
+  const payload = args.analyze
+    ? await analyzeDrifterSandboxFailures({
+        sandboxRoot,
+        diffSummaryPath: args.diffSummaryPath ? path.resolve(args.diffSummaryPath) : null,
+        outputPrefix: args.outputPrefix || "failure-analysis",
+      })
+    : await summarizeDrifterSandbox({
+        sandboxRoot,
+        outputPrefix: args.outputPrefix || "sandbox-diff-summary",
+      });
 
   process.stdout.write(`${JSON.stringify({ ok: true, sandboxRoot, ...payload }, null, 2)}\n`);
 }
