@@ -249,6 +249,10 @@ type StatusPanelData = {
   equippedItems: string[];
   inventoryNotes: string[];
   worldTime: string;
+  playerName: string;
+  currentGoal: string;
+  bootstrapCharacterCreated: boolean;
+  bootstrapComplete: boolean;
 };
 
 type NpcMemorySummary = {
@@ -401,7 +405,7 @@ function buildPromptSurfaceChunk(params: {
     TRPG_RUNTIME_ACTION_FEASIBILITY_GUARD: { mandatory: true, priority: 88, maxLines: 14, maxChars: 1800 },
     TRPG_RUNTIME_FREEFORM_RULE: { mandatory: true, priority: 86, maxLines: 10, maxChars: 1200 },
     TRPG_DISCORD_COMPONENTS: { mandatory: true, priority: 84, maxLines: 20, maxChars: 2500 },
-    TRPG_RUNTIME_STATUS_PANEL_V1: { mandatory: true, priority: 82, maxLines: 8, maxChars: 950 },
+    TRPG_RUNTIME_STATUS_PANEL_V1: { mandatory: true, priority: 82, maxLines: 12, maxChars: 1300 },
     TRPG_RUNTIME_TRAVEL_TRANSITION: { mandatory: false, priority: 76, maxLines: 9, maxChars: 1000 },
     TRPG_RUNTIME_FAST_WAIT_V1: { mandatory: false, priority: 74, maxLines: 8, maxChars: 900 },
     TRPG_RUNTIME_ECONOMY_LITE_V1: { mandatory: false, priority: 70, maxLines: 7, maxChars: 900 },
@@ -1239,6 +1243,73 @@ function relationshipKey(value: Record<string, unknown>): string {
   }
 
   return `${from}|${to}|${relationType}|${visibility}|${source}`;
+}
+
+async function syncBootstrapStateToStatus(params: {
+  cfg: ReturnType<typeof parseTrpgRuntimeConfig>;
+  worldRoot: string;
+  player: Record<string, unknown>;
+  gameState: Record<string, unknown>;
+}): Promise<void> {
+  const nowIso = new Date().toISOString();
+  const loaded = await loadStructuredWorldFile(params.worldRoot, "state/player-status.yaml", {
+    allowMissing: true,
+    maxReadBytes: params.cfg.maxReadBytes,
+  });
+
+  const root = toObject(loaded.parsed);
+  const meta = toObject(root.meta);
+  const playerStatus = toObject(root.player_status);
+  const bootstrapStatus = toObject(playerStatus.bootstrap);
+  const desiredName = readString(playerStatus.name) || readString(params.player.name);
+  const desiredGoal = readString(playerStatus.current_goal) || readString(params.player.goal);
+  const desiredBootstrapName = readString(params.player.name);
+  const desiredBootstrapBackground = readString(params.player.background);
+  const desiredBootstrapMotive = readString(params.player.motive);
+  const desiredBootstrapGoal = readString(params.player.goal);
+  const desiredCharacterCreated = params.gameState.character_created === true;
+  const desiredBootstrapComplete = params.gameState.bootstrap_complete === true;
+  const changed =
+    readString(playerStatus.name) !== desiredName ||
+    readString(playerStatus.current_goal) !== desiredGoal ||
+    readString(bootstrapStatus.name) !== desiredBootstrapName ||
+    readString(bootstrapStatus.background) !== desiredBootstrapBackground ||
+    readString(bootstrapStatus.motive) !== desiredBootstrapMotive ||
+    readString(bootstrapStatus.goal) !== desiredBootstrapGoal ||
+    (playerStatus.character_created === true) !== desiredCharacterCreated ||
+    (playerStatus.bootstrap_complete === true) !== desiredBootstrapComplete ||
+    (bootstrapStatus.character_created === true) !== desiredCharacterCreated ||
+    (bootstrapStatus.bootstrap_complete === true) !== desiredBootstrapComplete;
+
+  if (!changed && loaded.exists) {
+    return;
+  }
+
+  root.meta = {
+    ...meta,
+    schema_version: 1,
+    last_updated: readString(meta.last_updated) || nowIso,
+  };
+  root.player_status = {
+    ...playerStatus,
+    name: desiredName,
+    current_goal: desiredGoal,
+    character_created: desiredCharacterCreated,
+    bootstrap_complete: desiredBootstrapComplete,
+    bootstrap: {
+      ...bootstrapStatus,
+      name: desiredBootstrapName,
+      background: desiredBootstrapBackground,
+      motive: desiredBootstrapMotive,
+      goal: desiredBootstrapGoal,
+      character_created: desiredCharacterCreated,
+      bootstrap_complete: desiredBootstrapComplete,
+      synced_at: nowIso,
+    },
+  };
+
+  const rendered = renderStructuredContent(loaded.format ?? "yaml", root);
+  await fs.writeFile(resolveWorldAbsolutePath(params.worldRoot, "state/player-status.yaml"), rendered, "utf8");
 }
 
 async function applyBootstrapAuditedPersistence(params: {
@@ -2574,6 +2645,7 @@ async function loadStatusPanelData(params: {
 
   const statusRoot = toObject(statusLoaded.parsed);
   const playerStatus = toObject(statusRoot.player_status);
+  const bootstrapStatus = toObject(playerStatus.bootstrap);
   const legacyStatus = toObject(statusRoot.status);
   const health = toObject(legacyStatus.health);
   const staminaGauge = toObject(legacyStatus.stamina);
@@ -2684,7 +2756,7 @@ async function loadStatusPanelData(params: {
     stressCurrent: readFiniteNumber(stress.current),
     stressMax: readFiniteNumber(stress.max),
     money,
-    staminaState: readString(playerStatus.stamina) || "normal",
+    staminaState: readString(playerStatus.stamina) || readString(playerStatus.stamina_state) || "normal",
     conditionState: readString(playerStatus.condition) || "healthy",
     tags: toStringArray(playerStatus.tags).slice(0, 6),
     fundsText,
@@ -2693,6 +2765,16 @@ async function loadStatusPanelData(params: {
     equippedItems: authoritativeEquipped,
     inventoryNotes: notes,
     worldTime,
+    playerName: readString(playerStatus.name) || readString(bootstrapStatus.name),
+    currentGoal: readString(playerStatus.current_goal) || readString(bootstrapStatus.goal),
+    bootstrapCharacterCreated:
+      typeof playerStatus.character_created === "boolean"
+        ? playerStatus.character_created === true
+        : bootstrapStatus.character_created === true,
+    bootstrapComplete:
+      typeof playerStatus.bootstrap_complete === "boolean"
+        ? playerStatus.bootstrap_complete === true
+        : bootstrapStatus.bootstrap_complete === true,
   };
 }
 
@@ -2728,6 +2810,18 @@ function buildStatusPanelGuardChunk(params: {
   lines.push(
     "Inventory-authoritative policy: only use carried/equipped anchors listed here; never invent missing items from prior turns.",
   );
+
+  if (params.status.playerName || params.status.currentGoal) {
+    lines.push(
+      `Profile (state/player-status): ${params.status.playerName || "unknown"} | Goal: ${params.status.currentGoal || "unset"}`,
+    );
+  }
+
+  if (params.status.bootstrapCharacterCreated || params.status.bootstrapComplete) {
+    lines.push(
+      `Bootstrap flags (state/player-status): character_created=${String(params.status.bootstrapCharacterCreated)} | bootstrap_complete=${String(params.status.bootstrapComplete)}`,
+    );
+  }
 
   if (params.status.equippedItems.length > 0) {
     lines.push(`Equipped anchors: ${params.status.equippedItems.slice(0, 3).join(" | ")}`);
@@ -3810,6 +3904,13 @@ async function runCharacterBootstrapGate(params: {
     }
   }
 
+  await syncBootstrapStateToStatus({
+    cfg: params.cfg,
+    worldRoot: params.worldRoot,
+    player,
+    gameState,
+  });
+
   const [worldSeedsLoaded, relationshipsLoaded] = await Promise.all([
     loadStructuredWorldFile(params.worldRoot, "state/world-seeds.yaml", {
       allowMissing: true,
@@ -4290,6 +4391,7 @@ const trpgRuntimePlugin = {
             [
               "[TRPG_RUNTIME_BOOTSTRAP_COMPLETED]",
               "Character bootstrap has just completed. Resume normal scene engine flow now.",
+              "Canon/state sync for player bootstrap has already been applied before response rendering.",
               "For this opening response, output order is mandatory:",
               "1) current location and situation",
               "2) visible clues",
@@ -4300,6 +4402,21 @@ const trpgRuntimePlugin = {
             ].join(String.fromCharCode(10)),
           );
         }
+
+        appendChunks.push(
+          [
+            "[TRPG_RUNTIME_TURN_PIPELINE]",
+            "Enforce this order for every scene-turn response:",
+            "1) authoritative state read",
+            "2) classify latest input",
+            "3) adjudicate feasibility",
+            "4) apply state patch",
+            "5) render response/components",
+            "6) send",
+            "Never describe post-patch state that has not been written yet.",
+            "Status panel facts must follow state/player-status as the primary source.",
+          ].join(String.fromCharCode(10)),
+        );
 
         const guard = await applySceneIntroGuard({ cfg, worldRoot });
         if (guard.introRequired) {
@@ -4330,6 +4447,30 @@ const trpgRuntimePlugin = {
           maxReadBytes: cfg.maxReadBytes,
         });
         const sceneStateRoot = toObject(sceneStateLoaded.parsed);
+
+        const statusPanelData = await loadStatusPanelData({
+          cfg,
+          worldRoot,
+        });
+        const statusPanelChunk = buildStatusPanelGuardChunk({
+          status: statusPanelData,
+          latestAction,
+        });
+        if (statusPanelChunk) {
+          appendChunks.push(statusPanelChunk);
+        }
+
+        const actionFeasibilityGuardChunk = await buildActionFeasibilityGuardChunk({
+          cfg,
+          worldRoot,
+          messages: promptMessages,
+          prompt: event.prompt,
+          sceneParsed: sceneStateRoot,
+          statusPanelData,
+        });
+        if (actionFeasibilityGuardChunk) {
+          appendChunks.push(actionFeasibilityGuardChunk);
+        }
 
         const persistenceState = applyScenePersistenceDefaults({
           sceneParsed: sceneStateRoot,
@@ -4363,30 +4504,6 @@ const trpgRuntimePlugin = {
         });
         if (economyContext.contextChunk) {
           appendChunks.push(economyContext.contextChunk);
-        }
-
-        const statusPanelData = await loadStatusPanelData({
-          cfg,
-          worldRoot,
-        });
-        const statusPanelChunk = buildStatusPanelGuardChunk({
-          status: statusPanelData,
-          latestAction,
-        });
-        if (statusPanelChunk) {
-          appendChunks.push(statusPanelChunk);
-        }
-
-        const actionFeasibilityGuardChunk = await buildActionFeasibilityGuardChunk({
-          cfg,
-          worldRoot,
-          messages: promptMessages,
-          prompt: event.prompt,
-          sceneParsed: sceneStateRoot,
-          statusPanelData,
-        });
-        if (actionFeasibilityGuardChunk) {
-          appendChunks.push(actionFeasibilityGuardChunk);
         }
 
         const npcMemoryChunk = await updateAndBuildNpcMemoryChunk({
