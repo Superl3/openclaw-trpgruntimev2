@@ -250,4 +250,6 @@ Optional overrides:
 - `--openclaw-home <path>`: alternate `~/.openclaw` root for global defaults
 - `--agent-id <id>`: fallback when `--agent-path` is not set
 - `--provider <provider-id>` / `--model <model-id>`: force provider/model during smoke
+- Post-run smoke-session validity check: `npm run smoke:session-validate -- runtime/reports/<run>/report.machine.json`
+- Focused validity tests: `npm run test:smoke-session-validity`
 
