@@ -255,4 +255,6 @@ Optional overrides:
 - Tuning checklist: `docs/drifter-feedback-tuning-checklist.md`
 - Stop-criteria standard: `docs/drifter-smoke-stop-criteria.md`
 - Focused validity tests: `npm run test:smoke-session-validity`
+- Drifter sandbox checkpoint MVP: `npm run drifter:snapshot -- create --workspace <sandbox-root> --session-id <sess-id>`
+- Docs: `docs/drifter-snapshot-restore-replay-mvp.md`
 
