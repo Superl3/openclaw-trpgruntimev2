@@ -167,6 +167,36 @@ Minimal flow:
 This is intentionally still a runnable MVP slice, not full `/trpg new` production routing.
 It proves that an actual drifter/gamer session can execute against sandbox-local world/session/report paths without writing into the main repo world or default runtime report folders.
 
+## Sandbox diff / promotion summary MVP
+
+A post-run reporting layer now exists for sandbox inspection:
+
+```bash
+node ./scripts/drifter-sandbox-report.mjs --sandbox <sandbox-root>
+```
+
+It writes sandbox-local files under `<sandbox>/reports/`:
+
+- `sandbox-diff-summary.json`
+- `sandbox-diff-summary.md`
+
+Current MVP behavior:
+
+- compares `world/base/` against the canonical `source.worldSourceRoot`,
+- inventories sandbox `reports/`, `session/transcripts/`, and `artifacts/`,
+- reads sandbox machine reports when present,
+- inspects sandbox worktree `git status` when present,
+- emits **promotion candidates** for changed/new world files and sandbox code changes,
+- keeps all generated outputs inside the sandbox.
+
+Promotion remains review-first. The tool identifies candidates; it does **not** write back into canonical paths.
+
+## Current launcher behavior
+
+`node ./scripts/run-drifter-sandbox-session.mjs` now runs the post-run summary step by default after the live smoke/session command completes. You can disable it with:
+
+- `--no-post-report`
+
 ## Remaining follow-up
 
 Still not done:
@@ -175,4 +205,5 @@ Still not done:
 - resume registry across multiple drifter sandbox runs,
 - richer artifact indexing / transcript search,
 - automatic cleanup / retention policy,
-- promotion flow from sandbox back into canonical world state.
+- automatic promotion flow from sandbox back into canonical world state,
+- failure-analysis / patch-candidate generation on top of the diff summary.

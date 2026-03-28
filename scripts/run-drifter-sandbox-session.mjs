@@ -8,6 +8,7 @@ import {
   createDrifterSandbox,
   inspectDrifterSandbox,
 } from "./lib/drifter-sandbox.mjs";
+import { summarizeDrifterSandbox } from "./lib/drifter-sandbox-analysis.mjs";
 
 function readValue(argv, index, flag) {
   const value = String(argv[index + 1] ?? "").trim();
@@ -34,6 +35,7 @@ function parseArgs(argv) {
     noWorktree: false,
     ref: null,
     keepSandbox: false,
+    postReport: true,
     help: false,
     passthrough: [],
   };
@@ -117,6 +119,10 @@ function parseArgs(argv) {
       parsed.keepSandbox = true;
       continue;
     }
+    if (token === "--no-post-report") {
+      parsed.postReport = false;
+      continue;
+    }
     if (token === "--") {
       parsed.passthrough = argv.slice(i + 1);
       break;
@@ -149,6 +155,7 @@ function usage() {
     "  --ref <git-ref>          Detached ref for sandbox worktree",
     "  --no-worktree            Create sandbox without git worktree",
     "  --keep-sandbox           Keep sandbox after failures/success for inspection",
+    "  --no-post-report         Skip sandbox diff/promotion summary generation",
     "  -h, --help",
   ].join("\n");
 }
@@ -279,7 +286,13 @@ async function main() {
   };
   await writeJson(launchStatePath, launchSummary);
 
-  process.stdout.write(`${JSON.stringify({ ok: launchSummary.ok, manifest, launchSummary }, null, 2)}\n`);
+  let diffSummary = null;
+  if (args.postReport) {
+    const reportResult = await summarizeDrifterSandbox({ sandboxRoot });
+    diffSummary = reportResult;
+  }
+
+  process.stdout.write(`${JSON.stringify({ ok: launchSummary.ok, manifest, launchSummary, diffSummary }, null, 2)}\n`);
   if (result.status !== 0) {
     process.stderr.write(result.stderr || result.stdout || "drifter sandbox session failed\n");
     process.exitCode = result.status || 1;

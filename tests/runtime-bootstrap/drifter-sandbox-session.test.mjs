@@ -80,6 +80,7 @@ test("run-drifter-sandbox-session writes world, reports, transcripts, and logs i
   const transcriptsRoot = payload.launchSummary.transcriptsRoot;
   const artifactsRoot = payload.launchSummary.artifactsRoot;
   const worldRoot = payload.launchSummary.worldRoot;
+  assert.equal(payload.diffSummary.summary.kind, "drifter-sandbox-diff-summary");
 
   const reportEntries = await fs.readdir(reportsRoot);
   assert.ok(reportEntries.some((entry) => entry.startsWith("drifter-session-shadow-")));
@@ -95,4 +96,6 @@ test("run-drifter-sandbox-session writes world, reports, transcripts, and logs i
 
   const launchResult = JSON.parse(await fs.readFile(path.join(sandboxRoot, "session", "launch-result.json"), "utf8"));
   assert.equal(launchResult.ok, true);
+  await fs.access(path.join(reportsRoot, "sandbox-diff-summary.json"));
+  await fs.access(path.join(reportsRoot, "sandbox-diff-summary.md"));
 });
