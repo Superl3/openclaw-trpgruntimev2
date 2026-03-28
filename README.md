@@ -121,6 +121,30 @@ All tools return JSON-shaped output (`details`) and JSON text in `content`.
 - Runtime supports buttons/modals and can emit select-menu payloads where useful.
 - Bootstrap/onboarding does **not** require select-menu support; button+modal-first flows remain valid.
 
+## Drifter sandbox prototype (MVP)
+
+A disposable drifter sandbox prototype is included for isolated experiments.
+
+- Architecture/design doc: `docs/drifter-sandbox-architecture.md`
+- CLI: `node ./scripts/drifter-sandbox.mjs`
+- Default sandbox root: OS temp dir (`/tmp/trpg-runtime-v2/sandboxes/...` on Linux)
+
+Examples:
+
+```bash
+# create sandbox with repo worktree + copied world snapshot
+node ./scripts/drifter-sandbox.mjs create \
+  --repo /path/to/trpg-runtime-v2 \
+  --world /path/to/trpg-runtime-v2/world \
+  --label nightly-drift
+
+# inspect manifest
+node ./scripts/drifter-sandbox.mjs inspect --sandbox /tmp/trpg-runtime-v2/sandboxes/<sandbox-id>
+
+# destroy sandbox + remove worktree
+node ./scripts/drifter-sandbox.mjs destroy --sandbox /tmp/trpg-runtime-v2/sandboxes/<sandbox-id> --force
+```
+
 ## Build
 
 No compile/build step is required for runtime loading (OpenClaw loads TypeScript via jiti).

@@ -13,7 +13,10 @@
     "seed:validate": "node ./scripts/validate-world-seed.mjs",
     "factions:validate": "node ./scripts/validate-factions-canon.mjs",
     "factions:drift-vs-seed": "node ./scripts/diff-factions-vs-seed.mjs",
-    "factions:scaffold-from-seed": "node ./scripts/scaffold-factions-from-seed.mjs"
+    "factions:scaffold-from-seed": "node ./scripts/scaffold-factions-from-seed.mjs",
+    "sandbox:drifter:create": "node ./scripts/drifter-sandbox.mjs create",
+    "sandbox:drifter:inspect": "node ./scripts/drifter-sandbox.mjs inspect",
+    "sandbox:drifter:destroy": "node ./scripts/drifter-sandbox.mjs destroy"
   },
   "dependencies": {
     "yaml": "^2.8.2"
