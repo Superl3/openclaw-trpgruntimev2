@@ -4196,6 +4196,27 @@ async function detectRuntimePhase(params: {
   return runtimePhase;
 }
 
+function classifyTurnKind(latestUserMessage: string): "scene-turn" | "etc" {
+  const text = latestUserMessage.trim().toLowerCase();
+  if (!text) {
+    return "scene-turn";
+  }
+
+  if (/^(?:\/(?:help|status|debug|config|설정)|ooc\b|meta\b)/.test(text)) {
+    return "etc";
+  }
+
+  if (/(?:구현|브릿지|bridge|runtime|plugin|코드|test|테스트|schema|스키마|config|debug|디버그|버그|fix|커밋|commit|pr\b|patch|tool|modal|component|discord|openclaw|trpg-v2|drifter|어떻게\s*바꾸|how\s+do\s+i\s+change)/.test(text)) {
+    return "etc";
+  }
+
+  if (/(?:이동|조사|공격|대화|말한다|묻는다|살핀다|본다|사용한다|열어본다|간다|한다|선택|입력|완료|계속)/.test(text)) {
+    return "scene-turn";
+  }
+
+  return "scene-turn";
+}
+
 function normalizeSceneComponentInputByPhase(input: SceneComponentInput, runtimePhase: RuntimePhase): SceneComponentInput {
   const sanitizedDescription = sanitizeLegacyBootstrapTemplateText(readString(input.description));
   const safeDescription = sanitizedDescription || "캐릭터 준비 정보를 입력해 주세요.";
@@ -4875,8 +4896,28 @@ const trpgRuntimePlugin = {
       properties: {
         scene: {
           type: "string",
-          enum: ["exploration", "npc_encounter", "combat", "choice", "dialogue", "system"],
+          enum: [
+            "bootstrap_choice",
+            "exploration",
+            "npc_encounter",
+            "combat",
+            "choice",
+            "dialogue",
+            "system",
+            "system_input",
+            "resolution",
+            "travel_transition",
+          ],
           description: "Scene type determines template",
+        },
+        turnKind: {
+          type: "string",
+          enum: ["scene-turn", "etc"],
+          description: "Optional caller-provided routing hint for scene vs meta/etc turns",
+        },
+        latestUserMessage: {
+          type: "string",
+          description: "Latest raw user input used for routing/classification fallback",
         },
         description: {
           type: "string",
@@ -4926,6 +4967,10 @@ const trpgRuntimePlugin = {
             properties: {
               label: { type: "string" },
               style: { type: "string", enum: ["primary", "secondary", "success", "danger"] },
+              actionId: { type: "string" },
+              customId: { type: ["string", "null"] },
+              custom_id: { type: ["string", "null"] },
+              disabled: { type: "boolean" },
             },
             required: ["label", "style"],
           },
@@ -4973,18 +5018,51 @@ const trpgRuntimePlugin = {
           }
 
           try {
+            const rawInput = params as SceneComponentInput;
             const runtimePhase = await detectRuntimePhase({
               cfg,
               worldRoot: gate.worldRoot,
               sessionId: ctx.sessionId,
             });
-            const normalizedInput = normalizeSceneComponentInputByPhase(params as SceneComponentInput, runtimePhase);
+            const routingText = readString(rawInput.turnKind) ? "" : readString(rawInput.latestUserMessage) || readString(rawInput.description);
+            const turnKind = rawInput.turnKind === "etc" || rawInput.turnKind === "scene-turn"
+              ? rawInput.turnKind
+              : classifyTurnKind(routingText);
+
+            if (turnKind === "etc") {
+              await emitRuntimeDiagnostic({
+                cfg,
+                worldRoot: gate.worldRoot,
+                sessionId: ctx.sessionId,
+                event: "scene_components_suppressed",
+                severity: "info",
+                runtimePhase,
+                route: "trpg_scene_components",
+                gate: "turn_kind",
+                result: "etc",
+                details: {
+                  requestedScene: readString(rawInput.scene),
+                  latestUserMessage: readString(rawInput.latestUserMessage) || undefined,
+                },
+              });
+              return jsonToolResult({
+                ok: true,
+                runtimePhase,
+                turnKind,
+                plainReplyRecommended: true,
+                skipSceneComponents: true,
+                components: null,
+                instructions: "This input is meta/etc, so reply in plain text instead of sending TRPG scene components.",
+              });
+            }
+
+            const normalizedInput = normalizeSceneComponentInputByPhase(rawInput, runtimePhase);
             const components = buildSceneComponents(normalizedInput);
-            const requestedButtons = Array.isArray((params as SceneComponentInput).buttons)
-              ? (params as SceneComponentInput).buttons?.length ?? 0
+            const requestedButtons = Array.isArray(rawInput.buttons)
+              ? rawInput.buttons?.length ?? 0
               : 0;
             const normalizedButtons = Array.isArray(normalizedInput.buttons) ? normalizedInput.buttons.length : 0;
-            const requestedScene = readString((params as SceneComponentInput).scene);
+            const requestedScene = readString(rawInput.scene);
             const blockedButtons = normalizedInput.scene !== requestedScene
               ? requestedButtons
               : Math.max(0, requestedButtons - normalizedButtons);
@@ -5005,11 +5083,15 @@ const trpgRuntimePlugin = {
                 normalizedButtons,
                 blockedButtons,
                 includeInput: normalizedInput.includeInput !== false,
+                turnKind,
               },
             });
             return jsonToolResult({
               ok: true,
               runtimePhase,
+              turnKind,
+              plainReplyRecommended: false,
+              skipSceneComponents: false,
               components,
               instructions:
                 "Pass this 'components' object to the message tool: message(action='send', message='scene update', components=<this.components>)",
@@ -5034,6 +5116,7 @@ const trpgRuntimePlugin = {
 export const __internalTestHooks = {
   extractLatestUserMessageFromPrompt,
   extractBootstrapFreeform,
+  classifyTurnKind,
 };
 
 export default trpgRuntimePlugin;

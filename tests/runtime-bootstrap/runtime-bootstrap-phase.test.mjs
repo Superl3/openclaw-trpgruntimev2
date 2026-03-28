@@ -333,6 +333,357 @@ test("bootstrap freeform extraction filters wrapper metadata/untrusted context",
   assert.equal(freeform.includes("doc_id"), false);
 });
 
+test("turn kind classifier separates meta/etc prompts from scene turns", async () => {
+  const { testHooks } = await pluginBundlePromise;
+  assert.ok(testHooks && typeof testHooks.classifyTurnKind === "function");
+  assert.equal(testHooks.classifyTurnKind("이동해서 문을 조사한다"), "scene-turn");
+  assert.equal(testHooks.classifyTurnKind("이 브릿지 구현 설정을 어떻게 바꾸지?"), "etc");
+});
+
+test("scene component tool suppresses UI for etc input", async () => {
+  const plugin = await pluginPromise;
+  const worldRoot = path.resolve(ROOT_DIR, ".tmp-test-world-etc-turn-components");
+  await fs.rm(worldRoot, { recursive: true, force: true });
+  await writeWorldFile(worldRoot, "canon/player.yaml", "{}\n");
+
+  const toolResult = await invokeTool(plugin, worldRoot, "trpg_scene_components", {
+    scene: "exploration",
+    description: "이 브릿지 구현 설정을 어떻게 바꾸지?",
+    latestUserMessage: "이 브릿지 구현 설정을 어떻게 바꾸지?",
+    buttons: [{ label: "🔍 조사", style: "secondary" }],
+    includeInput: true,
+  });
+
+  const payload = toolResult?.details ?? JSON.parse(toolResult?.content?.[0]?.text ?? "{}");
+  assert.equal(payload.ok, true);
+  assert.equal(payload.turnKind, "etc");
+  assert.equal(payload.plainReplyRecommended, true);
+  assert.equal(payload.skipSceneComponents, true);
+  assert.equal(payload.components, null);
+});
+
+test("ready-for-intro phase uses live-scene character modal instead of bootstrap system modal", async () => {
+  const plugin = await pluginPromise;
+  const worldRoot = path.resolve(ROOT_DIR, ".tmp-test-world-ready-for-intro-components");
+  await fs.rm(worldRoot, { recursive: true, force: true });
+  await writeWorldFile(
+    worldRoot,
+    "canon/player.yaml",
+    [
+      "player:",
+      "  name: Aria",
+      "game_state:",
+      "  character_created: true",
+      "  bootstrap_complete: true",
+      "",
+    ].join("\n"),
+  );
+  await writeWorldFile(
+    worldRoot,
+    "state/current-scene.yaml",
+    [
+      "scene:",
+      "  id: scene-intro-001",
+      "  scene_flow:",
+      "    player_setup_complete: false",
+      "    intro_shown: false",
+      "",
+    ].join("\n"),
+  );
+
+  const toolResult = await invokeTool(plugin, worldRoot, "trpg_scene_components", {
+    scene: "system",
+    description: "첫 장면 진입 직전이다.",
+    buttons: [{ label: "✏️ 직접 입력", style: "secondary" }],
+    includeInput: true,
+  });
+
+  const payload = toolResult?.details ?? JSON.parse(toolResult?.content?.[0]?.text ?? "{}");
+  assert.equal(payload.ok, true);
+  assert.equal(payload.runtimePhase, "READY_FOR_INTRO");
+  assert.equal(payload.components?.embeds?.[0]?.title, "🗺️ 탐색");
+  assert.equal(payload.components?.modal?.type, "character");
+  assert.equal(payload.components?.modal?.triggerLabel, "✏️ 직접 입력");
+  const modalFieldLabels = (payload.components?.modal?.fields ?? []).map((field) => field?.label ?? "");
+  const modalFieldNames = (payload.components?.modal?.fields ?? []).map((field) => field?.name ?? "");
+  assert.deepEqual(modalFieldNames, ["action", "speech", "tone"]);
+  assert.equal(modalFieldLabels.includes("행동 (무엇을 하는가?)"), true);
+  assert.equal(modalFieldLabels.includes("이름 입력"), false);
+  const labels = (payload.components?.blocks ?? []).flatMap((entry) => entry?.buttons ?? []).map((entry) => entry.label);
+  assert.equal(labels.includes("✏️ 직접 입력"), false);
+});
+
+
+test("scene component tool distinguishes bootstrap_choice sections in bootstrap phase", async () => {
+  const plugin = await pluginPromise;
+  const worldRoot = path.resolve(ROOT_DIR, ".tmp-test-world-scene-type-bootstrap-choice");
+  await fs.rm(worldRoot, { recursive: true, force: true });
+  await writeWorldFile(worldRoot, "canon/player.yaml", "{}\n");
+
+  const toolResult = await invokeTool(plugin, worldRoot, "trpg_scene_components", {
+    scene: "choice",
+    description: "출신 배경을 정해 주세요.",
+    choices: [{ label: "항구 노동자", value: "dock_worker" }],
+    includeInput: true,
+  });
+
+  const payload = toolResult?.details ?? JSON.parse(toolResult?.content?.[0]?.text ?? "{}");
+  const textBlocks = (payload.components?.blocks ?? []).filter((block) => block?.type === "text").map((block) => block.text ?? "");
+  const selectBlock = (payload.components?.blocks ?? []).find((block) => Boolean(block?.select));
+
+  assert.equal(payload.ok, true);
+  assert.equal(payload.components?.embeds?.[0]?.title, "⚙️ 캐릭터 준비");
+  assert.equal(textBlocks.some((text) => text.includes("선택 안내")), true);
+  assert.equal(textBlocks.some((text) => text.includes("시스템 입력만 받습니다")), true);
+  assert.ok(selectBlock);
+  assert.equal(payload.components?.modal?.type, "system");
+  assert.equal(payload.components?.modal?.triggerLabel, "✍️ 자유서술 입력");
+  const modalFieldNames = (payload.components?.modal?.fields ?? []).map((field) => field?.name ?? "");
+  assert.deepEqual(modalFieldNames, ["name", "background", "goal", "freeform"]);
+});
+
+test("scene component tool distinguishes dialogue sections from npc encounter/exploration", async () => {
+  const plugin = await pluginPromise;
+  const worldRoot = path.resolve(ROOT_DIR, ".tmp-test-world-scene-type-dialogue");
+  await fs.rm(worldRoot, { recursive: true, force: true });
+  await writeWorldFile(
+    worldRoot,
+    "canon/player.yaml",
+    [
+      "player:",
+      "  name: Aria",
+      "game_state:",
+      "  character_created: true",
+      "  bootstrap_complete: true",
+      "",
+    ].join("\n"),
+  );
+  await writeWorldFile(
+    worldRoot,
+    "state/current-scene.yaml",
+    [
+      "scene:",
+      "  id: scene-dialogue-001",
+      "  scene_flow:",
+      "    player_setup_complete: true",
+      "    intro_shown: true",
+      "",
+    ].join("\n"),
+  );
+
+  const toolResult = await invokeTool(plugin, worldRoot, "trpg_scene_components", {
+    scene: "exploration",
+    description: "상인이 조심스럽게 가격을 제안한다.",
+    latestUserMessage: "상인에게 가격을 다시 물어본다",
+    npc: {
+      name: "마로",
+      title: "상인",
+      dialogue: "이 가격이면 둘 다 손해는 아니오.",
+      disposition: "+1",
+    },
+    includeInput: true,
+  });
+
+  const payload = toolResult?.details ?? JSON.parse(toolResult?.content?.[0]?.text ?? "{}");
+  const textBlocks = (payload.components?.blocks ?? []).filter((block) => block?.type === "text").map((block) => block.text ?? "");
+  const buttonLabels = (payload.components?.blocks ?? []).flatMap((block) => block?.buttons ?? []).map((button) => button.label);
+
+  assert.equal(payload.ok, true);
+  assert.equal(payload.runtimePhase, "IN_GAME");
+  assert.equal(payload.components?.embeds?.[0]?.title, "💬 대화 진행 중");
+  assert.equal(textBlocks.some((text) => text.includes("👤 마로")), true);
+  assert.equal(textBlocks.some((text) => text.includes("💬 대사")), true);
+  assert.equal(buttonLabels.includes("💬 계속 듣기"), true);
+  assert.equal(payload.components?.modal?.triggerLabel, "✏️ 직접 입력");
+});
+
+test("scene component tool distinguishes combat sections from other live scenes", async () => {
+  const plugin = await pluginPromise;
+  const worldRoot = path.resolve(ROOT_DIR, ".tmp-test-world-scene-type-combat");
+  await fs.rm(worldRoot, { recursive: true, force: true });
+  await writeWorldFile(
+    worldRoot,
+    "canon/player.yaml",
+    [
+      "player:",
+      "  name: Aria",
+      "game_state:",
+      "  character_created: true",
+      "  bootstrap_complete: true",
+      "",
+    ].join("\n"),
+  );
+  await writeWorldFile(
+    worldRoot,
+    "state/current-scene.yaml",
+    [
+      "scene:",
+      "  id: scene-combat-001",
+      "  scene_flow:",
+      "    player_setup_complete: true",
+      "    intro_shown: true",
+      "",
+    ].join("\n"),
+  );
+
+  const toolResult = await invokeTool(plugin, worldRoot, "trpg_scene_components", {
+    scene: "exploration",
+    description: "늑대가 달려들며 전투가 시작된다.",
+    combat: {
+      round: 2,
+      hpCurrent: 12,
+      hpMax: 20,
+      ac: 14,
+      manaCurrent: 3,
+      manaMax: 7,
+      enemySummary: "굶주린 늑대 2마리",
+      effects: "출혈 1",
+    },
+    includeInput: true,
+  });
+
+  const payload = toolResult?.details ?? JSON.parse(toolResult?.content?.[0]?.text ?? "{}");
+  const textBlocks = (payload.components?.blocks ?? []).filter((block) => block?.type === "text").map((block) => block.text ?? "");
+  const buttonLabels = (payload.components?.blocks ?? []).flatMap((block) => block?.buttons ?? []).map((button) => button.label);
+
+  assert.equal(payload.ok, true);
+  assert.equal(payload.components?.embeds?.[0]?.title, "⚔️ 전투 중");
+  assert.equal(textBlocks.some((text) => text.includes("전투 라운드 2")), true);
+  assert.equal(textBlocks.some((text) => text.includes("버프/디버프")), true);
+  assert.equal(buttonLabels.includes("⚔️ 공격"), true);
+  assert.equal(payload.components?.modal?.triggerLabel, "✏️ 직접 입력");
+});
+
+test("scene component tool keeps exploration sections distinct from dialogue/combat", async () => {
+  const plugin = await pluginPromise;
+  const worldRoot = path.resolve(ROOT_DIR, ".tmp-test-world-scene-type-exploration");
+  await fs.rm(worldRoot, { recursive: true, force: true });
+  await writeWorldFile(
+    worldRoot,
+    "canon/player.yaml",
+    [
+      "player:",
+      "  name: Aria",
+      "game_state:",
+      "  character_created: true",
+      "  bootstrap_complete: true",
+      "",
+    ].join("\n"),
+  );
+  await writeWorldFile(
+    worldRoot,
+    "state/current-scene.yaml",
+    [
+      "scene:",
+      "  id: scene-explore-001",
+      "  scene_flow:",
+      "    player_setup_complete: true",
+      "    intro_shown: true",
+      "",
+    ].join("\n"),
+  );
+
+  const toolResult = await invokeTool(plugin, worldRoot, "trpg_scene_components", {
+    scene: "exploration",
+    description: "안개 낀 부두를 천천히 살핀다.",
+    locationInfo: "낡은 창고 문, 젖은 발자국, 흔들리는 랜턴이 보인다.",
+    includeInput: true,
+  });
+
+  const payload = toolResult?.details ?? JSON.parse(toolResult?.content?.[0]?.text ?? "{}");
+  const textBlocks = (payload.components?.blocks ?? []).filter((block) => block?.type === "text").map((block) => block.text ?? "");
+  const buttonLabels = (payload.components?.blocks ?? []).flatMap((block) => block?.buttons ?? []).map((button) => button.label);
+
+  assert.equal(payload.ok, true);
+  assert.equal(payload.components?.embeds?.[0]?.title, "🗺️ 탐색");
+  assert.equal(textBlocks.some((text) => text.includes("현장 정보")), true);
+  assert.equal(textBlocks.some((text) => text.includes("💬 대사")), false);
+  assert.equal(textBlocks.some((text) => text.includes("전투 라운드")), false);
+  assert.equal(buttonLabels.includes("🔍 조사"), true);
+  assert.equal(payload.components?.modal?.triggerLabel, "✏️ 직접 입력");
+});
+
+test("bootstrap choice keeps a single direct-input entry point and strips duplicate free-input buttons", async () => {
+  const plugin = await pluginPromise;
+  const worldRoot = path.resolve(ROOT_DIR, ".tmp-test-world-bootstrap-direct-input-dedupe");
+  await fs.rm(worldRoot, { recursive: true, force: true });
+  await writeWorldFile(worldRoot, "canon/player.yaml", "{}\n");
+
+  const toolResult = await invokeTool(plugin, worldRoot, "trpg_scene_components", {
+    scene: "choice",
+    description: "배경을 선택하거나 직접 입력할 수 있다.",
+    choices: [{ label: "항구 노동자", value: "dock_worker" }],
+    buttons: [
+      { label: "✏️ 직접 입력", style: "secondary" },
+      { label: "✍️ 자유서술 입력", style: "secondary" },
+    ],
+    includeInput: true,
+  });
+
+  const payload = toolResult?.details ?? JSON.parse(toolResult?.content?.[0]?.text ?? "{}");
+  assert.equal(payload.ok, true);
+  assert.equal(payload.runtimePhase, "BOOTSTRAP");
+  const labels = (payload.components?.blocks ?? []).flatMap((entry) => entry?.buttons ?? []).map((entry) => entry.label);
+  assert.equal(labels.includes("✏️ 직접 입력"), false);
+  assert.equal(labels.includes("✍️ 자유서술 입력"), false);
+  assert.equal(Boolean(payload.components?.modal), true);
+  assert.equal(payload.components?.modal?.type, "system");
+  assert.equal(payload.components?.modal?.triggerLabel, "✍️ 자유서술 입력");
+  const modalFieldNames = (payload.components?.modal?.fields ?? []).map((field) => field?.name ?? "");
+  assert.deepEqual(modalFieldNames, ["name", "background", "goal", "freeform"]);
+});
+
+test("action buttons preserve order after stripping duplicate direct-input entries", async () => {
+  const plugin = await pluginPromise;
+  const worldRoot = path.resolve(ROOT_DIR, ".tmp-test-world-action-order-without-direct-input-duplicates");
+  await fs.rm(worldRoot, { recursive: true, force: true });
+  await writeWorldFile(
+    worldRoot,
+    "canon/player.yaml",
+    [
+      "player:",
+      "  name: Aria",
+      "game_state:",
+      "  character_created: true",
+      "  bootstrap_complete: true",
+      "",
+    ].join("\n"),
+  );
+  await writeWorldFile(
+    worldRoot,
+    "state/current-scene.yaml",
+    [
+      "scene:",
+      "  id: scene-order-001",
+      "  scene_flow:",
+      "    player_setup_complete: true",
+      "    intro_shown: true",
+      "",
+    ].join("\n"),
+  );
+
+  const toolResult = await invokeTool(plugin, worldRoot, "trpg_scene_components", {
+    scene: "exploration",
+    description: "행동 선택지 순서를 확인한다.",
+    buttons: [
+      { label: "🔍 조사", style: "primary" },
+      { label: "✏️ 직접 입력", style: "secondary" },
+      { label: "🚶 이동", style: "secondary" },
+      { label: "✍️ 자유서술 입력", style: "secondary" },
+      { label: "🎒 가방 열기", style: "secondary" },
+    ],
+    includeInput: true,
+  });
+
+  const payload = toolResult?.details ?? JSON.parse(toolResult?.content?.[0]?.text ?? "{}");
+  const buttonLabels = (payload.components?.blocks ?? []).flatMap((block) => block?.buttons ?? []).map((button) => button.label);
+
+  assert.equal(payload.ok, true);
+  assert.deepEqual(buttonLabels, ["🔍 조사", "🚶 이동", "🎒 가방 열기"]);
+  assert.equal(payload.components?.modal?.type, "character");
+  assert.equal(payload.components?.modal?.triggerLabel, "✏️ 직접 입력");
+});
+
 test("non-game bootstrap template text is sanitized to safe guidance", async () => {
   const plugin = await pluginPromise;
   const worldRoot = path.resolve(ROOT_DIR, ".tmp-test-world-bootstrap-template-sanitize");
@@ -391,6 +742,124 @@ test("non-game select allows safe dropdown and rejects invalid options", async (
   const invalidButtons = (invalidPayload.components?.blocks ?? []).flatMap((block) => block?.buttons ?? []);
   assert.equal(invalidHasSelect, false);
   assert.equal(invalidButtons.some((button) => button.label === "🆕 새 캐릭터 시작"), true);
+});
+
+test("bootstrap completion syncs canon fields into state/player-status", async () => {
+  const plugin = await pluginPromise;
+  const worldRoot = path.resolve(ROOT_DIR, ".tmp-test-world-bootstrap-status-sync");
+  await fs.rm(worldRoot, { recursive: true, force: true });
+
+  await writeWorldFile(worldRoot, "canon/player.yaml", "{}\n");
+  await writeWorldFile(
+    worldRoot,
+    "state/player-status.yaml",
+    [
+      "meta:",
+      "  schema_version: 1",
+      "player_status:",
+      "  money: 5",
+      "  stamina: normal",
+      "  condition: healthy",
+      "  tags: []",
+      "",
+    ].join("\n"),
+  );
+
+  await invokeBeforePrompt(
+    plugin,
+    worldRoot,
+    {
+      prompt: "user: 이름: 리아\n배경: 떠돌이 밀수꾼\n이유: 빚을 갚으려 들어왔다\n비밀: 장부를 숨겼다\n두려움: 바다\n목표: 빚을 갚는다\n준비 완료",
+      messages: [{ role: "user", content: "이름: 리아\n배경: 떠돌이 밀수꾼\n이유: 빚을 갚으려 들어왔다\n비밀: 장부를 숨겼다\n두려움: 바다\n목표: 빚을 갚는다\n준비 완료" }],
+    },
+    { allowPatchApply: true, canonicalWriteBackEnabled: true },
+  );
+
+  const statusText = await fs.readFile(path.resolve(worldRoot, "state/player-status.yaml"), "utf8");
+  assert.equal(statusText.includes("name: 리아"), true);
+  assert.equal(statusText.includes("goal: 빚을 갚는다"), true);
+  assert.equal(statusText.includes("character_created: true"), true);
+  assert.equal(statusText.includes("bootstrap_complete: true"), true);
+});
+
+test("status panel profile lines prefer state/player-status over canon drift", async () => {
+  const plugin = await pluginPromise;
+  const worldRoot = path.resolve(ROOT_DIR, ".tmp-test-world-status-panel-source");
+  await fs.rm(worldRoot, { recursive: true, force: true });
+
+  await writeWorldFile(
+    worldRoot,
+    "canon/player.yaml",
+    [
+      "player:",
+      "  name: CanonName",
+      "  goal: CanonGoal",
+      "game_state:",
+      "  character_created: true",
+      "  bootstrap_complete: true",
+      "",
+    ].join("\n"),
+  );
+  await writeWorldFile(
+    worldRoot,
+    "state/player-status.yaml",
+    [
+      "meta:",
+      "  schema_version: 1",
+      "  last_updated: 2026-03-28T00:00:00.000Z",
+      "player_status:",
+      "  name: StateName",
+      "  current_goal: StateGoal",
+      "  money: 9",
+      "  stamina: normal",
+      "  condition: focused",
+      "  tags:",
+      "    - alert",
+      "  bootstrap:",
+      "    name: StateName",
+      "    goal: StateGoal",
+      "    character_created: true",
+      "    bootstrap_complete: true",
+      "status:",
+      "  health:",
+      "    current: 12",
+      "    max: 12",
+      "  stamina:",
+      "    current: 10",
+      "    max: 10",
+      "  stress:",
+      "    current: 1",
+      "    max: 10",
+      "  economy:",
+      "    money: 9",
+      "    funds: 9",
+      "",
+    ].join("\n"),
+  );
+  await writeWorldFile(
+    worldRoot,
+    "state/current-scene.yaml",
+    [
+      "scene:",
+      "  id: scene-011",
+      "  scene_flow:",
+      "    player_setup_complete: true",
+      "    intro_shown: true",
+      "",
+    ].join("\n"),
+  );
+
+  const result = await invokeBeforePrompt(plugin, worldRoot, {
+    prompt: "user: 상태 확인",
+    messages: [{ role: "user", content: "상태 확인" }],
+  });
+  const context = result?.appendSystemContext || "";
+  const statusText = await fs.readFile(path.resolve(worldRoot, "state/player-status.yaml"), "utf8");
+
+  assert.equal(statusText.includes("name: StateName"), true);
+  assert.equal(statusText.includes("current_goal: StateGoal"), true);
+  assert.equal(statusText.includes("goal: CanonGoal"), true);
+  assert.equal(context.includes("Profile (state/player-status): StateName | Goal: StateGoal"), true);
 });
 
 test("stored polluted freeform_description is sanitized on read path immediately", async () => {
