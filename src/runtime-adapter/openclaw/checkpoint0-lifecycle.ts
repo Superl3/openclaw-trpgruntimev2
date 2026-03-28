@@ -1359,10 +1359,36 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
                 confirmToken: confirmation.token,
                 confirmExpiresAt: confirmation.expiresAt,
                 nextActions: buildNewConfirmationActionHints(confirmation.token),
-                components: {
+                actionableComponents: {
                   type: "actions",
                   title: "기존 세션이 있어 확인이 필요합니다.",
                   token: confirmation.token,
+                  buttons: [
+                    {
+                      id: "trpg_new_confirm_yes",
+                      label: "YES",
+                      style: "danger",
+                      tool: "trpg_session_new",
+                      params: {
+                        confirmReset: true,
+                        confirmToken: confirmation.token,
+                        wipeMode: "force",
+                      },
+                    },
+                    {
+                      id: "trpg_new_confirm_no",
+                      label: "NO",
+                      style: "secondary",
+                      tool: "trpg_session_new",
+                      params: {
+                        confirmReset: false,
+                        wipeMode: "ask",
+                      },
+                    },
+                  ],
+                },
+                components: {
+                  text: "기존 세션이 있어 확인이 필요합니다.",
                   buttons: [
                     {
                       id: "trpg_new_confirm_yes",

@@ -1092,10 +1092,14 @@ test("/trpg new requires confirmation token on contamination and validates token
   assert.equal(confirmRequired.ok, false);
   assert.equal(confirmRequired.errorCode, "confirmation_required");
   assert.ok(typeof confirmRequired.confirmToken === "string" && confirmRequired.confirmToken.length >= 8);
-  assert.equal(Array.isArray(confirmRequired?.components?.buttons), true);
-  const confirmLabels = (confirmRequired?.components?.buttons ?? []).map((entry) => entry?.label);
+  assert.equal(Array.isArray(confirmRequired?.actionableComponents?.buttons), true);
+  const confirmLabels = (confirmRequired?.actionableComponents?.buttons ?? []).map((entry) => entry?.label);
   assert.equal(confirmLabels.includes("YES"), true);
   assert.equal(confirmLabels.includes("NO"), true);
+  assert.equal(Array.isArray(confirmRequired?.components?.buttons), true);
+  const legacyButtons = (confirmRequired?.components?.buttons ?? []).map((entry) => entry?.label);
+  assert.equal(legacyButtons.includes("YES"), true);
+  assert.equal(legacyButtons.includes("NO"), true);
   assert.equal(typeof confirmRequired?.nextActions?.yes?.manualExample, "string");
   assert.equal(typeof confirmRequired?.nextActions?.no?.manualExample, "string");
   assert.equal(String(confirmRequired?.nextActions?.yes?.manualExample).includes("confirmToken="), true);
