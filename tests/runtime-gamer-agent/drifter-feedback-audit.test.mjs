@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildDrifterFeedbackAudit, buildDrifterTuningChecklist } from "../helpers/drifter-feedback-audit.mjs";
+import {
+  buildDrifterFeedbackAudit,
+  buildDrifterStopCriteria,
+  buildDrifterTuningChecklist,
+} from "../helpers/drifter-feedback-audit.mjs";
 
 function makeTranscript(overrides = {}) {
   return {
@@ -120,6 +124,107 @@ test("drifter feedback audit flags fallback/meta-heavy run", () => {
   assert.ok(audit.summary.topFindings.some((line) => line.includes("Fallback pressure")));
   assert.equal(audit.dimensions.find((entry) => entry.name === "fallback_discipline").status, "poor");
   assert.equal(audit.dimensions.find((entry) => entry.name === "modal_choice_fit").status, "poor");
+});
+
+test("drifter stop criteria returns hard-stop for invalid session", () => {
+  const report = { turnTranscripts: [] };
+  const stop = buildDrifterStopCriteria(report, {
+    validity: {
+      ok: false,
+      issues: [{ level: "error", code: "report.summary_turns_mismatch" }],
+      summary: { errors: 1, warnings: 0 },
+    },
+  });
+
+  assert.equal(stop.summary.classification, "hard_stop");
+  assert.equal(stop.summary.shouldStop, true);
+  assert.ok(stop.criteria.hardStop.some((entry) => entry.code === "invalid_smoke_session"));
+});
+
+test("drifter stop criteria returns soft-stop for fallback-heavy but valid session", () => {
+  const report = {
+    turnTranscripts: [
+      makeTranscript({
+        sent: {
+          type: "button",
+          customId: "trpg:v1:sess-1:1:scene-bootstrap:action.wait",
+          actionId: "action.wait",
+          label: "대기",
+          reason: "안전 fallback 적용",
+          freeInput: null,
+          audit: { contractStatus: "fallback_unambiguous" },
+        },
+      }),
+      makeTranscript({
+        turn: 2,
+        sent: {
+          type: "button",
+          customId: "trpg:v1:sess-1:2:scene-bootstrap:action.wait",
+          actionId: "action.wait",
+          label: "대기",
+          reason: "안전 fallback 적용",
+          freeInput: null,
+          audit: { contractStatus: "fallback_unambiguous" },
+        },
+      }),
+      makeTranscript({ turn: 3 }),
+    ],
+    proposals: [{ reasons: ["invalid/fallback observed"] }],
+    laneIssues: [],
+  };
+
+  const audit = buildDrifterFeedbackAudit(report);
+  const stop = buildDrifterStopCriteria(report, {
+    validity: { ok: true, issues: [], summary: { errors: 0, warnings: 0 } },
+    audit,
+  });
+
+  assert.equal(stop.summary.classification, "soft_stop");
+  assert.ok(stop.criteria.softStop.some((entry) => entry.code === "fallback_pressure"));
+});
+
+test("drifter stop criteria returns success-stop for clean valid sample", () => {
+  const report = {
+    turnTranscripts: [
+      makeTranscript(),
+      makeTranscript({
+        turn: 2,
+        sent: {
+          type: "modal",
+          customId: "trpg:v1:sess-1:2:scene-bootstrap:action.free_input.submit",
+          actionId: null,
+          label: null,
+          reason: "작은 소리로 안쪽 상황을 떠본다",
+          freeInput: "안에 사람 있으면 나와 달라고 조심히 말한다",
+          audit: { contractStatus: "valid_json" },
+        },
+      }),
+      makeTranscript({
+        turn: 3,
+        sent: {
+          type: "button",
+          customId: "trpg:v1:sess-1:3:scene-bootstrap:action.observe",
+          actionId: "action.observe",
+          label: "관찰",
+          reason: "추가 위험 신호를 확인하기 위해 주변을 더 관찰한다",
+          freeInput: null,
+          audit: { contractStatus: "valid_json" },
+        },
+      }),
+    ],
+    proposals: [],
+    laneIssues: [],
+  };
+
+  const audit = buildDrifterFeedbackAudit(report);
+  const stop = buildDrifterStopCriteria(report, {
+    validity: { ok: true, issues: [], summary: { errors: 0, warnings: 0 } },
+    audit,
+  });
+
+  assert.equal(stop.summary.classification, "success_stop");
+  assert.equal(stop.summary.shouldStop, true);
+  assert.ok(stop.criteria.successStop.length >= 1);
 });
 
 test("drifter tuning checklist stays concise and non-empty", () => {

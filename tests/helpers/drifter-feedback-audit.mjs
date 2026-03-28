@@ -81,6 +81,36 @@ function scoreDimension({ name, score, rationale, evidence, focus }) {
   };
 }
 
+function normalizeValidity(validity) {
+  if (!validity || typeof validity !== "object") {
+    return {
+      ok: true,
+      issueCount: 0,
+      issues: [],
+      summary: { errors: 0, warnings: 0 },
+    };
+  }
+
+  const issues = safeArray(validity.issues);
+  const errors = Number.isFinite(validity?.summary?.errors)
+    ? validity.summary.errors
+    : issues.filter((entry) => entry?.level === "error").length;
+  const warnings = Number.isFinite(validity?.summary?.warnings)
+    ? validity.summary.warnings
+    : issues.filter((entry) => entry?.level === "warn").length;
+
+  return {
+    ok: validity.ok === true,
+    issueCount: issues.length,
+    issues,
+    summary: { errors, warnings },
+  };
+}
+
+function pushCriterion(list, code, message) {
+  list.push({ code, message });
+}
+
 export function buildDrifterTuningChecklist() {
   return [
     "Gate on smoke-session validity first; never interpret drifter quality from an invalid report.",
@@ -260,5 +290,136 @@ export function buildDrifterFeedbackAudit(report) {
     dimensions,
     checklist: buildDrifterTuningChecklist(),
     roadmap,
+  };
+}
+
+export function buildDrifterStopCriteria(report, options = {}) {
+  const validity = normalizeValidity(options.validity);
+  const audit = options.audit && typeof options.audit === "object"
+    ? options.audit
+    : buildDrifterFeedbackAudit(report);
+
+  const totalTurns = Number.isFinite(audit?.summary?.totalTurns) ? audit.summary.totalTurns : safeArray(report?.turnTranscripts).length;
+  const fallbackTurns = Number.isFinite(audit?.metrics?.fallbackTurns) ? audit.metrics.fallbackTurns : 0;
+  const metaReasonTurns = Number.isFinite(audit?.metrics?.metaReasonTurns) ? audit.metrics.metaReasonTurns : 0;
+  const explicitReasonTurns = Number.isFinite(audit?.metrics?.explicitReasonTurns) ? audit.metrics.explicitReasonTurns : 0;
+  const metaFreeInputTurns = Number.isFinite(audit?.metrics?.metaFreeInputTurns) ? audit.metrics.metaFreeInputTurns : 0;
+  const freeInputTurns = Number.isFinite(audit?.metrics?.freeInputTurns) ? audit.metrics.freeInputTurns : 0;
+  const recoveredTurns = Number.isFinite(audit?.metrics?.recoveredTurns) ? audit.metrics.recoveredTurns : 0;
+  const laneSignalCount = Number.isFinite(audit?.metrics?.laneSignalCount) ? audit.metrics.laneSignalCount : 0;
+  const repeatedActionMaxStreak = Number.isFinite(audit?.metrics?.repeatedActionMaxStreak) ? audit.metrics.repeatedActionMaxStreak : 0;
+  const gate = asText(audit?.summary?.gate) || "unknown";
+
+  const fallbackRate = ratio(fallbackTurns, totalTurns) ?? 0;
+  const metaReasonRate = ratio(metaReasonTurns, explicitReasonTurns) ?? 0;
+  const metaFreeInputRate = ratio(metaFreeInputTurns, freeInputTurns) ?? 0;
+
+  const hardStop = [];
+  const softStop = [];
+  const successStop = [];
+
+  if (validity.ok !== true) {
+    pushCriterion(hardStop, "invalid_smoke_session", "Smoke-session validity failed; this run is not structurally trustworthy evidence.");
+  }
+  if (totalTurns === 0) {
+    pushCriterion(hardStop, "no_turn_evidence", "No turn transcripts were captured, so the run cannot be audited as drifter evidence.");
+  }
+
+  if (gate === "fix_feedback_quality_first") {
+    pushCriterion(softStop, "audit_gate_fix_first", "Feedback-quality audit says to fix harness/feedback quality before extending the run.");
+  }
+  if (fallbackRate > 0.2) {
+    pushCriterion(softStop, "fallback_pressure", "Fallback pressure exceeded 20%, so additional turns mostly measure the safety net.");
+  }
+  if (metaReasonRate > 0.5 || metaFreeInputTurns > 0) {
+    pushCriterion(softStop, "meta_leakage", "Meta/UI language is leaking into reasons or free input, so qualitative observations are degrading.");
+  }
+  if (laneSignalCount > 0) {
+    pushCriterion(softStop, "lane_instability", "Lane issues were observed; stop after the current capture window and fix the lane before more sampling.");
+  }
+  if (recoveredTurns > 0) {
+    pushCriterion(softStop, "recovery_observed", "Recovery/stale handling appeared in the sample; extending the run will mix recovery behavior into evaluation evidence.");
+  }
+  if (repeatedActionMaxStreak >= 3) {
+    pushCriterion(softStop, "autopilot_streak", "A repeated-route streak of 3+ suggests the sample is collapsing into autopilot rather than yielding fresh evidence.");
+  }
+
+  if (
+    validity.ok === true
+    && totalTurns >= 3
+    && (gate === "ready_for_behavior_tuning" || gate === "shadow_tuning_only")
+    && fallbackRate <= 0.2
+    && laneSignalCount === 0
+    && metaReasonRate <= 0.5
+    && metaFreeInputRate === 0
+    && recoveredTurns === 0
+  ) {
+    pushCriterion(
+      successStop,
+      gate === "ready_for_behavior_tuning" ? "tuning_ready_sample" : "shadow_quality_sample",
+      gate === "ready_for_behavior_tuning"
+        ? "Session captured a valid, low-fallback sample that is ready for behavior-tuning comparisons."
+        : "Session captured a valid observation-grade sample; stop and file it before chasing more turns."
+    );
+  }
+
+  let classification = "continue";
+  let shouldStop = false;
+  let operatorAction = "continue_collecting";
+  let primaryReason = "No stop criterion matched yet; keep sampling until a stop class is reached.";
+
+  if (hardStop.length > 0) {
+    classification = "hard_stop";
+    shouldStop = true;
+    operatorAction = "discard_run_and_fix_plumbing";
+    primaryReason = hardStop[0].message;
+  } else if (successStop.length > 0) {
+    classification = "success_stop";
+    shouldStop = true;
+    operatorAction = "archive_run_and_compare_against_other_valid_runs";
+    primaryReason = successStop[0].message;
+  } else if (softStop.length > 0) {
+    classification = "soft_stop";
+    shouldStop = true;
+    operatorAction = "stop_after_current_window_and_fix_feedback_quality";
+    primaryReason = softStop[0].message;
+  }
+
+  const usageGuidance = {
+    hard_stop: "Abort interpretation immediately. Do not tune prompts/profiles from this run. Fix validity/plumbing, then rerun.",
+    soft_stop: "Finish the current capture window, then stop. Save the report as diagnostic evidence, but do not extend the same run for more behavioral conclusions.",
+    success_stop: "Stop on purpose. Save the run, cite the audit payload, and compare future changes only against other success-stop runs.",
+    continue: "Keep collecting until you either have a valid success sample or a clear reason to soft-stop.",
+  };
+
+  return {
+    version: 1,
+    summary: {
+      classification,
+      shouldStop,
+      operatorAction,
+      primaryReason,
+    },
+    criteria: {
+      hardStop,
+      softStop,
+      successStop,
+    },
+    evidence: {
+      validityOk: validity.ok,
+      validityIssueCount: validity.issueCount,
+      validityErrorCount: validity.summary.errors,
+      validityWarningCount: validity.summary.warnings,
+      auditGate: gate,
+      totalTurns,
+      fallbackTurns,
+      fallbackRate: Number(fallbackRate.toFixed(3)),
+      metaReasonRate: Number(metaReasonRate.toFixed(3)),
+      metaFreeInputRate: Number(metaFreeInputRate.toFixed(3)),
+      recoveredTurns,
+      laneSignalCount,
+      repeatedActionMaxStreak,
+    },
+    usageGuidance,
   };
 }

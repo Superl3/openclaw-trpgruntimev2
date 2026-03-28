@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
 import path from "node:path";
-import { buildDrifterFeedbackAudit } from "../tests/helpers/drifter-feedback-audit.mjs";
+import { buildDrifterFeedbackAudit, buildDrifterStopCriteria } from "../tests/helpers/drifter-feedback-audit.mjs";
 import { runSmokeSessionValidation } from "./validate-smoke-session.mjs";
 
 async function main() {
@@ -17,6 +17,7 @@ async function main() {
   const report = JSON.parse(raw);
   const validity = await runSmokeSessionValidation(reportPath);
   const audit = buildDrifterFeedbackAudit(report);
+  const stopCriteria = buildDrifterStopCriteria(report, { validity, audit });
 
   const payload = {
     reportPath,
@@ -26,6 +27,7 @@ async function main() {
       issues: Array.isArray(validity.issues) ? validity.issues : [],
     },
     feedbackQualityAudit: audit,
+    stopCriteria,
   };
 
   process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);

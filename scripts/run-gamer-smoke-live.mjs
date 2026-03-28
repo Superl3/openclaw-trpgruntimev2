@@ -7,7 +7,8 @@ import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { BlackboxGamerAgent, isStaleInteractionError } from "../tests/helpers/blackbox-gamer-agent.mjs";
 import { GamerLiveImprover, applyTuningToProfile } from "../tests/helpers/gamer-live-improver.mjs";
-import { buildDrifterFeedbackAudit } from "../tests/helpers/drifter-feedback-audit.mjs";
+import { buildDrifterFeedbackAudit, buildDrifterStopCriteria } from "../tests/helpers/drifter-feedback-audit.mjs";
+import { validateSmokeReport } from "./validate-smoke-session.mjs";
 import { createOpenAiChatDecisionLane } from "../tests/helpers/llm-gamer-decision-lane.mjs";
 import {
   createOpenClawConfigDecisionLane,
@@ -1653,6 +1654,9 @@ function buildImproveMarkdownReport(report) {
   const feedbackQualityAudit = report?.feedbackQualityAudit && typeof report.feedbackQualityAudit === "object"
     ? report.feedbackQualityAudit
     : null;
+  const stopCriteria = report?.stopCriteria && typeof report.stopCriteria === "object"
+    ? report.stopCriteria
+    : null;
 
   const lines = [];
   lines.push("# 🎮 Gamer Smoke Improve Report");
@@ -1786,6 +1790,30 @@ function buildImproveMarkdownReport(report) {
     lines.push("세부 차원:");
     for (const dimension of Array.isArray(feedbackQualityAudit.dimensions) ? feedbackQualityAudit.dimensions : []) {
       lines.push(`- ${dimension.name}: ${dimension.status} (${dimension.score}) — ${dimension.focus}`);
+    }
+  }
+  lines.push("");
+
+  lines.push("## 🛑 Drifter Smoke Stop Criteria");
+  if (!stopCriteria) {
+    lines.push("> [!NOTE]");
+    lines.push("> stop-criteria 데이터가 없습니다.");
+  } else {
+    const stopSummary = stopCriteria.summary && typeof stopCriteria.summary === "object"
+      ? stopCriteria.summary
+      : {};
+    lines.push(`- classification: ${stopSummary.classification ?? "n/a"}`);
+    lines.push(`- shouldStop: ${stopSummary.shouldStop ?? "n/a"}`);
+    lines.push(`- operatorAction: ${stopSummary.operatorAction ?? "n/a"}`);
+    lines.push(`- primaryReason: ${stopSummary.primaryReason ?? "n/a"}`);
+    const matched = [];
+    for (const groupName of ["hardStop", "softStop", "successStop"]) {
+      for (const entry of Array.isArray(stopCriteria?.criteria?.[groupName]) ? stopCriteria.criteria[groupName] : []) {
+        matched.push(`${groupName}:${entry.code}`);
+      }
+    }
+    if (matched.length > 0) {
+      lines.push(`- matchedCriteria: ${matched.join(", ")}`);
     }
   }
   lines.push("");
@@ -2455,12 +2483,30 @@ async function main() {
   const contractSamples = improveReportCollector
     ? buildContractSamples(improveReportCollector.turnTranscripts, 3)
     : [];
-  const feedbackQualityAudit = improveReportCollector
-    ? buildDrifterFeedbackAudit({
-        turnTranscripts: improveReportCollector.turnTranscripts,
+  const reportForAudit = improveReportCollector
+    ? {
+        runId,
+        generatedAt: new Date().toISOString(),
+        runnerConfig: { scenarios: args.scenarios },
+        summary: {
+          passed: summary.passed,
+          failed: summary.failed,
+          turns: summary.turnsPlayed,
+        },
         proposals: improveReportCollector.proposals,
+        turnTranscripts: improveReportCollector.turnTranscripts,
         laneIssues: improveReportCollector.laneIssues,
-      })
+        scenarioSummaries,
+      }
+    : null;
+  const smokeSessionValidity = reportForAudit
+    ? validateSmokeReport(reportForAudit, { mode: "live-report" })
+    : null;
+  const feedbackQualityAudit = reportForAudit
+    ? buildDrifterFeedbackAudit(reportForAudit)
+    : null;
+  const stopCriteria = reportForAudit
+    ? buildDrifterStopCriteria(reportForAudit, { validity: smokeSessionValidity, audit: feedbackQualityAudit })
     : null;
 
   const machineSummary = {
@@ -2501,7 +2547,9 @@ async function main() {
       scenarioFeedback,
       contractAuditSummary,
       contractSamples,
+      smokeSessionValidity,
       feedbackQualityAudit,
+      stopCriteria,
     };
     await writeImproveReports(args, ui, improveReport);
   }
