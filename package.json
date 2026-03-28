@@ -10,6 +10,7 @@
     "smoke:manifest": "node -e \"const fs=require('fs');const path=require('path');const root=process.env.INIT_CWD||process.cwd();const manifestPath=path.resolve(root,'openclaw.plugin.json');const m=JSON.parse(fs.readFileSync(manifestPath,'utf8'));if(!m.id||!m.configSchema){throw new Error('manifest invalid')}console.log('manifest ok:',m.id)\"",
     "smoke:gamer-live": "node ./scripts/run-gamer-smoke-live.mjs",
     "smoke:session-validate": "node ./scripts/validate-smoke-session.mjs",
+    "smoke:drifter-audit": "node ./scripts/analyze-drifter-feedback.mjs",
     "test:smoke-session-validity": "node --test tests/runtime-gamer-agent/smoke-session-validity.test.mjs",
     "scaffold:gamer-profile": "node ./scripts/scaffold-gamer-agent-profile.mjs",
     "seed:validate": "node ./scripts/validate-world-seed.mjs",

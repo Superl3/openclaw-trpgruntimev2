@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { BlackboxGamerAgent, isStaleInteractionError } from "../tests/helpers/blackbox-gamer-agent.mjs";
 import { GamerLiveImprover, applyTuningToProfile } from "../tests/helpers/gamer-live-improver.mjs";
+import { buildDrifterFeedbackAudit } from "../tests/helpers/drifter-feedback-audit.mjs";
 import { createOpenAiChatDecisionLane } from "../tests/helpers/llm-gamer-decision-lane.mjs";
 import {
   createOpenClawConfigDecisionLane,
@@ -1649,6 +1650,9 @@ function buildImproveMarkdownReport(report) {
     ? report.contractAuditSummary
     : null;
   const contractSamples = Array.isArray(report?.contractSamples) ? report.contractSamples : [];
+  const feedbackQualityAudit = report?.feedbackQualityAudit && typeof report.feedbackQualityAudit === "object"
+    ? report.feedbackQualityAudit
+    : null;
 
   const lines = [];
   lines.push("# 🎮 Gamer Smoke Improve Report");
@@ -1757,6 +1761,31 @@ function buildImproveMarkdownReport(report) {
         const rawOutputPreview = typeof sample?.rawOutputPreview === "string" ? sample.rawOutputPreview : "";
         lines.push(`- [${scenario} c${cycle} t${turn}] status=${status} preview=${rawOutputPreview || "(empty)"}`);
       }
+    }
+  }
+  lines.push("");
+
+  lines.push("## 🧭 Drifter Feedback Quality Audit");
+  if (!feedbackQualityAudit) {
+    lines.push("> [!NOTE]");
+    lines.push("> 피드백 품질 감사 데이터가 없습니다.");
+  } else {
+    const auditSummary = feedbackQualityAudit.summary && typeof feedbackQualityAudit.summary === "object"
+      ? feedbackQualityAudit.summary
+      : {};
+    lines.push(`- overallScore: ${auditSummary.overallScore ?? "n/a"}`);
+    lines.push(`- gate: ${auditSummary.gate ?? "n/a"}`);
+    const findings = Array.isArray(auditSummary.topFindings) ? auditSummary.topFindings : [];
+    if (findings.length > 0) {
+      lines.push("- topFindings:");
+      for (const finding of findings) {
+        lines.push(`  - ${finding}`);
+      }
+    }
+    lines.push("");
+    lines.push("세부 차원:");
+    for (const dimension of Array.isArray(feedbackQualityAudit.dimensions) ? feedbackQualityAudit.dimensions : []) {
+      lines.push(`- ${dimension.name}: ${dimension.status} (${dimension.score}) — ${dimension.focus}`);
     }
   }
   lines.push("");
@@ -2426,6 +2455,13 @@ async function main() {
   const contractSamples = improveReportCollector
     ? buildContractSamples(improveReportCollector.turnTranscripts, 3)
     : [];
+  const feedbackQualityAudit = improveReportCollector
+    ? buildDrifterFeedbackAudit({
+        turnTranscripts: improveReportCollector.turnTranscripts,
+        proposals: improveReportCollector.proposals,
+        laneIssues: improveReportCollector.laneIssues,
+      })
+    : null;
 
   const machineSummary = {
     runId,
@@ -2465,6 +2501,7 @@ async function main() {
       scenarioFeedback,
       contractAuditSummary,
       contractSamples,
+      feedbackQualityAudit,
     };
     await writeImproveReports(args, ui, improveReport);
   }

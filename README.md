@@ -251,5 +251,7 @@ Optional overrides:
 - `--agent-id <id>`: fallback when `--agent-path` is not set
 - `--provider <provider-id>` / `--model <model-id>`: force provider/model during smoke
 - Post-run smoke-session validity check: `npm run smoke:session-validate -- runtime/reports/<run>/report.machine.json`
+- Post-run drifter feedback audit: `npm run smoke:drifter-audit -- runtime/reports/<run>/report.machine.json`
+- Tuning checklist: `docs/drifter-feedback-tuning-checklist.md`
 - Focused validity tests: `npm run test:smoke-session-validity`
 
