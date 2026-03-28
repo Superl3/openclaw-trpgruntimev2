@@ -11,6 +11,7 @@
     "smoke:gamer-live": "node ./scripts/run-gamer-smoke-live.mjs",
     "smoke:session-validate": "node ./scripts/validate-smoke-session.mjs",
     "smoke:drifter-audit": "node ./scripts/analyze-drifter-feedback.mjs",
+    "smoke:drifter-divergence": "node ./scripts/run-drifter-divergence.mjs",
     "drifter:snapshot": "node ./scripts/drifter-snapshot.mjs",
     "test:smoke-session-validity": "node --test tests/runtime-gamer-agent/smoke-session-validity.test.mjs",
     "scaffold:gamer-profile": "node ./scripts/scaffold-gamer-agent-profile.mjs",

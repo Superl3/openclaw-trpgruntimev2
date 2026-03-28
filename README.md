@@ -252,6 +252,8 @@ Optional overrides:
 - `--provider <provider-id>` / `--model <model-id>`: force provider/model during smoke
 - Post-run smoke-session validity check: `npm run smoke:session-validate -- runtime/reports/<run>/report.machine.json`
 - Post-run drifter feedback audit + stop classification: `npm run smoke:drifter-audit -- runtime/reports/<run>/report.machine.json`
+- Divergence harness (thin vs rich context, varied personalities, free-input bias): `npm run smoke:drifter-divergence -- --lane bridge --richness thin,rich`
+- Divergence docs: `docs/drifter-divergence-test-mvp.md`
 - Tuning checklist: `docs/drifter-feedback-tuning-checklist.md`
 - Stop-criteria standard: `docs/drifter-smoke-stop-criteria.md`
 - Focused validity tests: `npm run test:smoke-session-validity`
