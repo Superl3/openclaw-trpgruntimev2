@@ -144,6 +144,35 @@ Not implemented yet:
 - session resume registry across multiple sandbox runs,
 - automatic promotion of a sandbox back into canonical world state.
 
-## Suggested next step
+## Current MVP session wiring
 
-Integrate current session bootstrap so that `/trpg new` or a drifter-specific entry point can optionally request a sandbox manifest and then route all runtime writes through the manifest layout instead of directly targeting canonical world/workspace paths.
+A practical launcher now exists:
+
+```bash
+node ./scripts/run-drifter-sandbox-session.mjs
+```
+
+Minimal flow:
+
+1. create or inspect sandbox manifest,
+2. choose sandbox worktree (or source repo when `--no-worktree`),
+3. run `scripts/run-gamer-smoke-live.mjs` with:
+   - `--world-root <sandbox>/world/base`
+   - `--preserve-world-root`
+   - `--transcript-dir <sandbox>/session/transcripts`
+   - `--improve-report-dir <sandbox>/reports`
+4. capture stdout/stderr logs into `<sandbox>/artifacts/`,
+5. persist launch summary into `<sandbox>/session/launch-result.json`.
+
+This is intentionally still a runnable MVP slice, not full `/trpg new` production routing.
+It proves that an actual drifter/gamer session can execute against sandbox-local world/session/report paths without writing into the main repo world or default runtime report folders.
+
+## Remaining follow-up
+
+Still not done:
+
+- direct `/trpg new` integration with sandbox request/selection,
+- resume registry across multiple drifter sandbox runs,
+- richer artifact indexing / transcript search,
+- automatic cleanup / retention policy,
+- promotion flow from sandbox back into canonical world state.

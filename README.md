@@ -145,6 +145,50 @@ node ./scripts/drifter-sandbox.mjs inspect --sandbox /tmp/trpg-runtime-v2/sandbo
 node ./scripts/drifter-sandbox.mjs destroy --sandbox /tmp/trpg-runtime-v2/sandboxes/<sandbox-id> --force
 ```
 
+## Sandboxed drifter session launcher
+
+The next MVP slice wires the live drifter/gamer smoke harness onto the sandbox layout.
+
+It creates or reuses a sandbox, points the runtime at `world/base`, and keeps artifacts inside the sandbox:
+
+- world/runtime state → `<sandbox>/world/base`
+- turn transcripts → `<sandbox>/session/transcripts`
+- improve reports → `<sandbox>/reports`
+- stdout/stderr logs → `<sandbox>/artifacts`
+- launch summary → `<sandbox>/session/launch-result.json`
+
+Example:
+
+```bash
+node ./scripts/run-drifter-sandbox-session.mjs \
+  --repo /path/to/trpg-runtime-v2 \
+  --world /path/to/trpg-runtime-v2/world \
+  --lane deterministic \
+  --scenario happy \
+  --turns 2 \
+  --improve shadow
+```
+
+For an existing sandbox:
+
+```bash
+node ./scripts/run-drifter-sandbox-session.mjs \
+  --sandbox /tmp/trpg-runtime-v2/sandboxes/<sandbox-id> \
+  --lane openclaw \
+  --agent-path /abs/path/to/agent \
+  --scenario happy,modal
+```
+
+`run-gamer-smoke-live` also supports direct sandbox targeting now:
+
+```bash
+node ./scripts/run-gamer-smoke-live.mjs \
+  --lane deterministic \
+  --world-root /tmp/trpg-runtime-v2/sandboxes/<sandbox-id>/world/base \
+  --preserve-world-root \
+  --transcript-dir /tmp/trpg-runtime-v2/sandboxes/<sandbox-id>/session/transcripts
+```
+
 ## Build
 
 No compile/build step is required for runtime loading (OpenClaw loads TypeScript via jiti).
