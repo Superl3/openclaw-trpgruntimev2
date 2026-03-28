@@ -74,6 +74,7 @@ function validateSelection(raw) {
 
 function sanitizeBridgeContext(context) {
   const visible = context?.visible && typeof context.visible === "object" ? context.visible : {};
+  const metadata = context?.metadata && typeof context.metadata === "object" ? context.metadata : {};
   const buttons = Array.isArray(visible.buttons)
     ? visible.buttons
         .map((button) => ({
@@ -83,18 +84,36 @@ function sanitizeBridgeContext(context) {
         }))
         .filter((button) => typeof button.customId === "string")
     : [];
-  const modal = visible?.modal && typeof visible.modal.customId === "string" ? { customId: visible.modal.customId } : null;
+  const modal = visible?.modal && typeof visible.modal.customId === "string"
+    ? {
+      customId: visible.modal.customId,
+      ...(typeof visible.modal.title === "string" ? { title: visible.modal.title.slice(0, 200) } : {}),
+      ...(typeof visible.modal.label === "string" ? { label: visible.modal.label.slice(0, 200) } : {}),
+      ...(Array.isArray(visible.modal.fieldLabels)
+        ? {
+          fieldLabels: visible.modal.fieldLabels
+            .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+            .filter(Boolean)
+            .slice(0, 12),
+        }
+        : {}),
+    }
+    : null;
   const recommendation =
     visible?.recommendation && typeof visible.recommendation.actionId === "string"
       ? { actionId: visible.recommendation.actionId }
       : null;
   const textSummary = typeof visible?.textSummary === "string" ? visible.textSummary.slice(0, 1500) : "";
+  const originalText = typeof visible?.originalText === "string" ? visible.originalText.slice(0, 5000) : "";
+  const preferModal = metadata?.preferModal === true;
 
   return {
     recommendation,
     buttons,
     modal,
+    originalText,
     textSummary,
+    ...(preferModal ? { metadata: { preferModal: true } } : {}),
   };
 }
 

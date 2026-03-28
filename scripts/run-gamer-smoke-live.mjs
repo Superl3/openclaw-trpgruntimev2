@@ -25,6 +25,35 @@ const DEFAULT_IMPROVE_WINDOW = 3;
 const DEFAULT_WATCH_INTERVAL_MS = 1000;
 const DEFAULT_IMPROVE_REPORT_DIR = "./runtime/reports";
 const DEFAULT_IMPROVE_REPORT_PREFIX = "gamer-improve";
+const DEFAULT_DISCORD_WORKDIR = "/home/superl3/S3OpenClaw";
+const DEFAULT_DISCORD_MIRROR_TEMPLATE_PATH = "./scripts/templates/discord-smoke-mirror.template.txt";
+const DEFAULT_OPENCLAW_CONFIG_PATH = "/home/superl3/.openclaw/openclaw.json";
+const DEFAULT_DIRECT_INPUT_FALLBACK_TEXT = "이름은 레온. 변방 사냥꾼이며 실종된 동생을 찾고 있어.";
+const DISCORD_MIRROR_MAX_CHARS = 1800;
+const ACTION_KO_LABELS = new Map([
+  ["investigate", "조사"],
+  ["move", "이동"],
+  ["wait", "대기"],
+  ["force", "강행"],
+]);
+const BUILTIN_DISCORD_MIRROR_TEMPLATE = [
+  "[TRPG Mirror] run={{runId}} scenario={{scenario}} turn={{turn}}",
+  "",
+  "보이는 정보",
+  "- 장면: {{visible.scene}}",
+  "- Beat: {{visible.beat}}",
+  "- 압력: {{visible.pressure}}",
+  "- 가능 버튼: {{visible.choices}}",
+  "- 추천 버튼: {{visible.recommendation}}",
+  "- 모달: {{visible.modal}}",
+  "- 제약: {{visible.constraints}}",
+  "",
+  "Drifter 행동",
+  "- 선택 행동: {{drifter.actionName}} ({{drifter.actionCode}})",
+  "- 결정 출처: {{drifter.decisionSource}}",
+  "- 입력 내용: {{drifter.inputText}}",
+  "- 선택 이유: {{drifter.humanReason}}",
+].join("\n");
 
 function readValue(argv, index, flag) {
   const value = String(argv[index + 1] ?? "").trim();
@@ -64,6 +93,12 @@ function usage() {
     "  --bridge-wsl-distro <name>     (bridge lane, default: Ubuntu-24.04)",
     "  --print-lane-config            (openclaw/bridge lane, prints non-secret resolved config)",
     "  --skip-preflight               (openclaw/bridge lane, bypass infra connectivity check)",
+    "  --discord-mirror               (mirror each successful turn to Discord)",
+    "  --discord-channel-id <id>      (default: resolved from ~/.openclaw/openclaw.json trpg-v2 binding)",
+    `  --discord-workdir <path>       (default: ${DEFAULT_DISCORD_WORKDIR})`,
+    `  --discord-mirror-template <path> (default: ${DEFAULT_DISCORD_MIRROR_TEMPLATE_PATH})`,
+    "  --force-direct-input           (force preferModal flow for all playTurn calls)",
+    `  --direct-input-fallback-text <text> (default: ${DEFAULT_DIRECT_INPUT_FALLBACK_TEXT})`,
     "  --improve <off|shadow|auto>    (default: off)",
     "  --improve-window <N>           (default: 3 turns)",
     "  --improve-report-dir <path>    (default: ./runtime/reports)",
@@ -107,6 +142,14 @@ function parseArgs(argv) {
     watch: false,
     watchIntervalMs: DEFAULT_WATCH_INTERVAL_MS,
     maxCycles: null,
+    discordMirror: false,
+    discordChannelId: null,
+    discordWorkdir: DEFAULT_DISCORD_WORKDIR,
+    discordMirrorTemplate: DEFAULT_DISCORD_MIRROR_TEMPLATE_PATH,
+    discordMirrorTemplateFallbackNotified: false,
+    discordMirrorTemplateCache: null,
+    forceDirectInput: false,
+    directInputFallbackText: DEFAULT_DIRECT_INPUT_FALLBACK_TEXT,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -214,6 +257,34 @@ function parseArgs(argv) {
       parsed.skipPreflight = true;
       continue;
     }
+    if (token === "--discord-mirror") {
+      parsed.discordMirror = true;
+      continue;
+    }
+    if (token === "--discord-channel-id") {
+      parsed.discordChannelId = readValue(argv, i, "--discord-channel-id");
+      i += 1;
+      continue;
+    }
+    if (token === "--discord-workdir") {
+      parsed.discordWorkdir = readValue(argv, i, "--discord-workdir");
+      i += 1;
+      continue;
+    }
+    if (token === "--discord-mirror-template") {
+      parsed.discordMirrorTemplate = readValue(argv, i, "--discord-mirror-template");
+      i += 1;
+      continue;
+    }
+    if (token === "--force-direct-input") {
+      parsed.forceDirectInput = true;
+      continue;
+    }
+    if (token === "--direct-input-fallback-text") {
+      parsed.directInputFallbackText = readValue(argv, i, "--direct-input-fallback-text");
+      i += 1;
+      continue;
+    }
     if (token === "--improve") {
       parsed.improve = readValue(argv, i, "--improve");
       i += 1;
@@ -317,6 +388,651 @@ function buildBridgeSessionId(args, context = {}) {
     ? context.scenarioName.trim()
     : "scenario";
   return `${base}:${runId}:c${cycle}:${scenario}`;
+}
+
+function firstNonEmptyString(...values) {
+  for (const value of values) {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) {
+        return trimmed;
+      }
+    }
+  }
+  return null;
+}
+
+function pickDiscordChannelIdFromBinding(binding) {
+  if (!binding || typeof binding !== "object") {
+    return null;
+  }
+  return firstNonEmptyString(
+    binding?.match?.peer?.id,
+    binding?.match?.target?.id,
+    binding?.discord?.channelId,
+    binding?.discord?.channel_id,
+    binding?.discordChannelId,
+    binding?.discord_channel_id,
+    binding?.channelId,
+    binding?.channel_id,
+    binding?.target,
+  );
+}
+
+function resolveDiscordChannelIdFromConfigObject(configRoot) {
+  if (!configRoot || typeof configRoot !== "object") {
+    return null;
+  }
+
+  const directCandidates = [
+    configRoot?.bindings?.["trpg-v2"],
+    configRoot?.binding?.["trpg-v2"],
+    configRoot?.agents?.["trpg-v2"],
+    configRoot?.trpg?.["v2"],
+    configRoot?.trpgV2,
+  ];
+  for (const candidate of directCandidates) {
+    const channelId = pickDiscordChannelIdFromBinding(candidate);
+    if (channelId) {
+      return channelId;
+    }
+  }
+
+  const bindings = Array.isArray(configRoot?.bindings) ? configRoot.bindings : [];
+  for (const binding of bindings) {
+    const agentId = typeof binding?.agentId === "string" ? binding.agentId.trim() : "";
+    const channel = typeof binding?.match?.channel === "string" ? binding.match.channel.trim() : "";
+    if (agentId !== "trpg-v2" || channel !== "discord") {
+      continue;
+    }
+    const channelId = pickDiscordChannelIdFromBinding(binding);
+    if (channelId) {
+      return channelId;
+    }
+  }
+
+  const visited = new Set();
+  const queue = [configRoot];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object") {
+      continue;
+    }
+    if (visited.has(current)) {
+      continue;
+    }
+    visited.add(current);
+
+    if (
+      (typeof current?.id === "string" && current.id.trim() === "trpg-v2") ||
+      (typeof current?.name === "string" && current.name.trim() === "trpg-v2") ||
+      (typeof current?.key === "string" && current.key.trim() === "trpg-v2")
+    ) {
+      const channelId = pickDiscordChannelIdFromBinding(current);
+      if (channelId) {
+        return channelId;
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(current, "trpg-v2")) {
+      const channelId = pickDiscordChannelIdFromBinding(current["trpg-v2"]);
+      if (channelId) {
+        return channelId;
+      }
+    }
+
+    for (const value of Object.values(current)) {
+      if (value && typeof value === "object") {
+        queue.push(value);
+      }
+    }
+  }
+
+  return null;
+}
+
+async function resolveDefaultDiscordChannelIdFromOpenClawConfig(configPath = DEFAULT_OPENCLAW_CONFIG_PATH) {
+  try {
+    const raw = await fs.readFile(configPath, "utf8");
+    const parsed = JSON.parse(raw);
+    return resolveDiscordChannelIdFromConfigObject(parsed);
+  } catch {
+    return null;
+  }
+}
+
+function extractPanelRawTextFromTurn(turnData, turnTranscript = null) {
+  const receivedOriginalText = firstNonEmptyString(
+    turnData?.received?.originalText,
+    turnData?.result?.received?.originalText,
+    turnTranscript?.received?.originalText,
+  );
+  const receivedTextSummary = firstNonEmptyString(
+    turnData?.received?.textSummary,
+    turnData?.result?.received?.textSummary,
+    turnTranscript?.received?.textSummary,
+  );
+  const panelRawFallback = firstNonEmptyString(
+    turnData?.result?.originalText,
+    turnData?.result?.panel?.originalText,
+    turnData?.originalText,
+    turnTranscript?.originalText,
+  );
+  return firstNonEmptyString(
+    receivedOriginalText,
+    receivedTextSummary,
+    panelRawFallback,
+  );
+}
+
+function parseInlineList(value) {
+  if (typeof value !== "string") {
+    return [];
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return [];
+  }
+  return trimmed
+    .split(/[|,\/]/g)
+    .map((entry) => entry.trim().replace(/^[\-•·\s]+/, ""))
+    .filter(Boolean);
+}
+
+function parseVisibleMirrorFields(rawText) {
+  const panelText = typeof rawText === "string" ? rawText : "";
+  const lines = panelText.split(/\r?\n/);
+  const visible = {
+    scene: "없음",
+    beat: "없음",
+    pressure: "없음",
+    choices: "없음",
+    recommendation: "없음",
+    modal: "없음",
+    constraints: "없음",
+  };
+
+  const normalizeMirrorLine = (rawLine) => {
+    let line = typeof rawLine === "string" ? rawLine.trim() : "";
+    if (!line) {
+      return "";
+    }
+
+    line = line.replace(/^[\-*•]\s+/, "").trim();
+
+    const unwrapSimpleMarkdownPrefix = (input) => {
+      if (input.startsWith("**")) {
+        const endIndex = input.indexOf("**", 2);
+        if (endIndex > 1) {
+          return `${input.slice(2, endIndex)}${input.slice(endIndex + 2)}`.trim();
+        }
+      }
+      if (input.startsWith("`")) {
+        const endIndex = input.indexOf("`", 1);
+        if (endIndex > 0) {
+          return `${input.slice(1, endIndex)}${input.slice(endIndex + 1)}`.trim();
+        }
+      }
+      return input;
+    };
+
+    line = unwrapSimpleMarkdownPrefix(line).replace(/^[\-*•]\s+/, "").trim();
+    return line;
+  };
+
+  for (const rawLine of lines) {
+    const line = normalizeMirrorLine(rawLine);
+    if (!line) {
+      continue;
+    }
+    if (line.startsWith("장면:")) {
+      visible.scene = firstNonEmptyString(line.slice("장면:".length).trim(), visible.scene) || "없음";
+      continue;
+    }
+    if (/^Beat(?:\s+\d+)?\s*:/i.test(line)) {
+      const beatValue = line.replace(/^Beat(?:\s+\d+)?\s*:\s*/i, "").trim();
+      visible.beat = firstNonEmptyString(beatValue, visible.beat) || "없음";
+      continue;
+    }
+    if (line.startsWith("압력:")) {
+      visible.pressure = firstNonEmptyString(line.slice("압력:".length).trim(), visible.pressure) || "없음";
+      continue;
+    }
+    if (line.startsWith("가능 버튼:")) {
+      const choices = parseInlineList(line.slice("가능 버튼:".length));
+      visible.choices = choices.length > 0 ? choices.join(", ") : "없음";
+      continue;
+    }
+    if (line.startsWith("추천 버튼:")) {
+      visible.recommendation = firstNonEmptyString(line.slice("추천 버튼:".length).trim(), visible.recommendation) || "없음";
+      continue;
+    }
+    if (line.startsWith("모달:")) {
+      visible.modal = firstNonEmptyString(line.slice("모달:".length).trim(), visible.modal) || "없음";
+      continue;
+    }
+    if (line.startsWith("제약:")) {
+      const constraints = parseInlineList(line.slice("제약:".length));
+      visible.constraints = constraints.length > 0 ? constraints.join(", ") : "없음";
+    }
+  }
+
+  return visible;
+}
+
+function getActionCodeKey(actionCode) {
+  if (typeof actionCode !== "string") {
+    return "";
+  }
+  const trimmed = actionCode.trim().toLowerCase();
+  if (!trimmed) {
+    return "";
+  }
+  return trimmed.startsWith("action.") ? trimmed.slice("action.".length) : trimmed;
+}
+
+function mapActionCodeToKoreanLabel(actionCode) {
+  const key = getActionCodeKey(actionCode);
+  return key ? ACTION_KO_LABELS.get(key) ?? null : null;
+}
+
+function parseActionCodeFromReference(...values) {
+  const known = new Set(Array.from(ACTION_KO_LABELS.keys()));
+  for (const value of values) {
+    if (typeof value !== "string") {
+      continue;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const explicit = trimmed.match(/\b(action\.[a-z0-9._-]+)\b/i);
+    if (explicit?.[1]) {
+      return explicit[1].toLowerCase();
+    }
+    const segments = trimmed
+      .split(/[:/#]/g)
+      .map((entry) => entry.trim().toLowerCase().replace(/[^a-z0-9._-]/g, ""))
+      .filter(Boolean);
+    for (let i = segments.length - 1; i >= 0; i -= 1) {
+      const segment = segments[i];
+      if (segment.startsWith("action.")) {
+        return segment;
+      }
+      if (known.has(segment)) {
+        return `action.${segment}`;
+      }
+    }
+  }
+  return null;
+}
+
+function canonicalActionIdentity(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const parsedCode = parseActionCodeFromReference(value);
+  if (parsedCode) {
+    return parsedCode;
+  }
+  const trimmed = value.trim().toLowerCase();
+  return trimmed || null;
+}
+
+function reasonLooksLikeNoise(value) {
+  if (typeof value !== "string") {
+    return true;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return true;
+  }
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    return true;
+  }
+  if (/(choice_type|choice_label|choice_value|free_input)\s*[:=]/i.test(trimmed)) {
+    return true;
+  }
+  return false;
+}
+
+function resolveRecommendationActionId(turnData, turnTranscript) {
+  return firstNonEmptyString(
+    turnTranscript?.received?.recommendation?.actionId,
+    turnData?.received?.recommendation?.actionId,
+    turnData?.result?.received?.recommendation?.actionId,
+    turnData?.result?.visible?.recommendation?.actionId,
+    turnData?.visible?.recommendation?.actionId,
+    turnData?.context?.visible?.recommendation?.actionId,
+  );
+}
+
+function hasFreeInputMarker(...values) {
+  for (const value of values) {
+    if (typeof value !== "string") {
+      continue;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      continue;
+    }
+    if (/(^|[.:/_-])free[_-]?input($|[.:/_-])/i.test(trimmed)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function resolveInputTextFromSelection(sent, selection) {
+  return firstNonEmptyString(
+    sent?.freeInput,
+    selection?.freeInput,
+    sent?.inputText,
+    selection?.inputText,
+  );
+}
+
+function resolveDrifterActionSummary({ turnData, turnTranscript }) {
+  const sent = turnTranscript?.sent;
+  const selection = turnData?.selection;
+  const actionType = firstNonEmptyString(sent?.type, selection?.type, "unknown") || "unknown";
+  const actionNameFromLabel = firstNonEmptyString(sent?.label, selection?.label);
+  const actionCode = parseActionCodeFromReference(
+    sent?.actionId,
+    sent?.customId,
+    selection?.actionId,
+    selection?.customId,
+  );
+  const mappedActionName = mapActionCodeToKoreanLabel(actionCode);
+  const isModalFreeInput = actionType === "modal" && hasFreeInputMarker(
+    actionCode,
+    sent?.customId,
+    selection?.customId,
+    sent?.actionId,
+    selection?.actionId,
+  );
+  const inputTextRaw = resolveInputTextFromSelection(sent, selection);
+  return {
+    actionName: isModalFreeInput
+      ? "직접 입력"
+      : (firstNonEmptyString(actionNameFromLabel, mappedActionName, "알 수 없음") || "알 수 없음"),
+    actionCode: firstNonEmptyString(actionCode, "unknown") || "unknown",
+    selectedActionIdentity: firstNonEmptyString(
+      canonicalActionIdentity(sent?.actionId),
+      canonicalActionIdentity(selection?.actionId),
+      canonicalActionIdentity(sent?.customId),
+      canonicalActionIdentity(selection?.customId),
+    ),
+    rawReason: firstNonEmptyString(sent?.reason, selection?.reason),
+    inputTextRaw,
+  };
+}
+
+function resolveHumanReason({ rawReason, selectedActionIdentity, recommendationActionId, inputTextRaw }) {
+  if (!reasonLooksLikeNoise(rawReason)) {
+    return rawReason.trim();
+  }
+  if (selectedActionIdentity && canonicalActionIdentity(recommendationActionId) === selectedActionIdentity) {
+    return "추천 버튼 근거를 따라 선택";
+  }
+  if (typeof inputTextRaw === "string" && inputTextRaw.trim()) {
+    return "자유 입력으로 의도를 전달";
+  }
+  return "보이는 선택지 중 진행 가능한 행동을 선택";
+}
+
+function resolveDecisionSource(turnData, turnTranscript) {
+  const allowed = new Set(["drifter", "fallback", "unknown"]);
+  const explicitSource = firstNonEmptyString(
+    turnData?.selection?.decisionSource,
+    turnData?.result?.selection?.decisionSource,
+    turnTranscript?.sent?.decisionSource,
+  );
+  const normalizedExplicit = typeof explicitSource === "string" ? explicitSource.trim().toLowerCase() : "";
+  if (allowed.has(normalizedExplicit)) {
+    return normalizedExplicit;
+  }
+
+  const contractStatus = firstNonEmptyString(
+    turnTranscript?.sent?.audit?.contractStatus,
+    turnData?.selection?.audit?.contractStatus,
+    turnData?.result?.selection?.audit?.contractStatus,
+  );
+  if (contractStatus === "fallback_unambiguous") {
+    return "fallback";
+  }
+  if (contractStatus === "valid_json" || contractStatus === "valid_kv") {
+    return "drifter";
+  }
+
+  const reasonText = firstNonEmptyString(
+    turnTranscript?.sent?.reason,
+    turnData?.selection?.reason,
+    turnData?.result?.selection?.reason,
+  );
+  if (typeof reasonText === "string" && /fallback|안전 fallback/i.test(reasonText)) {
+    return "fallback";
+  }
+  return "unknown";
+}
+
+function buildDiscordMirrorPayload({ runId, scenarioName, turnNumber, turnData, turnTranscript }) {
+  const panelRawText = extractPanelRawTextFromTurn(turnData, turnTranscript);
+  const actionSummary = resolveDrifterActionSummary({ turnData, turnTranscript });
+  const recommendationActionId = resolveRecommendationActionId(turnData, turnTranscript);
+  const humanReason = resolveHumanReason({
+    rawReason: actionSummary.rawReason,
+    selectedActionIdentity: actionSummary.selectedActionIdentity,
+    recommendationActionId,
+    inputTextRaw: actionSummary.inputTextRaw,
+  });
+  return {
+    runId: firstNonEmptyString(runId, "run-unknown") || "run-unknown",
+    scenario: firstNonEmptyString(scenarioName, "unknown") || "unknown",
+    turn: Number.isFinite(turnNumber) ? Math.max(1, Math.trunc(turnNumber)) : 1,
+    visible: parseVisibleMirrorFields(panelRawText),
+    drifter: {
+      actionType: firstNonEmptyString(
+        turnTranscript?.sent?.type,
+        turnData?.selection?.type,
+        "unknown",
+      ) || "unknown",
+      actionRef: firstNonEmptyString(
+        turnTranscript?.sent?.customId,
+        turnTranscript?.sent?.actionId,
+        turnTranscript?.sent?.label,
+        turnData?.selection?.customId,
+        turnData?.selection?.actionId,
+        turnData?.selection?.label,
+        "없음",
+      ) || "없음",
+      inputText: firstNonEmptyString(
+        resolveInputTextFromSelection(turnTranscript?.sent, turnData?.selection),
+        "없음",
+      ) || "없음",
+      reason: firstNonEmptyString(
+        turnTranscript?.sent?.reason,
+        turnData?.selection?.reason,
+        "없음",
+      ) || "없음",
+      actionName: actionSummary.actionName,
+      actionCode: actionSummary.actionCode,
+      humanReason,
+      decisionSource: resolveDecisionSource(turnData, turnTranscript),
+      contractStatus: firstNonEmptyString(
+        turnTranscript?.sent?.audit?.contractStatus,
+        turnData?.selection?.audit?.contractStatus,
+        "unknown",
+      ) || "unknown",
+    },
+  };
+}
+
+function resolveTemplateValue(payload, token) {
+  const pathParts = token.split(".");
+  let current = payload;
+  for (const part of pathParts) {
+    if (!current || typeof current !== "object" || !Object.prototype.hasOwnProperty.call(current, part)) {
+      return "";
+    }
+    current = current[part];
+  }
+  if (Array.isArray(current)) {
+    return current.length > 0 ? current.join(", ") : "";
+  }
+  if (current === null || current === undefined) {
+    return "";
+  }
+  if (typeof current === "object") {
+    return JSON.stringify(current);
+  }
+  return String(current);
+}
+
+function renderDiscordMirrorTemplate(templateText, payload) {
+  return String(templateText ?? "").replace(/\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g, (_match, token) => {
+    const resolved = resolveTemplateValue(payload, token);
+    return resolved.trim() ? resolved : "-";
+  });
+}
+
+async function resolveDiscordMirrorTemplate(args, ui) {
+  if (typeof args.discordMirrorTemplateCache === "string" && args.discordMirrorTemplateCache.trim()) {
+    return args.discordMirrorTemplateCache;
+  }
+  const templatePath = typeof args.discordMirrorTemplate === "string" ? args.discordMirrorTemplate.trim() : "";
+  if (!templatePath) {
+    args.discordMirrorTemplateCache = BUILTIN_DISCORD_MIRROR_TEMPLATE;
+    return args.discordMirrorTemplateCache;
+  }
+
+  try {
+    const loaded = await fs.readFile(templatePath, "utf8");
+    const template = typeof loaded === "string" ? loaded : String(loaded ?? "");
+    if (!template.trim()) {
+      throw new Error("empty-template");
+    }
+    args.discordMirrorTemplateCache = template;
+    return template;
+  } catch {
+    if (!args.discordMirrorTemplateFallbackNotified) {
+      ui.warn(`discord-mirror template fallback path=${templatePath}`);
+      args.discordMirrorTemplateFallbackNotified = true;
+    }
+    args.discordMirrorTemplateCache = BUILTIN_DISCORD_MIRROR_TEMPLATE;
+    return args.discordMirrorTemplateCache;
+  }
+}
+
+function splitMessageChunks(message, maxLength = DISCORD_MIRROR_MAX_CHARS) {
+  const safeMessage = typeof message === "string" ? message : String(message ?? "");
+  if (!safeMessage) {
+    return [""];
+  }
+  if (safeMessage.length <= maxLength) {
+    return [safeMessage];
+  }
+
+  const chunks = [];
+  let remaining = safeMessage;
+  while (remaining.length > maxLength) {
+    let splitAt = remaining.lastIndexOf("\n", maxLength);
+    if (splitAt <= 0) {
+      splitAt = maxLength;
+    }
+    chunks.push(remaining.slice(0, splitAt));
+    remaining = remaining.slice(splitAt).replace(/^\n+/, "");
+  }
+  if (remaining.length > 0) {
+    chunks.push(remaining);
+  }
+  return chunks;
+}
+
+function shellQuoteSingle(value) {
+  const text = typeof value === "string" ? value : String(value ?? "");
+  return `'${text.replace(/'/g, `'"'"'`)}'`;
+}
+
+function sendDiscordMessageChunk({ message, channelId, workdir, wslDistro }) {
+  if (process.platform === "win32") {
+    const script = `cd ${shellQuoteSingle(workdir)} && node openclaw.mjs message send --channel discord --target ${shellQuoteSingle(`channel:${channelId}`)} --message ${shellQuoteSingle(message)}`;
+    const result = spawnSync("wsl.exe", ["-d", wslDistro, "bash", "-lc", script], {
+      encoding: "utf8",
+      stdio: "pipe",
+    });
+    return {
+      ok: result.status === 0,
+      status: result.status,
+      stdout: typeof result.stdout === "string" ? result.stdout.trim() : "",
+      stderr: typeof result.stderr === "string" ? result.stderr.trim() : "",
+      error: result.error instanceof Error ? result.error.message : null,
+    };
+  }
+
+  const result = spawnSync("node", [
+    "openclaw.mjs",
+    "message",
+    "send",
+    "--channel",
+    "discord",
+    "--target",
+    `channel:${channelId}`,
+    "--message",
+    message,
+  ], {
+    cwd: workdir,
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+
+  return {
+    ok: result.status === 0,
+    status: result.status,
+    stdout: typeof result.stdout === "string" ? result.stdout.trim() : "",
+    stderr: typeof result.stderr === "string" ? result.stderr.trim() : "",
+    error: result.error instanceof Error ? result.error.message : null,
+  };
+}
+
+async function mirrorTurnToDiscord({ args, ui, runId, scenarioName, turnNumber, turnData, turnTranscript }) {
+  if (!args.discordMirror) {
+    return;
+  }
+  const channelId = typeof args.discordChannelId === "string" ? args.discordChannelId.trim() : "";
+  if (!channelId) {
+    ui.warn(`discord-mirror skip scenario=${scenarioName} turn=${turnNumber} reason=missing-channel-id`);
+    return;
+  }
+
+  const payload = buildDiscordMirrorPayload({
+    runId,
+    scenarioName,
+    turnNumber,
+    turnData,
+    turnTranscript,
+  });
+  const template = await resolveDiscordMirrorTemplate(args, ui);
+  const message = renderDiscordMirrorTemplate(template, payload);
+  const chunks = splitMessageChunks(message, DISCORD_MIRROR_MAX_CHARS);
+
+  let sentCount = 0;
+  for (const chunk of chunks) {
+    const result = sendDiscordMessageChunk({
+      message: chunk,
+      channelId,
+      workdir: args.discordWorkdir,
+      wslDistro: args.bridgeWslDistro,
+    });
+    if (!result.ok) {
+      const reason = sanitizeForCli(firstNonEmptyString(result.error, result.stderr, result.stdout, `exit:${result.status}`) || "unknown");
+      ui.warn(`discord-mirror failed scenario=${scenarioName} turn=${turnNumber} chunk=${sentCount + 1}/${chunks.length} reason=${reason}`);
+      return;
+    }
+    sentCount += 1;
+  }
+
+  ui.ok(`discord-mirror sent scenario=${scenarioName} turn=${turnNumber} chunks=${sentCount}`);
 }
 
 function ansi(color, enabled) {
@@ -427,8 +1143,9 @@ function createScenarioLogger(ui, options, scenarioName) {
     const turn = Number.isFinite(payload?.turn) ? ` turn=${payload.turn}` : "";
     const ok = Object.prototype.hasOwnProperty.call(payload || {}, "ok") ? ` ok=${payload.ok}` : "";
     const selection = payload?.selectionType ? ` selection=${payload.selectionType}` : "";
+    const decisionSource = payload?.decisionSource ? ` decisionSource=${payload.decisionSource}` : "";
     const extra = options.verbose ? formatEventDetail(payload) : "";
-    const detail = `${scenarioName} ${event}${turn}${ok}${selection}${extra}`;
+    const detail = `${scenarioName} ${event}${turn}${ok}${selection}${decisionSource}${extra}`;
 
     if (!options.verbose) {
       const important = new Set([
@@ -1254,7 +1971,18 @@ async function writeImproveReports(args, ui, report) {
 async function runScenario({ name, plugin, args, ui, runtimeState, cycleNumber, reportCollector }) {
   const worldRoot = await createIsolatedWorldRoot(`trpg-runtime-v2-live-${name}`);
   let turnsPlayed = 0;
+  let latestTurnTranscript = null;
   const improver = args.improve !== "off" ? new GamerLiveImprover() : null;
+  const createTurnOptions = (base = {}) => {
+    if (args.forceDirectInput !== true) {
+      return base;
+    }
+    return {
+      ...base,
+      preferModal: true,
+      freeInput: args.directInputFallbackText,
+    };
+  };
 
   const maybeImprove = async (force = false) => {
     if (!improver) {
@@ -1331,6 +2059,17 @@ async function runScenario({ name, plugin, args, ui, runtimeState, cycleNumber, 
               recovered: payload?.recovered === true,
             });
           }
+          if (payload?.event === "turn_transcript") {
+            latestTurnTranscript = {
+              cycle: cycleNumber,
+              scenario: name,
+              turn: Number.isFinite(payload?.turn) ? payload.turn : null,
+              received: payload?.received && typeof payload.received === "object" ? payload.received : {},
+              sent: payload?.sent && typeof payload.sent === "object" ? payload.sent : {},
+              response: payload?.response && typeof payload.response === "object" ? payload.response : {},
+              recovered: payload?.recovered === true,
+            };
+          }
           if (reportCollector && Array.isArray(reportCollector.laneIssues)) {
             if (payload?.event === "llm_lane_error") {
               reportCollector.laneIssues.push({
@@ -1365,7 +2104,7 @@ async function runScenario({ name, plugin, args, ui, runtimeState, cycleNumber, 
 
     if (name === "happy") {
       for (let i = 0; i < args.turns; i += 1) {
-        const played = await agent.playTurn();
+        const played = await agent.playTurn(createTurnOptions());
         if (played?.result?.ok !== true) {
           throw new Error(`happy turn failed at ${i + 1}: ${JSON.stringify(played?.result)}`);
         }
@@ -1374,6 +2113,15 @@ async function runScenario({ name, plugin, args, ui, runtimeState, cycleNumber, 
           throw new Error(`happy commit failed at ${i + 1}: ${JSON.stringify(commit)}`);
         }
         turnsPlayed += 1;
+        await mirrorTurnToDiscord({
+          args,
+          ui,
+          runId: runtimeState.runId,
+          scenarioName: name,
+          turnNumber: Number.isFinite(latestTurnTranscript?.turn) ? latestTurnTranscript.turn : turnsPlayed,
+          turnData: played,
+          turnTranscript: latestTurnTranscript,
+        });
         await maybeImprove(false);
       }
       await maybeImprove(true);
@@ -1381,7 +2129,7 @@ async function runScenario({ name, plugin, args, ui, runtimeState, cycleNumber, 
     }
 
     if (name === "modal") {
-      const firstTurn = await agent.playTurn({ preferModal: true });
+      const firstTurn = await agent.playTurn(createTurnOptions({ preferModal: true }));
       if (firstTurn?.result?.ok !== true) {
         throw new Error(`modal first turn failed: ${JSON.stringify(firstTurn?.result)}`);
       }
@@ -1393,10 +2141,19 @@ async function runScenario({ name, plugin, args, ui, runtimeState, cycleNumber, 
         throw new Error(`modal first commit failed: ${JSON.stringify(firstCommit)}`);
       }
       turnsPlayed += 1;
+      await mirrorTurnToDiscord({
+        args,
+        ui,
+        runId: runtimeState.runId,
+        scenarioName: name,
+        turnNumber: Number.isFinite(latestTurnTranscript?.turn) ? latestTurnTranscript.turn : turnsPlayed,
+        turnData: firstTurn,
+        turnTranscript: latestTurnTranscript,
+      });
       await maybeImprove(false);
 
       for (let i = 1; i < args.turns; i += 1) {
-        const played = await agent.playTurn();
+        const played = await agent.playTurn(createTurnOptions());
         if (played?.result?.ok !== true) {
           throw new Error(`modal turn failed at ${i + 1}: ${JSON.stringify(played?.result)}`);
         }
@@ -1405,13 +2162,22 @@ async function runScenario({ name, plugin, args, ui, runtimeState, cycleNumber, 
           throw new Error(`modal commit failed at ${i + 1}: ${JSON.stringify(commit)}`);
         }
         turnsPlayed += 1;
+        await mirrorTurnToDiscord({
+          args,
+          ui,
+          runId: runtimeState.runId,
+          scenarioName: name,
+          turnNumber: Number.isFinite(latestTurnTranscript?.turn) ? latestTurnTranscript.turn : turnsPlayed,
+          turnData: played,
+          turnTranscript: latestTurnTranscript,
+        });
         await maybeImprove(false);
       }
       await maybeImprove(true);
       return { ok: true, turnsPlayed };
     }
 
-    const firstSelection = await agent.pickNextAction();
+    const firstSelection = await agent.pickNextAction(createTurnOptions());
     const firstInteraction = await agent.interact(firstSelection);
     if (firstInteraction?.ok !== true) {
       throw new Error(`stale setup first interaction failed: ${JSON.stringify(firstInteraction)}`);
@@ -1431,7 +2197,7 @@ async function runScenario({ name, plugin, args, ui, runtimeState, cycleNumber, 
       throw new Error(`stale resume failed: ${JSON.stringify(resumed)}`);
     }
 
-    const recoveredTurn = await agent.playTurn();
+    const recoveredTurn = await agent.playTurn(createTurnOptions());
     if (recoveredTurn?.result?.ok !== true) {
       throw new Error(`stale recovered turn failed: ${JSON.stringify(recoveredTurn?.result)}`);
     }
@@ -1440,10 +2206,19 @@ async function runScenario({ name, plugin, args, ui, runtimeState, cycleNumber, 
       throw new Error(`stale recovered commit failed: ${JSON.stringify(recoveredCommit)}`);
     }
     turnsPlayed += 1;
+    await mirrorTurnToDiscord({
+      args,
+      ui,
+      runId: runtimeState.runId,
+      scenarioName: name,
+      turnNumber: Number.isFinite(latestTurnTranscript?.turn) ? latestTurnTranscript.turn : turnsPlayed,
+      turnData: recoveredTurn,
+      turnTranscript: latestTurnTranscript,
+    });
     await maybeImprove(false);
 
     for (let i = 1; i < args.turns; i += 1) {
-      const played = await agent.playTurn();
+      const played = await agent.playTurn(createTurnOptions());
       if (played?.result?.ok !== true) {
         throw new Error(`stale extra turn failed at ${i + 1}: ${JSON.stringify(played?.result)}`);
       }
@@ -1452,6 +2227,15 @@ async function runScenario({ name, plugin, args, ui, runtimeState, cycleNumber, 
         throw new Error(`stale extra commit failed at ${i + 1}: ${JSON.stringify(commit)}`);
       }
       turnsPlayed += 1;
+      await mirrorTurnToDiscord({
+        args,
+        ui,
+        runId: runtimeState.runId,
+        scenarioName: name,
+        turnNumber: Number.isFinite(latestTurnTranscript?.turn) ? latestTurnTranscript.turn : turnsPlayed,
+        turnData: played,
+        turnTranscript: latestTurnTranscript,
+      });
       await maybeImprove(false);
     }
 
@@ -1500,6 +2284,13 @@ async function main() {
     ui.dim(`improve mode=${args.improve} window=${args.improveWindow}`);
     ui.dim(`improve report dir=${args.improveReportDir} prefix=${args.improveReportPrefix}`);
   }
+  if (args.discordMirror) {
+    ui.dim(`discord mirror requested workdir=${args.discordWorkdir}`);
+    ui.dim(`discord mirror template=${args.discordMirrorTemplate}`);
+  }
+  if (args.forceDirectInput) {
+    ui.dim(`force-direct-input enabled fallbackText=${JSON.stringify(args.directInputFallbackText)}`);
+  }
   if (args.watch) {
     ui.dim(`watch enabled intervalMs=${args.watchIntervalMs}${args.maxCycles !== null ? ` maxCycles=${args.maxCycles}` : ""}`);
   } else {
@@ -1523,6 +2314,22 @@ async function main() {
     ui.error(`infra:preflight-failed lane=${args.lane} reason=${reason}`);
     process.exitCode = 1;
     return;
+  }
+
+  if (args.discordMirror) {
+    if (!args.discordChannelId) {
+      const resolvedChannelId = await resolveDefaultDiscordChannelIdFromOpenClawConfig(DEFAULT_OPENCLAW_CONFIG_PATH);
+      if (resolvedChannelId) {
+        args.discordChannelId = resolvedChannelId;
+        ui.dim(`discord mirror channel auto-resolved from ${DEFAULT_OPENCLAW_CONFIG_PATH}`);
+      }
+    }
+    if (!args.discordChannelId) {
+      ui.error("discord mirror requires --discord-channel-id (or resolvable trpg-v2 discord binding in ~/.openclaw/openclaw.json)");
+      process.exitCode = 1;
+      return;
+    }
+    ui.dim(`discord mirror enabled channel=${args.discordChannelId} workdir=${args.discordWorkdir}`);
   }
 
   const summary = {

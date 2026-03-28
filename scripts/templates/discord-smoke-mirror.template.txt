@@ -1,0 +1,16 @@
+[TRPG 미러] run={{runId}} scenario={{scenario}} turn={{turn}}
+
+보이는 정보
+- 장면: {{visible.scene}}
+- Beat: {{visible.beat}}
+- 압력: {{visible.pressure}}
+- 가능 버튼: {{visible.choices}}
+- 추천 버튼: {{visible.recommendation}}
+- 모달: {{visible.modal}}
+- 제약: {{visible.constraints}}
+
+Drifter
+- 선택 행동: {{drifter.actionName}} ({{drifter.actionCode}})
+- 결정 출처: {{drifter.decisionSource}}
+- 입력 내용: {{drifter.inputText}}
+- 선택 이유: {{drifter.humanReason}}

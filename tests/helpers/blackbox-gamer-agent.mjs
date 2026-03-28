@@ -267,6 +267,14 @@ export class BlackboxGamerAgent {
       style: entry.style || null,
     }));
     const modalSubmitCustomId = components?.modal?.submitCustomId || components?.modal?.submit_custom_id || null;
+    const modalTitle = typeof components?.modal?.title === "string" ? components.modal.title : null;
+    const modalLabel = typeof components?.modal?.label === "string" ? components.modal.label : null;
+    const modalFieldLabels = Array.isArray(components?.modal?.fields)
+      ? components.modal.fields
+          .map((field) => (typeof field?.label === "string" ? field.label.trim() : ""))
+          .filter(Boolean)
+          .slice(0, 12)
+      : [];
     const recommendation = components?.recommendation?.actionId
       ? {
           actionId: components.recommendation.actionId,
@@ -277,7 +285,14 @@ export class BlackboxGamerAgent {
       visible: {
         recommendation,
         buttons,
-        modal: typeof modalSubmitCustomId === "string" ? { customId: modalSubmitCustomId } : null,
+        modal: typeof modalSubmitCustomId === "string"
+          ? {
+            customId: modalSubmitCustomId,
+            ...(modalTitle ? { title: modalTitle } : {}),
+            ...(modalLabel ? { label: modalLabel } : {}),
+            ...(modalFieldLabels.length > 0 ? { fieldLabels: modalFieldLabels } : {}),
+          }
+          : null,
         originalText: this.extractOriginalVisibleText(components),
         textSummary: this.summarizeVisibleText(components),
       },
@@ -354,6 +369,13 @@ export class BlackboxGamerAgent {
     return null;
   }
 
+  withDecisionSource(selection, decisionSource) {
+    return {
+      ...selection,
+      decisionSource,
+    };
+  }
+
   pickNextAction(options = {}) {
     const deterministicSelection = this.buildDeterministicSelection(options);
     const decisionContext = this.buildDecisionContext(options);
@@ -365,7 +387,7 @@ export class BlackboxGamerAgent {
     }, "debug");
 
     if (!this.decisionLane) {
-      return deterministicSelection;
+      return this.withDecisionSource(deterministicSelection, "fallback");
     }
 
     if (this.laneDisabled) {
@@ -373,7 +395,7 @@ export class BlackboxGamerAgent {
         reason: this.laneDisableReason || "lane_disabled",
       }, "warn");
       this.emit("llm_choice_fallback", { selection: deterministicSelection }, "info");
-      return deterministicSelection;
+      return this.withDecisionSource(deterministicSelection, "fallback");
     }
 
     const resolveDecision = async () => {
@@ -382,7 +404,7 @@ export class BlackboxGamerAgent {
         const validatedSelection = this.validateDecisionSelection(laneSelection, options);
         if (validatedSelection) {
           this.emit("llm_choice_valid", { selection: validatedSelection }, "info");
-          return validatedSelection;
+          return this.withDecisionSource(validatedSelection, "drifter");
         }
         this.emit("llm_choice_invalid", { laneSelection }, "warn");
       } catch (error) {
@@ -409,7 +431,7 @@ export class BlackboxGamerAgent {
         }
       }
       this.emit("llm_choice_fallback", { selection: deterministicSelection }, "info");
-      return deterministicSelection;
+      return this.withDecisionSource(deterministicSelection, "fallback");
     };
 
     return resolveDecision();
@@ -538,6 +560,7 @@ export class BlackboxGamerAgent {
         recovered,
         ok: result?.ok === true,
         selectionType: retrySelection?.type || null,
+        decisionSource: retrySelection?.decisionSource || null,
       }, "info");
       this.emit("turn_transcript", {
         turn: turnIndex,
@@ -553,6 +576,7 @@ export class BlackboxGamerAgent {
           customId: retrySelection?.customId || null,
           actionId: retrySelection?.actionId || null,
           label: retrySelection?.label || null,
+          decisionSource: retrySelection?.decisionSource || null,
           ...(typeof retrySelection?.reason === "string" ? { reason: retrySelection.reason } : {}),
           ...(retrySelection?.audit && typeof retrySelection.audit === "object" ? { audit: retrySelection.audit } : {}),
           ...(retrySelection?.type === "modal" ? { freeInput: retrySelection?.freeInput ?? this.defaultFreeInput } : {}),
@@ -574,6 +598,7 @@ export class BlackboxGamerAgent {
       recovered,
       ok: result?.ok === true,
       selectionType: selection?.type || null,
+      decisionSource: selection?.decisionSource || null,
     }, "info");
     this.emit("turn_transcript", {
       turn: turnIndex,
@@ -589,6 +614,7 @@ export class BlackboxGamerAgent {
         customId: selection?.customId || null,
         actionId: selection?.actionId || null,
         label: selection?.label || null,
+        decisionSource: selection?.decisionSource || null,
         ...(typeof selection?.reason === "string" ? { reason: selection.reason } : {}),
         ...(selection?.audit && typeof selection.audit === "object" ? { audit: selection.audit } : {}),
         ...(selection?.type === "modal" ? { freeInput: selection?.freeInput ?? this.defaultFreeInput } : {}),

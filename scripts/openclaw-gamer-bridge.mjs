@@ -149,6 +149,11 @@ function normalizeBridgePath(inputPath) {
 
 function sanitizeContext(context) {
   const visible = context?.visible && typeof context.visible === "object" ? context.visible : {};
+  const metadata = context?.metadata && typeof context.metadata === "object"
+    ? context.metadata
+    : visible?.metadata && typeof visible.metadata === "object"
+    ? visible.metadata
+    : {};
   const buttons = Array.isArray(visible.buttons)
     ? visible.buttons
         .map((button) => ({
@@ -161,37 +166,83 @@ function sanitizeContext(context) {
   const modal = visible?.modal && typeof visible.modal.customId === "string"
     ? {
       customId: visible.modal.customId,
+      title: typeof visible.modal.title === "string" ? visible.modal.title.slice(0, 200) : null,
       label: typeof visible.modal.label === "string" ? visible.modal.label : null,
       actionId: typeof visible.modal.actionId === "string" ? visible.modal.actionId : null,
+      fieldLabels: Array.isArray(visible.modal.fieldLabels)
+        ? visible.modal.fieldLabels
+            .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+            .filter(Boolean)
+            .slice(0, 12)
+        : [],
     }
     : null;
   const recommendation = visible?.recommendation && typeof visible.recommendation.actionId === "string"
     ? { actionId: visible.recommendation.actionId }
     : null;
+  const originalText = typeof visible?.originalText === "string" ? visible.originalText.slice(0, 5000) : "";
   const textSummary = typeof visible?.textSummary === "string" ? visible.textSummary.slice(0, 3000) : "";
-  return { visible: { textSummary, buttons, modal, recommendation } };
+  const preferModal = metadata?.preferModal === true;
+  return {
+    visible: {
+      originalText,
+      textSummary,
+      buttons,
+      modal,
+      recommendation,
+      ...(preferModal ? { metadata: { preferModal: true } } : {}),
+    },
+    ...(preferModal ? { metadata: { preferModal: true } } : {}),
+  };
 }
 
 function buildPrompt(context) {
   const visible = context.visible;
+  const preferModal = context?.metadata?.preferModal === true || visible?.metadata?.preferModal === true;
+  const visibleScreenText = (typeof visible.originalText === "string" && visible.originalText.trim())
+    ? visible.originalText
+    : visible.textSummary;
   const buttonLines = visible.buttons.length > 0
     ? visible.buttons
         .map((button, index) => `${index + 1}. label="${button.label ?? ""}" customId="${button.customId}" actionId="${button.actionId ?? ""}"`)
         .join("\n")
     : "(none)";
   const modalLine = visible.modal
-    ? `customId="${visible.modal.customId}" label="${visible.modal.label ?? ""}" actionId="${visible.modal.actionId ?? ""}"`
+    ? [
+      `customId="${visible.modal.customId}"`,
+      `title="${visible.modal.title ?? ""}"`,
+      `label="${visible.modal.label ?? ""}"`,
+      `actionId="${visible.modal.actionId ?? ""}"`,
+      `fieldLabels="${Array.isArray(visible.modal.fieldLabels) ? visible.modal.fieldLabels.join(" | ") : ""}"`,
+    ].join(" ")
     : "(none)";
   const recommendationLine = visible.recommendation?.actionId
     ? visible.recommendation.actionId
     : "(none)";
+  const preferModalLine = preferModal ? "true" : "false";
+  const highPriorityModalLines = preferModal && visible.modal?.customId
+    ? [
+      "",
+      "HIGH PRIORITY INSTRUCTION:",
+      `metadata.preferModal=true and visible modal customId exists (${visible.modal.customId}).`,
+      `Choose type=\"modal\" with customId=\"${visible.modal.customId}\" and provide free_input as one short sentence.`,
+      "Do not choose button unless the modal is unavailable.",
+    ]
+    : [];
   return [
     "You are a strict TRPG bridge selector.",
     "Choose one visible interaction only.",
+    "Judge using endpoint-visible screen content only.",
     "Do not invent customId values.",
     "If submitting modal, include brief free_input.",
+    ...highPriorityModalLines,
     "",
-    "Visible summary:",
+    `metadata.preferModal: ${preferModalLine}`,
+    "",
+    "Visible screen text (original preferred):",
+    visibleScreenText || "(empty)",
+    "",
+    "Visible summary (supplement):",
     visible.textSummary || "(empty)",
     "",
     "Visible buttons:",
@@ -247,6 +298,9 @@ function extractReasonSnippet(rawText) {
   }
   const first = lines[0].slice(0, 200).trim();
   if (!first) {
+    return "";
+  }
+  if (first.startsWith("{")) {
     return "";
   }
   if (/^[\[{(]+\s*[\]})]+$/.test(first)) {

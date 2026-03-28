@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openclaw.dev/contracts/smoke-mirror.schema.json",
+  "title": "Discord Smoke Mirror Payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "runId",
+    "scenario",
+    "turn",
+    "visible",
+    "drifter"
+  ],
+  "properties": {
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scenario": {
+      "type": "string",
+      "minLength": 1
+    },
+    "turn": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "visible": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scene",
+        "beat",
+        "pressure",
+        "choices",
+        "recommendation",
+        "modal",
+        "constraints"
+      ],
+      "properties": {
+        "scene": {
+          "type": "string"
+        },
+        "beat": {
+          "type": "string"
+        },
+        "pressure": {
+          "type": "string"
+        },
+        "choices": {
+          "type": "string"
+        },
+        "recommendation": {
+          "type": "string"
+        },
+        "modal": {
+          "type": "string"
+        },
+        "constraints": {
+          "type": "string"
+        }
+      }
+    },
+    "drifter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actionType",
+        "actionRef",
+        "inputText",
+        "reason",
+        "contractStatus"
+      ],
+      "properties": {
+        "actionType": {
+          "type": "string"
+        },
+        "actionRef": {
+          "type": "string"
+        },
+        "inputText": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "actionName": {
+          "type": "string"
+        },
+        "actionCode": {
+          "type": "string"
+        },
+        "humanReason": {
+          "type": "string"
+        },
+        "decisionSource": {
+          "type": "string",
+          "enum": [
+            "drifter",
+            "fallback",
+            "unknown"
+          ]
+        },
+        "contractStatus": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
