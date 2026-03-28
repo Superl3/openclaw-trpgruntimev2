@@ -300,6 +300,99 @@ test("expired analyzer memory is cleared and deterministic loop continues", asyn
   assert.equal(resolved.classification, "possible");
 });
 
+test("delegate-to-character follows the same rule-based recommendation as visible choices", async () => {
+  const { panel, sceneLoop } = await modulesPromise;
+  const nowIso = new Date().toISOString();
+  const session = makeSession(sceneLoop, nowIso);
+  const loop = session.deterministicLoop;
+
+  loop.scene.pressure = 82;
+  loop.scene.riskTier = "high";
+  loop.scene.npcAvailable = false;
+  loop.analyzerMemory.recentResolvedActions = ["action.observe", "action.observe"];
+  loop.intentInertia.lastMappedActionId = "action.observe";
+  loop.intentInertia.streakCount = 2;
+  loop.exchange = {
+    exchangeId: "ex-1",
+    exchangeIndex: 2,
+    inputActionId: "action.rush",
+    resolvedActionId: "action.rush",
+    classification: "reckless",
+    deltaTimeSec: 30,
+    resultSummary: "무리한 돌파로 현장이 거칠어졌다.",
+    riskNote: "위험 상승",
+    reactionChain: [],
+    occurredAtIso: nowIso,
+  };
+
+  const rendered = panel.buildCheckpoint1Panel({
+    session,
+    routes: [],
+    mode: "send",
+  });
+  const recommendedActionId = rendered.components?.recommendation?.actionId;
+  assert.ok(["action.observe", "action.move", "action.wait"].includes(recommendedActionId));
+
+  const delegated = sceneLoop.resolveDeterministicSceneAction({
+    loop,
+    routeActionId: "action.free_input.submit",
+    freeInput: "캐릭터에게 맡기기",
+    nowIso,
+  });
+
+  assert.equal(delegated.resolvedActionId, recommendedActionId);
+  assert.notEqual(delegated.resolvedActionId, "action.rush");
+  assert.notEqual(delegated.resolvedActionId, "action.talk");
+});
+
+test("delegate-to-character can resolve to non-observe action when rules prefer caution/continuity", async () => {
+  const { panel, sceneLoop } = await modulesPromise;
+  const nowIso = new Date().toISOString();
+  const session = makeSession(sceneLoop, nowIso);
+  const loop = session.deterministicLoop;
+
+  loop.scene.pressure = 18;
+  loop.scene.riskTier = "low";
+  loop.behavioralDrift.drift.caution = 0.8;
+  loop.behavioralDrift.drift.boldness = -0.25;
+  loop.behavioralDrift.drift.aggression = -0.2;
+  loop.analyzerMemory.recentResolvedActions = ["action.rush"];
+  loop.intentInertia.lastMappedActionId = "action.rush";
+  loop.intentInertia.streakCount = 1;
+  loop.exchange = {
+    exchangeId: "ex-2",
+    exchangeIndex: 1,
+    inputActionId: "action.rush",
+    resolvedActionId: "action.rush",
+    classification: "reckless",
+    deltaTimeSec: 25,
+    resultSummary: "위험한 시도로 긴장이 올랐다.",
+    riskNote: "무리함",
+    reactionChain: [],
+    occurredAtIso: nowIso,
+  };
+
+  const rendered = panel.buildCheckpoint1Panel({
+    session,
+    routes: [],
+    mode: "send",
+  });
+  const recommendedActionId = rendered.components?.recommendation?.actionId;
+  assert.equal(recommendedActionId, "action.wait");
+
+  const delegated = sceneLoop.resolveDeterministicSceneAction({
+    loop,
+    routeActionId: "action.free_input.submit",
+    freeInput: "성향 추천 선택",
+    nowIso,
+  });
+
+  assert.equal(delegated.resolvedActionId, "action.wait");
+  assert.equal(delegated.resolvedActionId, recommendedActionId);
+  assert.notEqual(delegated.resolvedActionId, "action.observe");
+  assert.notEqual(delegated.resolvedActionId, "action.rush");
+});
+
 test("default panel hides raw drift and debug panel shows raw drift", async () => {
   const { panel, sceneLoop } = await modulesPromise;
   const nowIso = new Date().toISOString();

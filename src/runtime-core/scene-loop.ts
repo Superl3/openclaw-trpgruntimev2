@@ -18,6 +18,7 @@ import {
   type AnchorRuntimeState,
   type AnchorTickSummary,
 } from "./anchor-layer.js";
+import { selectDelegateActionId } from "./action-recommendation.js";
 import type { RuntimeBootstrapInput } from "./types.js";
 
 export type ActionFeasibility = "possible" | "currently_impossible" | "reckless" | "impossible";
@@ -440,13 +441,17 @@ function computeDeltaTimeSec(params: {
   return clampInt(Math.round(base * classificationFactor * pressureFactor * ongoingFactor), 5, 900);
 }
 
+function isDelegateToCharacterInput(normalized: string): boolean {
+  return /(성향\s*추천|추천\s*선택|캐릭터.+맡기|맡겨|delegate)/.test(normalized);
+}
+
 export function mapFreeInputToActionDeterministic(freeInput: string): DeterministicActionId {
   const normalized = readString(freeInput).toLowerCase();
   if (!normalized) {
     return "action.unknown";
   }
 
-  if (/(성향\s*추천|추천\s*선택|캐릭터.+맡기|맡겨|delegate)/.test(normalized)) {
+  if (isDelegateToCharacterInput(normalized)) {
     return "action.observe";
   }
 
@@ -474,7 +479,12 @@ type ResolvedAction = {
   resolvedActionId: DeterministicActionId;
 };
 
-function resolveActionId(inputActionId: string, freeInput?: string, resolvedActionOverride?: string): ResolvedAction {
+function resolveActionId(
+  inputActionId: string,
+  loop: DeterministicSceneLoopState,
+  freeInput?: string,
+  resolvedActionOverride?: string,
+): ResolvedAction {
   const normalizedInput = normalizeActionId(inputActionId);
 
   const override = normalizeActionId(readString(resolvedActionOverride));
@@ -486,9 +496,16 @@ function resolveActionId(inputActionId: string, freeInput?: string, resolvedActi
   }
 
   if (normalizedInput === "action.free_input.submit") {
+    const normalizedFreeInput = readString(freeInput).toLowerCase();
+    const delegatedActionId = isDelegateToCharacterInput(normalizedFreeInput)
+      ? normalizeActionId(selectDelegateActionId({ loop }) ?? "action.unknown")
+      : "action.unknown";
     return {
       inputActionId: normalizedInput,
-      resolvedActionId: mapFreeInputToActionDeterministic(readString(freeInput)),
+      resolvedActionId:
+        delegatedActionId !== "action.unknown"
+          ? delegatedActionId
+          : mapFreeInputToActionDeterministic(readString(freeInput)),
     };
   }
 
@@ -919,7 +936,7 @@ export function resolveDeterministicSceneAction(input: DeterministicActionInput)
     sceneId: input.loop.scene.sceneId,
     nowIso: input.nowIso,
   });
-  const resolvedAction = resolveActionId(input.routeActionId, input.freeInput, input.resolvedActionOverride);
+  const resolvedAction = resolveActionId(input.routeActionId, input.loop, input.freeInput, input.resolvedActionOverride);
   const classified = classifyAction({
     loop: current,
     resolvedActionId: resolvedAction.resolvedActionId,
