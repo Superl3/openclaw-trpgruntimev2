@@ -208,7 +208,7 @@ function buildPromptSurfaceChunk(params) {
         TRPG_RUNTIME_ACTION_FEASIBILITY_GUARD: { mandatory: true, priority: 88, maxLines: 14, maxChars: 1800 },
         TRPG_RUNTIME_FREEFORM_RULE: { mandatory: true, priority: 86, maxLines: 10, maxChars: 1200 },
         TRPG_DISCORD_COMPONENTS: { mandatory: true, priority: 84, maxLines: 20, maxChars: 2500 },
-        TRPG_RUNTIME_STATUS_PANEL_V1: { mandatory: true, priority: 82, maxLines: 8, maxChars: 950 },
+        TRPG_RUNTIME_STATUS_PANEL_V1: { mandatory: true, priority: 82, maxLines: 12, maxChars: 1300 },
         TRPG_RUNTIME_TRAVEL_TRANSITION: { mandatory: false, priority: 76, maxLines: 9, maxChars: 1000 },
         TRPG_RUNTIME_FAST_WAIT_V1: { mandatory: false, priority: 74, maxLines: 8, maxChars: 900 },
         TRPG_RUNTIME_ECONOMY_LITE_V1: { mandatory: false, priority: 70, maxLines: 7, maxChars: 900 },
@@ -891,6 +891,62 @@ function relationshipKey(value) {
         return "";
     }
     return `${from}|${to}|${relationType}|${visibility}|${source}`;
+}
+async function syncBootstrapStateToStatus(params) {
+    const nowIso = new Date().toISOString();
+    const loaded = await loadStructuredWorldFile(params.worldRoot, "state/player-status.yaml", {
+        allowMissing: true,
+        maxReadBytes: params.cfg.maxReadBytes,
+    });
+    const root = toObject(loaded.parsed);
+    const meta = toObject(root.meta);
+    const playerStatus = toObject(root.player_status);
+    const bootstrapStatus = toObject(playerStatus.bootstrap);
+    const desiredName = readString(playerStatus.name) || readString(params.player.name);
+    const desiredGoal = readString(playerStatus.current_goal) || readString(params.player.goal);
+    const desiredBootstrapName = readString(params.player.name);
+    const desiredBootstrapBackground = readString(params.player.background);
+    const desiredBootstrapMotive = readString(params.player.motive);
+    const desiredBootstrapGoal = readString(params.player.goal);
+    const desiredCharacterCreated = params.gameState.character_created === true;
+    const desiredBootstrapComplete = params.gameState.bootstrap_complete === true;
+    const changed = readString(playerStatus.name) !== desiredName ||
+        readString(playerStatus.current_goal) !== desiredGoal ||
+        readString(bootstrapStatus.name) !== desiredBootstrapName ||
+        readString(bootstrapStatus.background) !== desiredBootstrapBackground ||
+        readString(bootstrapStatus.motive) !== desiredBootstrapMotive ||
+        readString(bootstrapStatus.goal) !== desiredBootstrapGoal ||
+        (playerStatus.character_created === true) !== desiredCharacterCreated ||
+        (playerStatus.bootstrap_complete === true) !== desiredBootstrapComplete ||
+        (bootstrapStatus.character_created === true) !== desiredCharacterCreated ||
+        (bootstrapStatus.bootstrap_complete === true) !== desiredBootstrapComplete;
+    if (!changed && loaded.exists) {
+        return;
+    }
+    root.meta = {
+        ...meta,
+        schema_version: 1,
+        last_updated: readString(meta.last_updated) || nowIso,
+    };
+    root.player_status = {
+        ...playerStatus,
+        name: desiredName,
+        current_goal: desiredGoal,
+        character_created: desiredCharacterCreated,
+        bootstrap_complete: desiredBootstrapComplete,
+        bootstrap: {
+            ...bootstrapStatus,
+            name: desiredBootstrapName,
+            background: desiredBootstrapBackground,
+            motive: desiredBootstrapMotive,
+            goal: desiredBootstrapGoal,
+            character_created: desiredCharacterCreated,
+            bootstrap_complete: desiredBootstrapComplete,
+            synced_at: nowIso,
+        },
+    };
+    const rendered = renderStructuredContent(loaded.format ?? "yaml", root);
+    await fs.writeFile(resolveWorldAbsolutePath(params.worldRoot, "state/player-status.yaml"), rendered, "utf8");
 }
 async function applyBootstrapAuditedPersistence(params) {
     if (params.operations.length === 0) {
@@ -2011,6 +2067,7 @@ async function loadStatusPanelData(params) {
     ]);
     const statusRoot = toObject(statusLoaded.parsed);
     const playerStatus = toObject(statusRoot.player_status);
+    const bootstrapStatus = toObject(playerStatus.bootstrap);
     const legacyStatus = toObject(statusRoot.status);
     const health = toObject(legacyStatus.health);
     const staminaGauge = toObject(legacyStatus.stamina);
@@ -2103,7 +2160,7 @@ async function loadStatusPanelData(params) {
         stressCurrent: readFiniteNumber(stress.current),
         stressMax: readFiniteNumber(stress.max),
         money,
-        staminaState: readString(playerStatus.stamina) || "normal",
+        staminaState: readString(playerStatus.stamina) || readString(playerStatus.stamina_state) || "normal",
         conditionState: readString(playerStatus.condition) || "healthy",
         tags: toStringArray(playerStatus.tags).slice(0, 6),
         fundsText,
@@ -2112,6 +2169,14 @@ async function loadStatusPanelData(params) {
         equippedItems: authoritativeEquipped,
         inventoryNotes: notes,
         worldTime,
+        playerName: readString(playerStatus.name) || readString(bootstrapStatus.name),
+        currentGoal: readString(playerStatus.current_goal) || readString(bootstrapStatus.goal),
+        bootstrapCharacterCreated: typeof playerStatus.character_created === "boolean"
+            ? playerStatus.character_created === true
+            : bootstrapStatus.character_created === true,
+        bootstrapComplete: typeof playerStatus.bootstrap_complete === "boolean"
+            ? playerStatus.bootstrap_complete === true
+            : bootstrapStatus.bootstrap_complete === true,
     };
 }
 function isStatusRecallIntent(message) {
@@ -2135,6 +2200,12 @@ function buildStatusPanelGuardChunk(params) {
         lines.push(`Player tags: ${params.status.tags.join(", ")}`);
     }
     lines.push("Inventory-authoritative policy: only use carried/equipped anchors listed here; never invent missing items from prior turns.");
+    if (params.status.playerName || params.status.currentGoal) {
+        lines.push(`Profile (state/player-status): ${params.status.playerName || "unknown"} | Goal: ${params.status.currentGoal || "unset"}`);
+    }
+    if (params.status.bootstrapCharacterCreated || params.status.bootstrapComplete) {
+        lines.push(`Bootstrap flags (state/player-status): character_created=${String(params.status.bootstrapCharacterCreated)} | bootstrap_complete=${String(params.status.bootstrapComplete)}`);
+    }
     if (params.status.equippedItems.length > 0) {
         lines.push(`Equipped anchors: ${params.status.equippedItems.slice(0, 3).join(" | ")}`);
     }
@@ -3000,6 +3071,12 @@ async function runCharacterBootstrapGate(params) {
             throw new Error(persisted.error || "bootstrap player persistence failed");
         }
     }
+    await syncBootstrapStateToStatus({
+        cfg: params.cfg,
+        worldRoot: params.worldRoot,
+        player,
+        gameState,
+    });
     const [worldSeedsLoaded, relationshipsLoaded] = await Promise.all([
         loadStructuredWorldFile(params.worldRoot, "state/world-seeds.yaml", {
             allowMissing: true,
@@ -3252,6 +3329,22 @@ async function detectRuntimePhase(params) {
     });
     return runtimePhase;
 }
+function classifyTurnKind(latestUserMessage) {
+    const text = latestUserMessage.trim().toLowerCase();
+    if (!text) {
+        return "scene-turn";
+    }
+    if (/^(?:\/(?:help|status|debug|config|설정)|ooc\b|meta\b)/.test(text)) {
+        return "etc";
+    }
+    if (/(?:구현|브릿지|bridge|runtime|plugin|코드|test|테스트|schema|스키마|config|debug|디버그|버그|fix|커밋|commit|pr\b|patch|tool|modal|component|discord|openclaw|trpg-v2|drifter|어떻게\s*바꾸|how\s+do\s+i\s+change)/.test(text)) {
+        return "etc";
+    }
+    if (/(?:이동|조사|공격|대화|말한다|묻는다|살핀다|본다|사용한다|열어본다|간다|한다|선택|입력|완료|계속)/.test(text)) {
+        return "scene-turn";
+    }
+    return "scene-turn";
+}
 function normalizeSceneComponentInputByPhase(input, runtimePhase) {
     const sanitizedDescription = sanitizeLegacyBootstrapTemplateText(readString(input.description));
     const safeDescription = sanitizedDescription || "캐릭터 준비 정보를 입력해 주세요.";
@@ -3427,6 +3520,7 @@ const trpgRuntimePlugin = {
                     appendChunks.push([
                         "[TRPG_RUNTIME_BOOTSTRAP_COMPLETED]",
                         "Character bootstrap has just completed. Resume normal scene engine flow now.",
+                        "Canon/state sync for player bootstrap has already been applied before response rendering.",
                         "For this opening response, output order is mandatory:",
                         "1) current location and situation",
                         "2) visible clues",
@@ -3436,6 +3530,18 @@ const trpgRuntimePlugin = {
                         "6) optional suggestions only after freeform invitation",
                     ].join(String.fromCharCode(10)));
                 }
+                appendChunks.push([
+                    "[TRPG_RUNTIME_TURN_PIPELINE]",
+                    "Enforce this order for every scene-turn response:",
+                    "1) authoritative state read",
+                    "2) classify latest input",
+                    "3) adjudicate feasibility",
+                    "4) apply state patch",
+                    "5) render response/components",
+                    "6) send",
+                    "Never describe post-patch state that has not been written yet.",
+                    "Status panel facts must follow state/player-status as the primary source.",
+                ].join(String.fromCharCode(10)));
                 const guard = await applySceneIntroGuard({ cfg, worldRoot });
                 if (guard.introRequired) {
                     const guidance = [
@@ -3462,6 +3568,28 @@ const trpgRuntimePlugin = {
                     maxReadBytes: cfg.maxReadBytes,
                 });
                 const sceneStateRoot = toObject(sceneStateLoaded.parsed);
+                const statusPanelData = await loadStatusPanelData({
+                    cfg,
+                    worldRoot,
+                });
+                const statusPanelChunk = buildStatusPanelGuardChunk({
+                    status: statusPanelData,
+                    latestAction,
+                });
+                if (statusPanelChunk) {
+                    appendChunks.push(statusPanelChunk);
+                }
+                const actionFeasibilityGuardChunk = await buildActionFeasibilityGuardChunk({
+                    cfg,
+                    worldRoot,
+                    messages: promptMessages,
+                    prompt: event.prompt,
+                    sceneParsed: sceneStateRoot,
+                    statusPanelData,
+                });
+                if (actionFeasibilityGuardChunk) {
+                    appendChunks.push(actionFeasibilityGuardChunk);
+                }
                 const persistenceState = applyScenePersistenceDefaults({
                     sceneParsed: sceneStateRoot,
                     latestAction,
@@ -3491,28 +3619,6 @@ const trpgRuntimePlugin = {
                 });
                 if (economyContext.contextChunk) {
                     appendChunks.push(economyContext.contextChunk);
-                }
-                const statusPanelData = await loadStatusPanelData({
-                    cfg,
-                    worldRoot,
-                });
-                const statusPanelChunk = buildStatusPanelGuardChunk({
-                    status: statusPanelData,
-                    latestAction,
-                });
-                if (statusPanelChunk) {
-                    appendChunks.push(statusPanelChunk);
-                }
-                const actionFeasibilityGuardChunk = await buildActionFeasibilityGuardChunk({
-                    cfg,
-                    worldRoot,
-                    messages: promptMessages,
-                    prompt: event.prompt,
-                    sceneParsed: sceneStateRoot,
-                    statusPanelData,
-                });
-                if (actionFeasibilityGuardChunk) {
-                    appendChunks.push(actionFeasibilityGuardChunk);
                 }
                 const npcMemoryChunk = await updateAndBuildNpcMemoryChunk({
                     cfg,
@@ -3826,8 +3932,28 @@ const trpgRuntimePlugin = {
             properties: {
                 scene: {
                     type: "string",
-                    enum: ["exploration", "npc_encounter", "combat", "choice", "dialogue", "system"],
+                    enum: [
+                        "bootstrap_choice",
+                        "exploration",
+                        "npc_encounter",
+                        "combat",
+                        "choice",
+                        "dialogue",
+                        "system",
+                        "system_input",
+                        "resolution",
+                        "travel_transition",
+                    ],
                     description: "Scene type determines template",
+                },
+                turnKind: {
+                    type: "string",
+                    enum: ["scene-turn", "etc"],
+                    description: "Optional caller-provided routing hint for scene vs meta/etc turns",
+                },
+                latestUserMessage: {
+                    type: "string",
+                    description: "Latest raw user input used for routing/classification fallback",
                 },
                 description: {
                     type: "string",
@@ -3877,6 +4003,10 @@ const trpgRuntimePlugin = {
                         properties: {
                             label: { type: "string" },
                             style: { type: "string", enum: ["primary", "secondary", "success", "danger"] },
+                            actionId: { type: "string" },
+                            customId: { type: ["string", "null"] },
+                            custom_id: { type: ["string", "null"] },
+                            disabled: { type: "boolean" },
                         },
                         required: ["label", "style"],
                     },
@@ -3920,18 +4050,49 @@ const trpgRuntimePlugin = {
                     return jsonToolResult(gate.payload);
                 }
                 try {
+                    const rawInput = params;
                     const runtimePhase = await detectRuntimePhase({
                         cfg,
                         worldRoot: gate.worldRoot,
                         sessionId: ctx.sessionId,
                     });
-                    const normalizedInput = normalizeSceneComponentInputByPhase(params, runtimePhase);
+                    const routingText = readString(rawInput.turnKind) ? "" : readString(rawInput.latestUserMessage) || readString(rawInput.description);
+                    const turnKind = rawInput.turnKind === "etc" || rawInput.turnKind === "scene-turn"
+                        ? rawInput.turnKind
+                        : classifyTurnKind(routingText);
+                    if (turnKind === "etc") {
+                        await emitRuntimeDiagnostic({
+                            cfg,
+                            worldRoot: gate.worldRoot,
+                            sessionId: ctx.sessionId,
+                            event: "scene_components_suppressed",
+                            severity: "info",
+                            runtimePhase,
+                            route: "trpg_scene_components",
+                            gate: "turn_kind",
+                            result: "etc",
+                            details: {
+                                requestedScene: readString(rawInput.scene),
+                                latestUserMessage: readString(rawInput.latestUserMessage) || undefined,
+                            },
+                        });
+                        return jsonToolResult({
+                            ok: true,
+                            runtimePhase,
+                            turnKind,
+                            plainReplyRecommended: true,
+                            skipSceneComponents: true,
+                            components: null,
+                            instructions: "This input is meta/etc, so reply in plain text instead of sending TRPG scene components.",
+                        });
+                    }
+                    const normalizedInput = normalizeSceneComponentInputByPhase(rawInput, runtimePhase);
                     const components = buildSceneComponents(normalizedInput);
-                    const requestedButtons = Array.isArray(params.buttons)
-                        ? params.buttons?.length ?? 0
+                    const requestedButtons = Array.isArray(rawInput.buttons)
+                        ? rawInput.buttons?.length ?? 0
                         : 0;
                     const normalizedButtons = Array.isArray(normalizedInput.buttons) ? normalizedInput.buttons.length : 0;
-                    const requestedScene = readString(params.scene);
+                    const requestedScene = readString(rawInput.scene);
                     const blockedButtons = normalizedInput.scene !== requestedScene
                         ? requestedButtons
                         : Math.max(0, requestedButtons - normalizedButtons);
@@ -3952,11 +4113,15 @@ const trpgRuntimePlugin = {
                             normalizedButtons,
                             blockedButtons,
                             includeInput: normalizedInput.includeInput !== false,
+                            turnKind,
                         },
                     });
                     return jsonToolResult({
                         ok: true,
                         runtimePhase,
+                        turnKind,
+                        plainReplyRecommended: false,
+                        skipSceneComponents: false,
                         components,
                         instructions: "Pass this 'components' object to the message tool: message(action='send', message='scene update', components=<this.components>)",
                     });
@@ -3975,5 +4140,6 @@ const trpgRuntimePlugin = {
 export const __internalTestHooks = {
     extractLatestUserMessageFromPrompt,
     extractBootstrapFreeform,
+    classifyTurnKind,
 };
 export default trpgRuntimePlugin;

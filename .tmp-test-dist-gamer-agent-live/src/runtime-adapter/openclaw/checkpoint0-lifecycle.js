@@ -132,8 +132,8 @@ const TRPG_COMMAND_HINTS = [
     {
         command: "/trpg new",
         tool: "trpg_session_new",
-        summary: "새 세션과 임시 워크스페이스를 시작한다.",
-        example: "/trpg new",
+        summary: "새 세션과 임시 워크스페이스를 시작한다. 기존 세션/임시데이터 정리 후 바로 재시작하려면 wipeMode=force를 사용한다.",
+        example: "/trpg new wipeMode=force",
     },
     {
         command: "/trpg resume",
@@ -1104,8 +1104,10 @@ export function registerCheckpoint0LifecycleTools(api) {
                     sessionContextId,
                 });
                 const contaminationDetected = Boolean(currentActive) || Boolean(workspaceRecord);
+                const autoResetRequested = wipeMode === "force" && !confirmReset;
+                const canAutoReset = autoResetRequested && (!currentActive || currentActive.ownerId === ownerId);
                 if (contaminationDetected) {
-                    if (!confirmReset) {
+                    if (!canAutoReset && !confirmReset) {
                         const confirmation = await issueSessionResetConfirmation({
                             canonicalWorldRoot: gate.worldRoot,
                             sessionContextId,
@@ -1127,7 +1129,7 @@ export function registerCheckpoint0LifecycleTools(api) {
                             confirmToken: confirmation.token,
                             confirmExpiresAt: confirmation.expiresAt,
                             nextActions: buildNewConfirmationActionHints(confirmation.token),
-                            components: {
+                            actionableComponents: {
                                 type: "actions",
                                 title: "기존 세션이 있어 확인이 필요합니다.",
                                 token: confirmation.token,
@@ -1155,23 +1157,51 @@ export function registerCheckpoint0LifecycleTools(api) {
                                     },
                                 ],
                             },
+                            components: {
+                                text: "기존 세션이 있어 확인이 필요합니다.",
+                                buttons: [
+                                    {
+                                        id: "trpg_new_confirm_yes",
+                                        label: "YES",
+                                        style: "danger",
+                                        tool: "trpg_session_new",
+                                        params: {
+                                            confirmReset: true,
+                                            confirmToken: confirmation.token,
+                                            wipeMode: "force",
+                                        },
+                                    },
+                                    {
+                                        id: "trpg_new_confirm_no",
+                                        label: "NO",
+                                        style: "secondary",
+                                        tool: "trpg_session_new",
+                                        params: {
+                                            confirmReset: false,
+                                            wipeMode: "ask",
+                                        },
+                                    },
+                                ],
+                            },
                         });
                     }
-                    const verified = await consumeSessionResetConfirmation({
-                        canonicalWorldRoot: gate.worldRoot,
-                        token: confirmToken,
-                        sessionContextId,
-                        channelKey,
-                        ownerId,
-                    });
-                    if (!verified.ok) {
-                        return jsonToolResult(runtimeError({
-                            command: "/trpg new",
-                            errorCode: "invalid_confirm_token",
-                            message: "confirmToken is invalid, expired, or mismatched with current context.",
-                            recoverable: true,
-                            recoveryHint: "Run /trpg new again and use the latest YES token.",
-                        }));
+                    if (!canAutoReset) {
+                        const verified = await consumeSessionResetConfirmation({
+                            canonicalWorldRoot: gate.worldRoot,
+                            token: confirmToken,
+                            sessionContextId,
+                            channelKey,
+                            ownerId,
+                        });
+                        if (!verified.ok) {
+                            return jsonToolResult(runtimeError({
+                                command: "/trpg new",
+                                errorCode: "invalid_confirm_token",
+                                message: "confirmToken is invalid, expired, or mismatched with current context.",
+                                recoverable: true,
+                                recoveryHint: "Run /trpg new again and use the latest YES token.",
+                            }));
+                        }
                     }
                     if (currentActive) {
                         await runtime.engine.endSession({

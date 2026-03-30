@@ -11,6 +11,8 @@ Structured TRPG runtime plugin for OpenClaw.
 - `trpg_dice_roll` - deterministic/traceable dice roll output
 - `trpg_state_compact` - lifecycle compaction dry-run/audited apply planner
 - `trpg_session_new` / `trpg_session_resume` / `trpg_session_end` - session panel lifecycle
+
+- 빠른 초기화 프로시저: 기본적으로 `/trpg new wipeMode=force` 실행 시 동일 owner 조건에서 기존 세션/임시 워크스페이스를 바로 정리 후 새 세션을 시작한다.
 - `trpg_panel_interact` / `trpg_panel_message_commit` - owner-guarded panel callback + message metadata sync
 - Runtime hardening: bounded session trace, stale interaction codes, and `dispatchId`-based panel commit safety
 - Checkpoint 5 temporal core: deterministic memory/freshness/residual-trace/location drift driven by `delta_time`

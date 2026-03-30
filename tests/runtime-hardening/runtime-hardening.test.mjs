@@ -1134,6 +1134,45 @@ test("/trpg new requires confirmation token on contamination and validates token
   assert.equal(typeof confirmed.workspace?.workspaceRoot, "string");
 });
 
+test("/trpg new force wipeMode skips confirmation for same-owner re-reset", async () => {
+  const { plugin } = await modulesPromise;
+  const worldRoot = "/tmp/trpg-runtime-v2-new-force-world";
+  await fs.rm(worldRoot, { recursive: true, force: true });
+  await fs.mkdir(path.resolve(worldRoot, "state/runtime-core"), { recursive: true });
+
+  const tools = new Map();
+  const api = {
+    pluginConfig: {
+      allowedAgentIds: ["trpg"],
+      panelDispatchTtlSec: 120,
+    },
+    resolvePath: (input) => (input === "world" ? worldRoot : path.resolve(input)),
+    logger: { info: () => {}, warn: () => {} },
+    on: () => {},
+    registerTool: (factory, options) => {
+      tools.set(options.name, factory({ agentId: "trpg", sessionId: "discord-force", userId: "owner-1" }));
+    },
+  };
+  plugin.register(api);
+  const newTool = tools.get("trpg_session_new");
+  assert.ok(newTool);
+  const parse = (result) => JSON.parse(result.content[0].text);
+
+  const first = parse(await newTool.execute("new", { channelKey: "discord:force-room", ownerId: "owner-1" }));
+  assert.equal(first.ok, true);
+
+  const forced = parse(
+    await newTool.execute("new-force", {
+      channelKey: "discord:force-room",
+      ownerId: "owner-1",
+      wipeMode: "force",
+    }),
+  );
+  assert.equal(forced.ok, true);
+  assert.notEqual(forced.session.sessionId, first.session.sessionId);
+  assert.equal(Array.isArray(forced?.actionableComponents?.buttons), true);
+});
+
 test("/trpg help returns visible command list and examples", async () => {
   const { plugin } = await modulesPromise;
   const worldRoot = "/tmp/trpg-runtime-v2-help-world";

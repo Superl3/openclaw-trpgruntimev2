@@ -20,6 +20,15 @@ Use it from `~/.openclaw/extensions/trpg-runtime-v2` either as a plugin-only ove
 11. Agent-level gate through `plugins.entries.trpg-runtime-v2.config.allowedAgentIds`.
 12. Path/write safety guards around world-root resolution and patch operations.
 
+
+## Reset procedure for fresh restart (/trpg new)
+
+- To fully start from scratch while a previous session/workspace exists, use:
+  - `/trpg new wipeMode=force`
+- When the caller is the current session owner (or no active session exists), this performs a direct reset.
+- If the active session belongs to another owner, plugin still asks for confirmation with token (`YES`).
+- This removes the need for repeated manual token flow in the normal user-owned reset flow.
+
 ## 2.2) Runtime hardening notes
 
 - `trpg_panel_message_commit` should use `dispatchId` from latest `panelDispatch` payload.

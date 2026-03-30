@@ -80,7 +80,10 @@
         "enabled": true,
         "config": {
           "allowPatchApply": false,
-          "allowedAgentIds": ["trpg"]
+          "allowedAgentIds": ["operator", "trpg-v2", "drifter", "trpg"],
+          "maxReadBytes": 262144,
+          "maxFilesPerQuery": 40,
+          "maxOperationsPerPatch": 64
         }
       }
     }

@@ -187,8 +187,8 @@ const TRPG_COMMAND_HINTS: TrpgCommandHint[] = [
   {
     command: "/trpg new",
     tool: "trpg_session_new",
-    summary: "새 세션과 임시 워크스페이스를 시작한다.",
-    example: "/trpg new",
+    summary: "새 세션과 임시 워크스페이스를 시작한다. 기존 세션/임시데이터 정리 후 바로 재시작하려면 wipeMode=force를 사용한다.",
+    example: "/trpg new wipeMode=force",
   },
   {
     command: "/trpg resume",
@@ -1335,9 +1335,11 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
             sessionContextId,
           });
           const contaminationDetected = Boolean(currentActive) || Boolean(workspaceRecord);
+          const autoResetRequested = wipeMode === "force" && !confirmReset;
+          const canAutoReset = autoResetRequested && (!currentActive || currentActive.ownerId === ownerId);
 
           if (contaminationDetected) {
-            if (!confirmReset) {
+            if (!canAutoReset && !confirmReset) {
               const confirmation = await issueSessionResetConfirmation({
                 canonicalWorldRoot: gate.worldRoot,
                 sessionContextId,
@@ -1416,23 +1418,25 @@ export function registerCheckpoint0LifecycleTools(api: OpenClawPluginApi): void 
               });
             }
 
-            const verified = await consumeSessionResetConfirmation({
-              canonicalWorldRoot: gate.worldRoot,
-              token: confirmToken,
-              sessionContextId,
-              channelKey,
-              ownerId,
-            });
-            if (!verified.ok) {
-              return jsonToolResult(
-                runtimeError({
-                  command: "/trpg new",
-                  errorCode: "invalid_confirm_token",
-                  message: "confirmToken is invalid, expired, or mismatched with current context.",
-                  recoverable: true,
-                  recoveryHint: "Run /trpg new again and use the latest YES token.",
-                }),
-              );
+            if (!canAutoReset) {
+              const verified = await consumeSessionResetConfirmation({
+                canonicalWorldRoot: gate.worldRoot,
+                token: confirmToken,
+                sessionContextId,
+                channelKey,
+                ownerId,
+              });
+              if (!verified.ok) {
+                return jsonToolResult(
+                  runtimeError({
+                    command: "/trpg new",
+                    errorCode: "invalid_confirm_token",
+                    message: "confirmToken is invalid, expired, or mismatched with current context.",
+                    recoverable: true,
+                    recoveryHint: "Run /trpg new again and use the latest YES token.",
+                  }),
+                );
+              }
             }
 
             if (currentActive) {

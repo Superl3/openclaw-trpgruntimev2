@@ -20,6 +20,15 @@
 11. `plugins.entries.trpg-runtime-v2.config.allowedAgentIds` 기반 에이전트 실행 제한.
 12. world root 해석/패치 작업에 대한 경로 및 쓰기 가드.
 
+
+## 새 세션 강제 초기화(Quick Reset) 프로시저
+
+- 진행 중인 세션/임시 워크스페이스를 비우고 완전 재시작하려면:
+  - `/trpg new wipeMode=force`
+- 호출 주체가 현재 채널의 기존 세션 owner와 같거나, 활성 세션이 없을 때는 바로 리셋 후 새 세션을 시작한다.
+- 다른 owner의 활성 세션이 걸려 있으면 기존처럼 토큰 기반 확인(YES) 플로우로 보호된다.
+- 운영자 입장에서 반복 확인이 많을 때는 이 절차를 우선 적용한다.
+
 ## 2.2) Runtime hardening 메모
 
 - `trpg_panel_message_commit`는 최신 `panelDispatch`의 `dispatchId`를 함께 전달해야 합니다.

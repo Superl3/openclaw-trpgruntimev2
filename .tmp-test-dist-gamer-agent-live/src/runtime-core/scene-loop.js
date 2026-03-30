@@ -1,6 +1,7 @@
 import { buildQuestTemporalSignal, ensureTemporalRuntimeState, runTemporalUpdatePipeline, } from "./temporal-systems.js";
 import { ensureQuestEconomyState, runQuestEconomyTick, } from "./quest-economy.js";
 import { createNoopAnchorTickSummary, ensureAnchorRuntimeState, runAnchorTick, } from "./anchor-layer.js";
+import { selectDelegateActionId } from "./action-recommendation.js";
 const DEFAULT_SCENE_ID = "scene-bootstrap";
 export const DEFAULT_ANALYZER_MEMORY_TTL_SEC = 900;
 const BEAT_OBJECTIVES = [
@@ -228,12 +229,15 @@ function computeDeltaTimeSec(params) {
     const ongoingFactor = params.loop.ongoingAction && params.loop.ongoingAction.status === "in_progress" ? 0.85 : 1;
     return clampInt(Math.round(base * classificationFactor * pressureFactor * ongoingFactor), 5, 900);
 }
+function isDelegateToCharacterInput(normalized) {
+    return /(성향\s*추천|추천\s*선택|캐릭터.+맡기|맡겨|delegate)/.test(normalized);
+}
 export function mapFreeInputToActionDeterministic(freeInput) {
     const normalized = readString(freeInput).toLowerCase();
     if (!normalized) {
         return "action.unknown";
     }
-    if (/(성향\s*추천|추천\s*선택|캐릭터.+맡기|맡겨|delegate)/.test(normalized)) {
+    if (isDelegateToCharacterInput(normalized)) {
         return "action.observe";
     }
     if (/(조사|살핀|탐색|observe|inspect|look)/.test(normalized)) {
@@ -253,7 +257,7 @@ export function mapFreeInputToActionDeterministic(freeInput) {
     }
     return "action.unknown";
 }
-function resolveActionId(inputActionId, freeInput, resolvedActionOverride) {
+function resolveActionId(inputActionId, loop, freeInput, resolvedActionOverride) {
     const normalizedInput = normalizeActionId(inputActionId);
     const override = normalizeActionId(readString(resolvedActionOverride));
     if (override !== "action.unknown") {
@@ -263,9 +267,15 @@ function resolveActionId(inputActionId, freeInput, resolvedActionOverride) {
         };
     }
     if (normalizedInput === "action.free_input.submit") {
+        const normalizedFreeInput = readString(freeInput).toLowerCase();
+        const delegatedActionId = isDelegateToCharacterInput(normalizedFreeInput)
+            ? normalizeActionId(selectDelegateActionId({ loop }) ?? "action.unknown")
+            : "action.unknown";
         return {
             inputActionId: normalizedInput,
-            resolvedActionId: mapFreeInputToActionDeterministic(readString(freeInput)),
+            resolvedActionId: delegatedActionId !== "action.unknown"
+                ? delegatedActionId
+                : mapFreeInputToActionDeterministic(readString(freeInput)),
         };
     }
     return {
@@ -631,7 +641,7 @@ export function resolveDeterministicSceneAction(input) {
         sceneId: input.loop.scene.sceneId,
         nowIso: input.nowIso,
     });
-    const resolvedAction = resolveActionId(input.routeActionId, input.freeInput, input.resolvedActionOverride);
+    const resolvedAction = resolveActionId(input.routeActionId, input.loop, input.freeInput, input.resolvedActionOverride);
     const classified = classifyAction({
         loop: current,
         resolvedActionId: resolvedAction.resolvedActionId,
