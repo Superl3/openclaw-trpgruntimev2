@@ -27,6 +27,7 @@ const DEFAULT_IMPROVE_WINDOW = 3;
 const DEFAULT_WATCH_INTERVAL_MS = 1000;
 const DEFAULT_IMPROVE_REPORT_DIR = "./runtime/reports";
 const DEFAULT_IMPROVE_REPORT_PREFIX = "gamer-improve";
+const DEFAULT_TURN_TRANSCRIPT_PREFIX = "turn-transcripts";
 const DEFAULT_DISCORD_WORKDIR = "/home/superl3/S3OpenClaw";
 const DEFAULT_DISCORD_MIRROR_TEMPLATE_PATH = "./scripts/templates/discord-smoke-mirror.template.txt";
 const DEFAULT_OPENCLAW_CONFIG_PATH = "/home/superl3/.openclaw/openclaw.json";
@@ -105,6 +106,10 @@ function usage() {
     "  --improve-window <N>           (default: 3 turns)",
     "  --improve-report-dir <path>    (default: ./runtime/reports)",
     "  --improve-report-prefix <name> (default: gamer-improve)",
+    "  --transcript-dir <path>        (write turn transcript JSON into this directory)",
+    "  --transcript-prefix <name>     (default: turn-transcripts)",
+    "  --world-root <path>            (use existing world root instead of temp-per-scenario root)",
+    "  --preserve-world-root          (do not delete --world-root after run)",
     "  --watch                        (repeat cycles until Ctrl+C)",
     "  --watch-interval-ms <N>        (default: 1000)",
     "  --max-cycles <N>               (default: 1 unless --watch)",
@@ -141,6 +146,10 @@ function parseArgs(argv) {
     improveWindow: DEFAULT_IMPROVE_WINDOW,
     improveReportDir: DEFAULT_IMPROVE_REPORT_DIR,
     improveReportPrefix: DEFAULT_IMPROVE_REPORT_PREFIX,
+    transcriptDir: null,
+    transcriptPrefix: DEFAULT_TURN_TRANSCRIPT_PREFIX,
+    worldRoot: null,
+    preserveWorldRoot: false,
     watch: false,
     watchIntervalMs: DEFAULT_WATCH_INTERVAL_MS,
     maxCycles: null,
@@ -314,6 +323,25 @@ function parseArgs(argv) {
     if (token === "--improve-report-prefix") {
       parsed.improveReportPrefix = readValue(argv, i, "--improve-report-prefix");
       i += 1;
+      continue;
+    }
+    if (token === "--transcript-dir") {
+      parsed.transcriptDir = readValue(argv, i, "--transcript-dir");
+      i += 1;
+      continue;
+    }
+    if (token === "--transcript-prefix") {
+      parsed.transcriptPrefix = readValue(argv, i, "--transcript-prefix");
+      i += 1;
+      continue;
+    }
+    if (token === "--world-root") {
+      parsed.worldRoot = readValue(argv, i, "--world-root");
+      i += 1;
+      continue;
+    }
+    if (token === "--preserve-world-root") {
+      parsed.preserveWorldRoot = true;
       continue;
     }
     if (token === "--watch-interval-ms") {
@@ -1987,6 +2015,27 @@ function buildImproveMarkdownReport(report) {
   return `${lines.join("\n")}\n`;
 }
 
+async function writeTurnTranscriptArtifacts(args, ui, summary) {
+  if (!args.transcriptDir) {
+    return null;
+  }
+
+  const transcriptDir = path.resolve(args.transcriptDir);
+  const transcriptPrefix = args.transcriptPrefix || DEFAULT_TURN_TRANSCRIPT_PREFIX;
+  const timestamp = formatReportTimestamp(new Date());
+  const outputPath = path.resolve(transcriptDir, `${transcriptPrefix}-${timestamp}.json`);
+
+  try {
+    await fs.mkdir(transcriptDir, { recursive: true });
+    await fs.writeFile(outputPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+    ui.ok(`turn transcripts written ${outputPath}`);
+    return outputPath;
+  } catch (error) {
+    ui.warn(`turn transcripts: failed to write '${outputPath}' (${sanitizeForCli(error instanceof Error ? error.message : String(error))})`);
+    return null;
+  }
+}
+
 async function writeImproveReports(args, ui, report) {
   const reportDir = path.resolve(args.improveReportDir || DEFAULT_IMPROVE_REPORT_DIR);
   const reportPrefix = args.improveReportPrefix || DEFAULT_IMPROVE_REPORT_PREFIX;
@@ -2026,7 +2075,13 @@ async function writeImproveReports(args, ui, report) {
 }
 
 async function runScenario({ name, plugin, args, ui, runtimeState, cycleNumber, reportCollector }) {
-  const worldRoot = await createIsolatedWorldRoot(`trpg-runtime-v2-live-${name}`);
+  const usingExternalWorldRoot = typeof args.worldRoot === "string" && args.worldRoot.trim().length > 0;
+  const worldRoot = usingExternalWorldRoot
+    ? path.resolve(args.worldRoot)
+    : await createIsolatedWorldRoot(`trpg-runtime-v2-live-${name}`);
+  if (usingExternalWorldRoot) {
+    await fs.mkdir(path.resolve(worldRoot, "state/runtime-core"), { recursive: true });
+  }
   let turnsPlayed = 0;
   let latestTurnTranscript = null;
   const improver = args.improve !== "off" ? new GamerLiveImprover() : null;
@@ -2299,7 +2354,9 @@ async function runScenario({ name, plugin, args, ui, runtimeState, cycleNumber, 
     await maybeImprove(true);
     return { ok: true, turnsPlayed };
   } finally {
-    await fs.rm(worldRoot, { recursive: true, force: true });
+    if (!usingExternalWorldRoot || args.preserveWorldRoot !== true) {
+      await fs.rm(worldRoot, { recursive: true, force: true });
+    }
   }
 }
 
@@ -2340,6 +2397,12 @@ async function main() {
   if (args.improve !== "off") {
     ui.dim(`improve mode=${args.improve} window=${args.improveWindow}`);
     ui.dim(`improve report dir=${args.improveReportDir} prefix=${args.improveReportPrefix}`);
+  }
+  if (args.transcriptDir) {
+    ui.dim(`transcript dir=${args.transcriptDir} prefix=${args.transcriptPrefix}`);
+  }
+  if (args.worldRoot) {
+    ui.dim(`world root override=${args.worldRoot} preserve=${args.preserveWorldRoot}`);
   }
   if (args.discordMirror) {
     ui.dim(`discord mirror requested workdir=${args.discordWorkdir}`);
@@ -2403,6 +2466,12 @@ async function main() {
       turnTranscripts: [],
       laneIssues: [],
     };
+  const transcriptCollector = args.transcriptDir
+    ? (improveReportCollector || {
+      turnTranscripts: [],
+      laneIssues: [],
+    })
+    : null;
 
   let continueWatch = true;
   process.on("SIGINT", () => {
@@ -2425,7 +2494,7 @@ async function main() {
           ui,
           runtimeState,
           cycleNumber: summary.cycles,
-          reportCollector: improveReportCollector,
+          reportCollector: transcriptCollector || improveReportCollector,
         });
         const endedAt = new Date();
         summary.passed += 1;
@@ -2520,6 +2589,29 @@ async function main() {
     })),
   };
   process.stdout.write(`MACHINE_SUMMARY ${JSON.stringify(machineSummary)}\n`);
+
+  if (transcriptCollector) {
+    await writeTurnTranscriptArtifacts(args, ui, {
+      runId,
+      generatedAt: new Date().toISOString(),
+      runnerConfig: {
+        lane: args.lane,
+        scenarios: args.scenarios,
+        turns: args.turns,
+        watch: args.watch,
+        maxCycles: args.maxCycles,
+        cyclesExecuted: summary.cycles,
+      },
+      summary: {
+        passed: summary.passed,
+        failed: summary.failed,
+        turns: summary.turnsPlayed,
+      },
+      scenarioSummaries,
+      turnTranscripts: transcriptCollector.turnTranscripts,
+      laneIssues: transcriptCollector.laneIssues,
+    });
+  }
 
   if (args.improve !== "off" && improveReportCollector) {
     const improveReport = {

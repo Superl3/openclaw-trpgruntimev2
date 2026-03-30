@@ -14,11 +14,17 @@
     "smoke:drifter-divergence": "node ./scripts/run-drifter-divergence.mjs",
     "drifter:snapshot": "node ./scripts/drifter-snapshot.mjs",
     "test:smoke-session-validity": "node --test tests/runtime-gamer-agent/smoke-session-validity.test.mjs",
+    "session:drifter-sandbox": "node ./scripts/run-drifter-sandbox-session.mjs",
+    "sandbox:drifter:report": "node ./scripts/drifter-sandbox-report.mjs",
+    "sandbox:drifter:analyze": "node ./scripts/drifter-sandbox-report.mjs --analyze",
     "scaffold:gamer-profile": "node ./scripts/scaffold-gamer-agent-profile.mjs",
     "seed:validate": "node ./scripts/validate-world-seed.mjs",
     "factions:validate": "node ./scripts/validate-factions-canon.mjs",
     "factions:drift-vs-seed": "node ./scripts/diff-factions-vs-seed.mjs",
-    "factions:scaffold-from-seed": "node ./scripts/scaffold-factions-from-seed.mjs"
+    "factions:scaffold-from-seed": "node ./scripts/scaffold-factions-from-seed.mjs",
+    "sandbox:drifter:create": "node ./scripts/drifter-sandbox.mjs create",
+    "sandbox:drifter:inspect": "node ./scripts/drifter-sandbox.mjs inspect",
+    "sandbox:drifter:destroy": "node ./scripts/drifter-sandbox.mjs destroy"
   },
   "dependencies": {
     "yaml": "^2.8.2"
