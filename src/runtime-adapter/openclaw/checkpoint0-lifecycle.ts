@@ -54,6 +54,16 @@ import {
   wipeSessionWorkspace,
 } from "../../runtime-core/session-workspaces.js";
 import {
+  PANEL_INTERACT_PARAMETERS,
+  PANEL_MESSAGE_COMMIT_PARAMETERS,
+  SESSION_END_PARAMETERS,
+  SESSION_HELP_PARAMETERS,
+  SESSION_NEW_PARAMETERS,
+  SESSION_RESUME_PARAMETERS,
+  SESSION_SECTION_TOOL_PARAMETERS,
+  SESSION_VERBOSE_PARAMETERS,
+} from "./checkpoint0-lifecycle-tool-schemas.js";
+import {
   buildNewConfirmationActionHints,
   buildSessionResumeActionComponents,
   buildSessionStartActionComponents,
@@ -64,6 +74,7 @@ import {
   resolveSectionList,
   resolveSessionContextId,
 } from "./lifecycle-tool-helpers.js";
+import { jsonToolResult, runtimeError } from "./lifecycle-response-helpers.js";
 
 const CHECKPOINT0_STORE_RELATIVE_PATH = "state/runtime-core";
 const FACTION_CANON_PATH = "canon/factions.yaml";
@@ -79,130 +90,6 @@ const WORLD_SEED_CANDIDATE_PATHS = [
   "state/world-seeds.json",
 ] as const;
 const NEW_CONFIRM_TOKEN_TTL_MS = 5 * 60 * 1000;
-
-const SESSION_NEW_PARAMETERS = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    channelKey: { type: "string" },
-    ownerId: { type: "string" },
-    actorId: { type: "string" },
-    sceneId: { type: "string" },
-    confirmReset: { type: "boolean" },
-    confirmToken: { type: "string" },
-    wipeMode: { type: "string", enum: ["ask", "force"] },
-  },
-} as const;
-
-const SECTION_ITEMS_SCHEMA = {
-  type: "string",
-  enum: SESSION_DATA_SECTIONS,
-} as const;
-
-const SESSION_SECTION_TOOL_PARAMETERS = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    sessionId: { type: "string" },
-    channelKey: { type: "string" },
-    actorId: { type: "string" },
-    sections: { type: "array", items: SECTION_ITEMS_SCHEMA, minItems: 1 },
-  },
-} as const;
-
-const SESSION_RESUME_PARAMETERS = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    sessionId: { type: "string" },
-    channelKey: { type: "string" },
-    actorId: { type: "string" },
-    forceRecreate: { type: "boolean" },
-  },
-} as const;
-
-const SESSION_END_PARAMETERS = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    sessionId: { type: "string" },
-    channelKey: { type: "string" },
-    actorId: { type: "string" },
-    reason: { type: "string" },
-  },
-} as const;
-
-const SESSION_HELP_PARAMETERS = {
-  type: "object",
-  additionalProperties: false,
-  properties: {},
-} as const;
-
-const SESSION_VERBOSE_PARAMETERS = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    sessionId: { type: "string" },
-    channelKey: { type: "string" },
-    actorId: { type: "string" },
-    enabled: { type: "boolean" },
-    tailCount: { type: "integer", minimum: 1, maximum: 12 },
-  },
-} as const;
-
-const PANEL_INTERACT_PARAMETERS = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    customId: { type: "string" },
-    sessionId: { type: "string" },
-    uiVersion: { type: "integer" },
-    sceneId: { type: "string" },
-    actionId: { type: "string" },
-    actorId: { type: "string" },
-    freeInput: { type: "string" },
-  },
-} as const;
-
-const PANEL_MESSAGE_COMMIT_PARAMETERS = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    sessionId: { type: "string" },
-    actorId: { type: "string" },
-    dispatchId: { type: "string" },
-    messageId: { type: "string" },
-    channelMessageRef: { type: "string" },
-    uiVersion: { type: "integer" },
-    sceneId: { type: "string" },
-    clear: { type: "boolean" },
-  },
-  required: ["sessionId"],
-} as const;
-
-function jsonToolResult(payload: unknown) {
-  return {
-    content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
-    details: payload,
-  };
-}
-
-function runtimeError(params: {
-  command?: string;
-  errorCode: string;
-  message: string;
-  recoverable?: boolean;
-  recoveryHint?: string;
-}): Record<string, unknown> {
-  return {
-    ok: false,
-    command: params.command,
-    errorCode: params.errorCode,
-    error: params.message,
-    recoverable: params.recoverable ?? true,
-    recoveryHint: params.recoveryHint,
-  };
-}
 
 function toObject(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)

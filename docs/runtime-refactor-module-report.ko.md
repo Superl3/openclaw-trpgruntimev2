@@ -68,6 +68,48 @@ _Last updated: 2026-03-31_
 15. `src/runtime-adapter/openclaw/before-prompt-travel-faction-flow.ts`
    - freeform 규칙 + travel transition + lifecycle preview + faction tick 단계 담당
 
+16. `src/runtime-adapter/openclaw/core-runtime-tool-schemas.ts`
+   - `register-core-runtime-tools.ts`에서 사용하는 tool parameter schema 모음
+
+17. `src/runtime-adapter/openclaw/scene-components-tool-schema.ts`
+   - `trpg_scene_components` tool parameter schema 모듈
+
+18. `src/runtime-adapter/openclaw/checkpoint0-lifecycle-tool-schemas.ts`
+   - checkpoint0 lifecycle tool parameter schema 모듈
+
+19. `src/runtime-adapter/openclaw/lifecycle-response-helpers.ts`
+   - checkpoint0 lifecycle 응답(jsonToolResult/runtimeError) 보조 모듈
+
+### 핵심 파일 구조 트리 (리팩터링 이후)
+
+```text
+src/
+  index.ts
+  runtime-adapter/openclaw/
+    register-runtime-plugin.ts
+    build-runtime-registration-deps.ts
+    build-before-prompt-deps.ts
+    before-prompt-*.ts
+      before-prompt-types.ts
+      before-prompt-diagnostics.ts
+      before-prompt-guard-chunks.ts
+      before-prompt-budgeted-response.ts
+      before-prompt-core-support.ts
+      before-prompt-status-fastwait-support.ts
+      before-prompt-npc-scene-support.ts
+      before-prompt-scene-prep-flow.ts
+      before-prompt-travel-faction-flow.ts
+      before-prompt-in-game-flow.ts
+    register-before-prompt-build-hook.ts
+    register-core-runtime-tools.ts
+    core-runtime-tool-schemas.ts
+    register-scene-components-tool.ts
+    scene-components-tool-schema.ts
+    checkpoint0-lifecycle.ts
+    checkpoint0-lifecycle-tool-schemas.ts
+    lifecycle-response-helpers.ts
+```
+
 ---
 
 ## 3) 도메인별 파일 책임
@@ -171,8 +213,16 @@ _Last updated: 2026-03-31_
   - before_prompt support 모듈 집합(barrel)
 - `register-core-runtime-tools.ts`
   - core runtime tool 등록
+- `core-runtime-tool-schemas.ts`
+  - core runtime tools의 parameter schema 분리
 - `register-scene-components-tool.ts`
   - scene components tool 등록
+- `scene-components-tool-schema.ts`
+  - scene components tool parameter schema 분리
+- `checkpoint0-lifecycle-tool-schemas.ts`
+  - checkpoint0 lifecycle tools parameter schema 분리
+- `lifecycle-response-helpers.ts`
+  - checkpoint0 lifecycle 공통 응답 래퍼 분리
 - `tool-gate.ts`
   - tool 접근 게이트/응답 보조
 
@@ -204,6 +254,9 @@ _Last updated: 2026-03-31_
 - `src/index.ts`: 45줄(엔트리 전용 유지)
 - `register-before-prompt-build-hook.ts`: 약 497줄 → 139줄로 축소
 - `build-before-prompt-deps.ts`: 56줄(얇은 deps 조합기)
+- `register-core-runtime-tools.ts`: 400줄 → 276줄(스키마 분리)
+- `register-scene-components-tool.ts`: 271줄 → 159줄(스키마 분리)
+- `checkpoint0-lifecycle.ts`: 2343줄 → 2230줄(스키마/응답 헬퍼 분리)
 - before_prompt 흐름은 아래 파일로 분산:
   - `before-prompt-types.ts` (타입 계약)
   - `before-prompt-diagnostics.ts` (진단)

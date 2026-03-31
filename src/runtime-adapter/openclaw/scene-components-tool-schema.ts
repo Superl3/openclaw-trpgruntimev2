@@ -1,0 +1,112 @@
+export const SCENE_COMPONENT_PARAMETERS = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    scene: {
+      type: "string",
+      enum: [
+        "bootstrap_choice",
+        "exploration",
+        "npc_encounter",
+        "combat",
+        "choice",
+        "dialogue",
+        "system",
+        "system_input",
+        "resolution",
+        "travel_transition",
+      ],
+      description: "Scene type determines template",
+    },
+    turnKind: {
+      type: "string",
+      enum: ["scene-turn", "etc"],
+      description: "Optional caller-provided routing hint for scene vs meta/etc turns",
+    },
+    latestUserMessage: {
+      type: "string",
+      description: "Latest raw user input used for routing/classification fallback",
+    },
+    description: {
+      type: "string",
+      description: "Scene description text (Discord markdown supported)",
+    },
+    locationInfo: {
+      type: "string",
+      description: "Optional location/status line",
+    },
+    npc: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        name: { type: "string" },
+        title: { type: "string" },
+        dialogue: { type: "string" },
+        disposition: { type: "string" },
+        status: { type: "string" },
+        color: { type: "string" },
+        action: { type: "string" },
+        oldDisposition: { type: "string" },
+        newDisposition: { type: "string" },
+      },
+      required: ["name", "title"],
+    },
+    combat: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        round: { type: "integer" },
+        hpCurrent: { type: "integer" },
+        hpMax: { type: "integer" },
+        ac: { type: "integer" },
+        acBuff: { type: "string" },
+        manaCurrent: { type: "integer" },
+        manaMax: { type: "integer" },
+        enemySummary: { type: "string" },
+        effects: { type: "string" },
+      },
+      required: ["round", "hpCurrent", "hpMax", "ac", "manaCurrent", "manaMax", "enemySummary"],
+    },
+    buttons: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          label: { type: "string" },
+          style: { type: "string", enum: ["primary", "secondary", "success", "danger"] },
+          actionId: { type: "string" },
+          customId: { type: ["string", "null"] },
+          custom_id: { type: ["string", "null"] },
+          disabled: { type: "boolean" },
+        },
+        required: ["label", "style"],
+      },
+      description: "Override default buttons for this scene type",
+    },
+    choices: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          label: { type: "string" },
+          description: { type: "string" },
+          value: { type: "string" },
+          emoji: { type: "string" },
+        },
+        required: ["label", "value"],
+      },
+      description: "Select menu choices (required for choice scene)",
+    },
+    modalTitle: {
+      type: "string",
+      description: "Override modal dialog title",
+    },
+    includeInput: {
+      type: "boolean",
+      description: "Include freeform input modal (default: true)",
+    },
+  },
+  required: ["scene", "description"],
+} as const;
