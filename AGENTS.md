@@ -89,7 +89,7 @@ npm run typecheck && node --test tests/runtime-hardening/runtime-hardening.test.
 
 ## 3) Repository map
 - Entrypoints: `index.ts`, `src/index.ts`
-- Lifecycle/session tools: `src/runtime-adapter/openclaw/checkpoint0-lifecycle.ts`
+- Lifecycle/session tools: `src/runtime-adapter/openclaw/session-lifecycle-tools.ts` (legacy alias: `checkpoint0-lifecycle.ts`)
 - Core deterministic systems: `src/runtime-core/*`
 - Patch/store utilities: `src/patch-engine.ts`, `src/world-store.ts`
 - Config and plugin contract: `src/config.ts`, `openclaw.plugin.json`

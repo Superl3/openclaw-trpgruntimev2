@@ -9,7 +9,7 @@ Primary sources:
 - `docs/ADR-0003-checkpoint5-time-memory-trace.md`
 - `docs/USAGE.en.md` section 2.3
 - `tests/runtime-temporal/runtime-temporal.test.mjs`
-- current runtime integration points in `src/runtime-core/*`, `src/runtime-adapter/openclaw/checkpoint0-lifecycle.ts`, and panel rendering
+- current runtime integration points in `src/runtime-core/*`, `src/runtime-adapter/openclaw/session-lifecycle-tools.ts` (legacy alias: `checkpoint0-lifecycle.ts`), and panel rendering
 
 ---
 

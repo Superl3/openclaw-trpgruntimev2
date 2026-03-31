@@ -74,8 +74,9 @@ _Last updated: 2026-03-31_
 17. `src/runtime-adapter/openclaw/scene-components-tool-schema.ts`
    - `trpg_scene_components` tool parameter schema 모듈
 
-18. `src/runtime-adapter/openclaw/checkpoint0-lifecycle-tool-schemas.ts`
-   - checkpoint0 lifecycle tool parameter schema 모듈
+18. `src/runtime-adapter/openclaw/session-lifecycle-tool-schemas.ts`
+   - session lifecycle tool parameter schema 모듈
+   - legacy alias: `checkpoint0-lifecycle-tool-schemas.ts`
 
 19. `src/runtime-adapter/openclaw/lifecycle-response-helpers.ts`
    - checkpoint0 lifecycle 응답(jsonToolResult/runtimeError) 보조 모듈
@@ -105,8 +106,10 @@ src/
     core-runtime-tool-schemas.ts
     register-scene-components-tool.ts
     scene-components-tool-schema.ts
-    checkpoint0-lifecycle.ts
-    checkpoint0-lifecycle-tool-schemas.ts
+    session-lifecycle-tools.ts
+    session-lifecycle-tool-schemas.ts
+    checkpoint0-lifecycle.ts                      # legacy alias
+    checkpoint0-lifecycle-tool-schemas.ts         # legacy alias
     lifecycle-response-helpers.ts
 ```
 
@@ -219,8 +222,13 @@ src/
   - scene components tool 등록
 - `scene-components-tool-schema.ts`
   - scene components tool parameter schema 분리
-- `checkpoint0-lifecycle-tool-schemas.ts`
-  - checkpoint0 lifecycle tools parameter schema 분리
+- `session-lifecycle-tool-schemas.ts`
+  - session lifecycle tools parameter schema 분리
+- `session-lifecycle-tools.ts`
+  - session lifecycle tool 등록 허브
+  - command handler 등록을 helper 단위로 분해(`new/resume/end/verbose`, `save/load/data-delete`, `panel_interact/panel_message_commit`)
+- `checkpoint0-lifecycle.ts`
+  - legacy alias re-export (호환 유지)
 - `lifecycle-response-helpers.ts`
   - checkpoint0 lifecycle 공통 응답 래퍼 분리
 - `tool-gate.ts`
@@ -256,7 +264,8 @@ src/
 - `build-before-prompt-deps.ts`: 56줄(얇은 deps 조합기)
 - `register-core-runtime-tools.ts`: 400줄 → 276줄(스키마 분리)
 - `register-scene-components-tool.ts`: 271줄 → 159줄(스키마 분리)
-- `checkpoint0-lifecycle.ts`: 2343줄 → 2230줄(스키마/응답 헬퍼 분리)
+- `session-lifecycle-tools.ts`: 2343줄 → 2288줄(리네임 + 스키마/응답 헬퍼 분리 + command handler 등록 단위 분해)
+- `checkpoint0-lifecycle.ts`: legacy alias(re-export) 유지
 - before_prompt 흐름은 아래 파일로 분산:
   - `before-prompt-types.ts` (타입 계약)
   - `before-prompt-diagnostics.ts` (진단)
