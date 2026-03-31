@@ -201,6 +201,22 @@ npm run typecheck
 npm run smoke:manifest
 ```
 
+Core regression gates:
+
+```bash
+npm run test:gate:core
+```
+
+Additional drifter sandbox gate:
+
+```bash
+npm run test:drifter-sandbox
+```
+
+Operational/runtime-data boundary policy:
+
+- `docs/runtime-operational-boundary.md`
+
 ## Install / Link (next step)
 
 This repository step intentionally does **not** install or link the plugin yet.

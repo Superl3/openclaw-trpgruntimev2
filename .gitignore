@@ -1,3 +1,14 @@
 node_modules/
 *.bak-*
 examples/openclaw.overlay*.json
+
+# Local agent/editor state
+.serena/
+
+# Test/build scratch artifacts
+.tmp*
+
+# Runtime operational data (workspace-local)
+workspace/world/state/runtime-core/
+workspace/world/canon/factions.yaml
+workspace/world/**/*.bak*

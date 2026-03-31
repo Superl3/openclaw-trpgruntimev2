@@ -546,3 +546,28 @@ test("runtime canonical provenance persists across new + resume", async () => {
   assert.equal(resumed.ok, true);
   assert.deepEqual(resumed.session.runtimeMetadata.canonicalSync, canonicalSync);
 });
+
+test("plugin manifest config schema stays aligned with runtime config specs", async () => {
+  const { config } = await modulesPromise;
+  const manifestRaw = await fs.readFile(path.resolve(ROOT_DIR, "openclaw.plugin.json"), "utf8");
+  const manifest = JSON.parse(manifestRaw);
+  const properties = manifest?.configSchema?.properties ?? {};
+
+  const integerSpecs = config.TRPG_RUNTIME_INTEGER_CONFIG_SPECS;
+  for (const [field, spec] of Object.entries(integerSpecs)) {
+    const schema = properties[field];
+    assert.ok(schema, `missing integer schema for ${field}`);
+    assert.equal(schema.type, "integer", `${field}.type`);
+    assert.equal(schema.default, spec.default, `${field}.default`);
+    assert.equal(schema.minimum, spec.min, `${field}.minimum`);
+    assert.equal(schema.maximum, spec.max, `${field}.maximum`);
+  }
+
+  const booleanDefaults = config.TRPG_RUNTIME_MANIFEST_BOOLEAN_DEFAULTS;
+  for (const [field, expectedDefault] of Object.entries(booleanDefaults)) {
+    const schema = properties[field];
+    assert.ok(schema, `missing boolean schema for ${field}`);
+    assert.equal(schema.type, "boolean", `${field}.type`);
+    assert.equal(schema.default, expectedDefault, `${field}.default`);
+  }
+});

@@ -29,21 +29,58 @@ export type TrpgRuntimeConfig = {
   runtimeSafetyFlags: RuntimeSafetyFlags;
 };
 
-const DEFAULT_CONFIG: TrpgRuntimeConfig = {
-  worldRoot: undefined,
+type IntegerConfigSpec = {
+  default: number;
+  min: number;
+  max: number;
+};
+
+export const TRPG_RUNTIME_INTEGER_CONFIG_SPECS = {
+  maxReadBytes: { default: 262_144, min: 4_096, max: 1_048_576 },
+  maxFilesPerQuery: { default: 40, min: 1, max: 200 },
+  maxOperationsPerPatch: { default: 64, min: 1, max: 200 },
+  traceMaxEvents: { default: 120, min: 20, max: 500 },
+  panelDispatchTtlSec: { default: 180, min: 30, max: 3_600 },
+  analyzerMemoryTtlSec: { default: 900, min: 60, max: 86_400 },
+  hookTextTimeoutMs: { default: 350, min: 80, max: 2_000 },
+  hookTextCacheTtlSec: { default: 900, min: 60, max: 7_200 },
+} as const satisfies Record<string, IntegerConfigSpec>;
+
+export const TRPG_RUNTIME_MANIFEST_BOOLEAN_DEFAULTS = {
   allowPatchApply: false,
   diagnosticsEnabled: true,
   diagnosticsConsoleMirror: true,
-  maxReadBytes: 262_144,
-  maxFilesPerQuery: 40,
-  maxOperationsPerPatch: 64,
-  allowedAgentIds: [],
-  traceMaxEvents: 120,
-  panelDispatchTtlSec: 180,
-  analyzerMemoryTtlSec: 900,
+  behavioralDriftEnabled: DEFAULT_RUNTIME_SAFETY_FLAGS.behavioralDriftEnabled,
+  behavioralDriftAffectsRules: DEFAULT_RUNTIME_SAFETY_FLAGS.behavioralDriftAffectsRules,
+  anchorLifecycleEnabled: DEFAULT_RUNTIME_SAFETY_FLAGS.anchorLifecycleEnabled,
+  anchorSummaryOnly: DEFAULT_RUNTIME_SAFETY_FLAGS.anchorSummaryOnly,
   richHookTextEnabled: false,
-  hookTextTimeoutMs: 350,
-  hookTextCacheTtlSec: 900,
+  richHookActionableEnabled: DEFAULT_RUNTIME_SAFETY_FLAGS.richHookActionableEnabled,
+  richHookWorldPulseEnabled: DEFAULT_RUNTIME_SAFETY_FLAGS.richHookWorldPulseEnabled,
+  richHookRecentOutcomesEnabled: DEFAULT_RUNTIME_SAFETY_FLAGS.richHookRecentOutcomesEnabled,
+  debugRuntimeSignals: DEFAULT_RUNTIME_SAFETY_FLAGS.debugRuntimeSignals,
+  traceVerbose: DEFAULT_RUNTIME_SAFETY_FLAGS.traceVerbose,
+  telemetryExtended: DEFAULT_RUNTIME_SAFETY_FLAGS.telemetryExtended,
+  canonicalSyncEnabled: DEFAULT_RUNTIME_SAFETY_FLAGS.canonicalSyncEnabled,
+  canonicalWriteBackEnabled: DEFAULT_RUNTIME_SAFETY_FLAGS.canonicalWriteBackEnabled,
+  recommendationWhimEnabled: DEFAULT_RUNTIME_SAFETY_FLAGS.recommendationWhimEnabled,
+} as const;
+
+export const TRPG_RUNTIME_DEFAULT_CONFIG: TrpgRuntimeConfig = {
+  worldRoot: undefined,
+  allowPatchApply: TRPG_RUNTIME_MANIFEST_BOOLEAN_DEFAULTS.allowPatchApply,
+  diagnosticsEnabled: TRPG_RUNTIME_MANIFEST_BOOLEAN_DEFAULTS.diagnosticsEnabled,
+  diagnosticsConsoleMirror: TRPG_RUNTIME_MANIFEST_BOOLEAN_DEFAULTS.diagnosticsConsoleMirror,
+  maxReadBytes: TRPG_RUNTIME_INTEGER_CONFIG_SPECS.maxReadBytes.default,
+  maxFilesPerQuery: TRPG_RUNTIME_INTEGER_CONFIG_SPECS.maxFilesPerQuery.default,
+  maxOperationsPerPatch: TRPG_RUNTIME_INTEGER_CONFIG_SPECS.maxOperationsPerPatch.default,
+  allowedAgentIds: [],
+  traceMaxEvents: TRPG_RUNTIME_INTEGER_CONFIG_SPECS.traceMaxEvents.default,
+  panelDispatchTtlSec: TRPG_RUNTIME_INTEGER_CONFIG_SPECS.panelDispatchTtlSec.default,
+  analyzerMemoryTtlSec: TRPG_RUNTIME_INTEGER_CONFIG_SPECS.analyzerMemoryTtlSec.default,
+  richHookTextEnabled: false,
+  hookTextTimeoutMs: TRPG_RUNTIME_INTEGER_CONFIG_SPECS.hookTextTimeoutMs.default,
+  hookTextCacheTtlSec: TRPG_RUNTIME_INTEGER_CONFIG_SPECS.hookTextCacheTtlSec.default,
   debugRuntimeSignals: false,
   traceVerbose: false,
   telemetryExtended: false,
@@ -94,12 +131,19 @@ function readBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
+type IntegerConfigField = keyof typeof TRPG_RUNTIME_INTEGER_CONFIG_SPECS;
+
+function readIntegerFromSpec(value: unknown, field: IntegerConfigField): number {
+  const spec = TRPG_RUNTIME_INTEGER_CONFIG_SPECS[field];
+  return readInteger(value, spec.default, spec.min, spec.max, field);
+}
+
 export function parseTrpgRuntimeConfig(raw: unknown): TrpgRuntimeConfig {
   const obj = asRecord(raw);
   const worldRoot = typeof obj.worldRoot === "string" && obj.worldRoot.trim() ? obj.worldRoot : undefined;
-  const allowPatchApply = typeof obj.allowPatchApply === "boolean" ? obj.allowPatchApply : false;
-  const diagnosticsEnabled = readBoolean(obj.diagnosticsEnabled, DEFAULT_CONFIG.diagnosticsEnabled);
-  const diagnosticsConsoleMirror = readBoolean(obj.diagnosticsConsoleMirror, DEFAULT_CONFIG.diagnosticsConsoleMirror);
+  const allowPatchApply = readBoolean(obj.allowPatchApply, TRPG_RUNTIME_DEFAULT_CONFIG.allowPatchApply);
+  const diagnosticsEnabled = readBoolean(obj.diagnosticsEnabled, TRPG_RUNTIME_DEFAULT_CONFIG.diagnosticsEnabled);
+  const diagnosticsConsoleMirror = readBoolean(obj.diagnosticsConsoleMirror, TRPG_RUNTIME_DEFAULT_CONFIG.diagnosticsConsoleMirror);
   const legacyRichHookTextEnabled =
     typeof obj.richHookTextEnabled === "boolean" ? obj.richHookTextEnabled : undefined;
   const runtimeSafetyFlags = normalizeRuntimeSafetyFlags({
@@ -148,52 +192,16 @@ export function parseTrpgRuntimeConfig(raw: unknown): TrpgRuntimeConfig {
     allowPatchApply,
     diagnosticsEnabled,
     diagnosticsConsoleMirror,
-    maxReadBytes: readInteger(
-      obj.maxReadBytes,
-      DEFAULT_CONFIG.maxReadBytes,
-      4_096,
-      1_048_576,
-      "maxReadBytes",
-    ),
-    maxFilesPerQuery: readInteger(
-      obj.maxFilesPerQuery,
-      DEFAULT_CONFIG.maxFilesPerQuery,
-      1,
-      200,
-      "maxFilesPerQuery",
-    ),
-    maxOperationsPerPatch: readInteger(
-      obj.maxOperationsPerPatch,
-      DEFAULT_CONFIG.maxOperationsPerPatch,
-      1,
-      200,
-      "maxOperationsPerPatch",
-    ),
-    allowedAgentIds: readStringArray(obj.allowedAgentIds, DEFAULT_CONFIG.allowedAgentIds),
-    traceMaxEvents: readInteger(obj.traceMaxEvents, DEFAULT_CONFIG.traceMaxEvents, 20, 500, "traceMaxEvents"),
-    panelDispatchTtlSec: readInteger(
-      obj.panelDispatchTtlSec,
-      DEFAULT_CONFIG.panelDispatchTtlSec,
-      30,
-      3600,
-      "panelDispatchTtlSec",
-    ),
-    analyzerMemoryTtlSec: readInteger(
-      obj.analyzerMemoryTtlSec,
-      DEFAULT_CONFIG.analyzerMemoryTtlSec,
-      60,
-      86_400,
-      "analyzerMemoryTtlSec",
-    ),
+    maxReadBytes: readIntegerFromSpec(obj.maxReadBytes, "maxReadBytes"),
+    maxFilesPerQuery: readIntegerFromSpec(obj.maxFilesPerQuery, "maxFilesPerQuery"),
+    maxOperationsPerPatch: readIntegerFromSpec(obj.maxOperationsPerPatch, "maxOperationsPerPatch"),
+    allowedAgentIds: readStringArray(obj.allowedAgentIds, TRPG_RUNTIME_DEFAULT_CONFIG.allowedAgentIds),
+    traceMaxEvents: readIntegerFromSpec(obj.traceMaxEvents, "traceMaxEvents"),
+    panelDispatchTtlSec: readIntegerFromSpec(obj.panelDispatchTtlSec, "panelDispatchTtlSec"),
+    analyzerMemoryTtlSec: readIntegerFromSpec(obj.analyzerMemoryTtlSec, "analyzerMemoryTtlSec"),
     richHookTextEnabled,
-    hookTextTimeoutMs: readInteger(obj.hookTextTimeoutMs, DEFAULT_CONFIG.hookTextTimeoutMs, 80, 2_000, "hookTextTimeoutMs"),
-    hookTextCacheTtlSec: readInteger(
-      obj.hookTextCacheTtlSec,
-      DEFAULT_CONFIG.hookTextCacheTtlSec,
-      60,
-      7_200,
-      "hookTextCacheTtlSec",
-    ),
+    hookTextTimeoutMs: readIntegerFromSpec(obj.hookTextTimeoutMs, "hookTextTimeoutMs"),
+    hookTextCacheTtlSec: readIntegerFromSpec(obj.hookTextCacheTtlSec, "hookTextCacheTtlSec"),
     debugRuntimeSignals: runtimeSafetyFlags.debugRuntimeSignals,
     traceVerbose: runtimeSafetyFlags.traceVerbose,
     telemetryExtended: runtimeSafetyFlags.telemetryExtended,

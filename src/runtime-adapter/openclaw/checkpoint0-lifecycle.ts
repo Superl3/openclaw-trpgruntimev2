@@ -52,8 +52,18 @@ import {
   issueSessionResetConfirmation,
   readSessionWorkspaceRecord,
   wipeSessionWorkspace,
-  type SessionDataSection,
 } from "../../runtime-core/session-workspaces.js";
+import {
+  buildNewConfirmationActionHints,
+  buildSessionResumeActionComponents,
+  buildSessionStartActionComponents,
+  buildVisibleCommandHints,
+  resolveActorId,
+  resolveChannelKey,
+  resolveOwnerId,
+  resolveSectionList,
+  resolveSessionContextId,
+} from "./lifecycle-tool-helpers.js";
 
 const CHECKPOINT0_STORE_RELATIVE_PATH = "state/runtime-core";
 const FACTION_CANON_PATH = "canon/factions.yaml";
@@ -169,151 +179,6 @@ const PANEL_MESSAGE_COMMIT_PARAMETERS = {
   },
   required: ["sessionId"],
 } as const;
-
-type TrpgCommandHint = {
-  command: string;
-  tool: string;
-  summary: string;
-  example: string;
-};
-
-const TRPG_COMMAND_HINTS: TrpgCommandHint[] = [
-  {
-    command: "/trpg help",
-    tool: "trpg_session_help",
-    summary: "사용 가능한 TRPG 명령과 예시를 확인한다.",
-    example: "/trpg help",
-  },
-  {
-    command: "/trpg new",
-    tool: "trpg_session_new",
-    summary: "새 세션과 임시 워크스페이스를 시작한다. 기존 세션/임시데이터 정리 후 바로 재시작하려면 wipeMode=force를 사용한다.",
-    example: "/trpg new wipeMode=force",
-  },
-  {
-    command: "/trpg resume",
-    tool: "trpg_session_resume",
-    summary: "현재 채널의 활성 세션 패널을 복구/재생성한다.",
-    example: "/trpg resume",
-  },
-  {
-    command: "/trpg save",
-    tool: "trpg_session_save",
-    summary: "임시 워크스페이스 변경을 canonical 파일로 저장한다.",
-    example: "/trpg save sections=[\"status\",\"inventory\"]",
-  },
-  {
-    command: "/trpg load",
-    tool: "trpg_session_load",
-    summary: "canonical 파일 내용을 임시 워크스페이스로 다시 불러온다.",
-    example: "/trpg load sections=[\"player\",\"scene\"]",
-  },
-  {
-    command: "/trpg data-delete",
-    tool: "trpg_session_data_delete",
-    summary: "임시 워크스페이스의 선택 섹션만 삭제한다.",
-    example: "/trpg data-delete sections=[\"scene\"]",
-  },
-  {
-    command: "/trpg verbose",
-    tool: "trpg_session_verbose",
-    summary: "디버그 추적 표시를 토글한다.",
-    example: "/trpg verbose enabled=true",
-  },
-  {
-    command: "/trpg end",
-    tool: "trpg_session_end",
-    summary: "세션을 종료하고 패널을 마감한다.",
-    example: "/trpg end",
-  },
-];
-
-function buildVisibleCommandHints() {
-  return {
-    title: "TRPG 명령 안내",
-    dataManagementNote: "데이터 관리 명령 안내: /trpg save · /trpg load · /trpg data-delete (자세한 예시는 /trpg help)",
-    commands: TRPG_COMMAND_HINTS,
-  };
-}
-
-function buildNewConfirmationActionHints(confirmToken: string) {
-  return {
-    yes: {
-      label: "YES",
-      intent: "기존 세션/임시데이터를 정리하고 /trpg new를 강행한다.",
-      tool: "trpg_session_new",
-      params: {
-        confirmReset: true,
-        confirmToken,
-        wipeMode: "force",
-      },
-      manualExample: `/trpg new confirmReset=true confirmToken=${confirmToken} wipeMode=force`,
-    },
-    no: {
-      label: "NO",
-      intent: "리셋을 취소하고 현재 상태를 유지한다.",
-      tool: "trpg_session_new",
-      params: {
-        confirmReset: false,
-        wipeMode: "ask",
-      },
-      manualExample: "/trpg new confirmReset=false wipeMode=ask",
-    },
-  };
-}
-
-function buildSessionStartActionComponents(sessionId: string, actorId: string) {
-  return {
-    type: "actions",
-    buttons: [
-      {
-        id: "trpg_start_resume",
-        label: "▶️ 패널 시작/갱신",
-        style: "primary",
-        tool: "trpg_session_resume",
-        params: {
-          sessionId,
-          actorId,
-        },
-      },
-      {
-        id: "trpg_start_help",
-        label: "❓ 명령 보기",
-        style: "secondary",
-        tool: "trpg_session_help",
-        params: {},
-      },
-    ],
-  };
-}
-
-function buildSessionResumeActionComponents(sessionId: string, actorId: string) {
-  return {
-    type: "actions",
-    buttons: [
-      {
-        id: "trpg_resume_refresh",
-        label: "🔄 패널 새로고침",
-        style: "primary",
-        tool: "trpg_session_resume",
-        params: {
-          sessionId,
-          actorId,
-        },
-      },
-      {
-        id: "trpg_resume_end",
-        label: "⏹️ 세션 종료",
-        style: "secondary",
-        tool: "trpg_session_end",
-        params: {
-          sessionId,
-          actorId,
-        },
-      },
-    ],
-  };
-}
 
 function jsonToolResult(payload: unknown) {
   return {
@@ -627,82 +492,6 @@ async function loadRuntimeCanonicalProvenance(params: {
   });
 }
 
-function resolveChannelKey(params: Record<string, unknown>, ctx: OpenClawPluginToolContext): string {
-  const fromParams = readString(params.channelKey);
-  if (fromParams) {
-    return fromParams;
-  }
-
-  const fromContextSession = readString(ctx.sessionId);
-  if (fromContextSession) {
-    return `session:${fromContextSession}`;
-  }
-
-  return "channel:unknown";
-}
-
-function resolveActorId(params: Record<string, unknown>, ctx: OpenClawPluginToolContext): string {
-  const fromParams = readString(params.actorId);
-  if (fromParams) {
-    return fromParams;
-  }
-
-  const fromContextUser = readString(ctx.userId);
-  if (fromContextUser) {
-    return fromContextUser;
-  }
-
-  const fromContextSession = readString(ctx.sessionId);
-  if (fromContextSession) {
-    return `session:${fromContextSession}`;
-  }
-
-  return "";
-}
-
-function resolveOwnerId(params: Record<string, unknown>, ctx: OpenClawPluginToolContext): string {
-  const explicitOwner = readString(params.ownerId);
-  if (explicitOwner) {
-    return explicitOwner;
-  }
-  return resolveActorId(params, ctx) || "owner:unknown";
-}
-
-function resolveSessionContextId(params: Record<string, unknown>, ctx: OpenClawPluginToolContext, channelKey: string): string {
-  const fromContext = readString(ctx.sessionId);
-  if (fromContext) {
-    return fromContext;
-  }
-  const fromParam = readString(params.sessionId);
-  if (fromParam) {
-    return fromParam;
-  }
-  return channelKey;
-}
-
-function resolveSectionList(value: unknown): SessionDataSection[] {
-  if (!Array.isArray(value) || value.length === 0) {
-    return [...SESSION_DATA_SECTIONS];
-  }
-
-  const allowed = new Set<SessionDataSection>(SESSION_DATA_SECTIONS);
-  const selected: SessionDataSection[] = [];
-  for (const raw of value) {
-    if (typeof raw !== "string") {
-      continue;
-    }
-    if (!allowed.has(raw as SessionDataSection)) {
-      continue;
-    }
-    const typed = raw as SessionDataSection;
-    if (!selected.includes(typed)) {
-      selected.push(typed);
-    }
-  }
-
-  return selected.length > 0 ? selected : [...SESSION_DATA_SECTIONS];
-}
-
 function normalizeSession(session: SessionState): SessionState {
   const nowIso = readString((session as Record<string, unknown>).updatedAt) || new Date().toISOString();
   const deterministicLoop = ensureDeterministicSceneLoopState((session as Record<string, unknown>).deterministicLoop, {
@@ -1005,8 +794,6 @@ function markDispatchCommitted(params: {
 }): SessionState {
   const previousIds = params.session.panelDispatch.committedDispatchIds.slice(-31);
   const committedDispatchIds = [...previousIds, params.dispatchId];
-
-  const pending = params.session.panelDispatch.pending;
   const next = {
     ...params.session,
     panelDispatch: {
