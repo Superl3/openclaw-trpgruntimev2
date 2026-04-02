@@ -133,7 +133,20 @@ export async function runTravelMovement(
       aliasMap,
     });
 
-    if (generatedZone) {
+    if (generatedZone?.rejected) {
+      return {
+        movementIntent: true,
+        occurred: false,
+        reason: `destination label rejected (${generatedZone.rejectionReason || "low_quality_label"})`,
+        contextChunk: deps.joinLines([
+          "[TRPG_RUNTIME_TRAVEL_CLARIFICATION_REQUIRED]",
+          generatedZone.contextLine,
+          "Ask one short clarification question and wait for a concrete destination name before movement.",
+        ]),
+      };
+    }
+
+    if (generatedZone && generatedZone.destinationZoneId) {
       destinationZoneId = generatedZone.destinationZoneId;
       generatedZoneContextLine = generatedZone.contextLine;
       zoneGraph[destinationZoneId] = {

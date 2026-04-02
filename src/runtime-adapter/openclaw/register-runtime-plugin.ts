@@ -41,10 +41,11 @@ export function registerRuntimePlugin(params: RegisterRuntimePluginParams): void
     cfg,
     toolGate,
     jsonToolResult,
+    loadStatusPanelData: beforePromptDeps.loadStatusPanelData,
     ...sceneComponentsDeps,
   });
 
   api.logger.info(
-    "[trpg-runtime] registered tools: trpg_store_get, trpg_patch_dry_run, trpg_patch_apply, trpg_state_compact, trpg_faction_tick, trpg_hooks_query, trpg_dice_roll, trpg_scene_components",
+    "[trpg-runtime] registered tools: trpg_store_get, trpg_patch_dry_run, trpg_patch_apply, trpg_state_compact, trpg_status_inventory_repair, trpg_faction_tick, trpg_hooks_query, trpg_dice_roll, trpg_scene_components",
   );
 }

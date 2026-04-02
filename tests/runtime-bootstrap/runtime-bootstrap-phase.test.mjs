@@ -113,7 +113,12 @@ test("bootstrap/ready/in-game phase branching injects component-first guidance",
   await fs.rm(worldRoot, { recursive: true, force: true });
 
   await writeWorldFile(worldRoot, "canon/player.yaml", "{}\n");
-  let result = await invokeBeforePrompt(plugin, worldRoot, { prompt: "", messages: [] });
+  let result = await invokeBeforePrompt(
+    plugin,
+    worldRoot,
+    { prompt: "", messages: [] },
+    { allowPatchApply: true, canonicalWriteBackEnabled: true },
+  );
   let context = result?.appendSystemContext || "";
   assert.equal(context.includes("character_created=false"), true);
   assert.equal(context.includes("TRPG_DISCORD_COMPONENTS_BOOTSTRAP"), true);
@@ -135,7 +140,12 @@ test("bootstrap/ready/in-game phase branching injects component-first guidance",
       "",
     ].join("\n"),
   );
-  result = await invokeBeforePrompt(plugin, worldRoot, { prompt: "", messages: [] });
+  result = await invokeBeforePrompt(
+    plugin,
+    worldRoot,
+    { prompt: "", messages: [] },
+    { allowPatchApply: true, canonicalWriteBackEnabled: true },
+  );
   context = result?.appendSystemContext || "";
   assert.equal(context.includes("character_created=true AND bootstrap_complete=false"), true);
   assert.equal(context.includes("TRPG_DISCORD_COMPONENTS_BOOTSTRAP"), true);
@@ -170,10 +180,15 @@ test("bootstrap/ready/in-game phase branching injects component-first guidance",
     ].join("\n"),
   );
 
-  result = await invokeBeforePrompt(plugin, worldRoot, {
-    prompt: "user: 진행",
-    messages: [{ role: "user", content: "진행" }],
-  });
+  result = await invokeBeforePrompt(
+    plugin,
+    worldRoot,
+    {
+      prompt: "user: 진행",
+      messages: [{ role: "user", content: "진행" }],
+    },
+    { allowPatchApply: true, canonicalWriteBackEnabled: true },
+  );
   context = result?.appendSystemContext || "";
   assert.equal(context.includes("TRPG_RUNTIME_STATUS_PANEL_V1"), true);
   assert.equal(context.includes("TRPG_DISCORD_COMPONENTS"), true);
@@ -212,23 +227,24 @@ test("D/E in-game seed recovery and date priority", async () => {
     ].join("\n"),
   );
 
-  await writeWorldFile(worldRoot, "state/player-status.yaml", ":::broken_yaml:::[\n");
-  await writeWorldFile(worldRoot, "state/inventory.yaml", "inventory: [\n");
+  const brokenStatusText = ":::broken_yaml:::[\n";
+  const brokenInventoryText = "inventory: [\n";
+  await writeWorldFile(worldRoot, "state/player-status.yaml", brokenStatusText);
+  await writeWorldFile(worldRoot, "state/inventory.yaml", brokenInventoryText);
 
   const result = await invokeBeforePrompt(plugin, worldRoot, {
     prompt: "user: 상태 확인",
     messages: [{ role: "user", content: "상태 확인" }],
-  });
+  }, { allowPatchApply: true, canonicalWriteBackEnabled: true });
   const context = result?.appendSystemContext || "";
   assert.equal(context.includes("World time:"), true);
 
   const statusText = await fs.readFile(path.resolve(worldRoot, "state/player-status.yaml"), "utf8");
   const inventoryText = await fs.readFile(path.resolve(worldRoot, "state/inventory.yaml"), "utf8");
-  assert.equal(statusText.includes("health:"), true);
-  assert.equal(statusText.includes("money:"), true);
-  assert.equal(statusText.includes("stamina_state:"), true);
-  assert.equal(inventoryText.includes("carried:"), true);
-  assert.equal(inventoryText.includes("notes:"), true);
+  assert.equal(statusText.includes("player_status:"), true);
+  assert.equal(statusText.includes("health:"), false);
+  assert.equal(statusText.includes("stamina_state:"), false);
+  assert.equal(inventoryText, brokenInventoryText);
 
   await writeWorldFile(
     worldRoot,
@@ -261,9 +277,285 @@ test("D/E in-game seed recovery and date priority", async () => {
   const resultPriority = await invokeBeforePrompt(plugin, worldRoot, {
     prompt: "user: 상태",
     messages: [{ role: "user", content: "상태" }],
-  });
+  }, { allowPatchApply: true, canonicalWriteBackEnabled: true });
   const contextPriority = resultPriority?.appendSystemContext || "";
   assert.equal(contextPriority.includes("World time: 2026-03-25T10:11:12.000Z"), true);
+});
+
+test("status/inventory malformed files are repaired only by explicit repair tool", async () => {
+  const plugin = await pluginPromise;
+  const worldRoot = path.resolve(ROOT_DIR, ".tmp-test-world-status-inventory-repair-tool");
+  await fs.rm(worldRoot, { recursive: true, force: true });
+
+  const brokenStatusText = ":::broken_yaml:::[\n";
+  const brokenInventoryText = "inventory: [\n";
+  await writeWorldFile(worldRoot, "state/player-status.yaml", brokenStatusText);
+  await writeWorldFile(worldRoot, "state/inventory.yaml", brokenInventoryText);
+
+  const dryRunResult = await invokeTool(plugin, worldRoot, "trpg_status_inventory_repair", {
+    dryRun: true,
+  });
+  const dryRunPayload = dryRunResult?.details ?? JSON.parse(dryRunResult?.content?.[0]?.text ?? "{}");
+  assert.equal(dryRunPayload?.ok, true);
+  assert.equal(dryRunPayload?.mode, "dry-run");
+  assert.equal(dryRunPayload?.status?.repaired, true);
+  assert.equal(dryRunPayload?.inventory?.repaired, true);
+  assert.equal(dryRunPayload?.wroteAny, false);
+
+  const statusAfterDryRun = await fs.readFile(path.resolve(worldRoot, "state/player-status.yaml"), "utf8");
+  const inventoryAfterDryRun = await fs.readFile(path.resolve(worldRoot, "state/inventory.yaml"), "utf8");
+  assert.equal(statusAfterDryRun, brokenStatusText);
+  assert.equal(inventoryAfterDryRun, brokenInventoryText);
+
+  const applyResult = await invokeTool(plugin, worldRoot, "trpg_status_inventory_repair", {});
+  const applyPayload = applyResult?.details ?? JSON.parse(applyResult?.content?.[0]?.text ?? "{}");
+  assert.equal(applyPayload?.ok, true);
+  assert.equal(applyPayload?.mode, "apply");
+  assert.equal(applyPayload?.status?.wrote, true);
+  assert.equal(applyPayload?.inventory?.wrote, true);
+
+  const repairedStatus = await fs.readFile(path.resolve(worldRoot, "state/player-status.yaml"), "utf8");
+  const repairedInventory = await fs.readFile(path.resolve(worldRoot, "state/inventory.yaml"), "utf8");
+  assert.equal(repairedStatus.includes("health:"), true);
+  assert.equal(repairedStatus.includes("money:"), true);
+  assert.equal(repairedStatus.includes("stamina_state:"), true);
+  assert.equal(repairedInventory.includes("carried:"), true);
+  assert.equal(repairedInventory.includes("notes:"), true);
+});
+
+test("status repair tool migrates legacy player-status schema into canonical v2 with marker", async () => {
+  const plugin = await pluginPromise;
+  const worldRoot = path.resolve(ROOT_DIR, ".tmp-test-world-status-schema-v2-migration");
+  await fs.rm(worldRoot, { recursive: true, force: true });
+
+  await writeWorldFile(
+    worldRoot,
+    "state/player-status.yaml",
+    [
+      "meta:",
+      "  schema_version: 1",
+      "status:",
+      "  hp_current: 9",
+      "  hp_max: 10",
+      "  stamina_current: 7",
+      "  stamina_max: 10",
+      "  stress_current: 2",
+      "  stress_max: 10",
+      "funds:",
+      "  coins: 12",
+      "condition: rested",
+      "tags:",
+      "  - field-operator",
+      "  - debt-risk",
+      "",
+    ].join("\n"),
+  );
+
+  const repairResult = await invokeTool(plugin, worldRoot, "trpg_status_inventory_repair", {
+    repairStatus: true,
+    repairInventory: false,
+  });
+  const repairPayload = repairResult?.details ?? JSON.parse(repairResult?.content?.[0]?.text ?? "{}");
+  assert.equal(repairPayload?.ok, true);
+  assert.equal(repairPayload?.status?.wrote, true);
+  assert.equal(repairPayload?.status?.reason, "schema_migrated_v2");
+
+  const repairedStatus = await fs.readFile(path.resolve(worldRoot, "state/player-status.yaml"), "utf8");
+  assert.equal(repairedStatus.includes("schema_version: 2"), true);
+  assert.equal(repairedStatus.includes("status_schema: player_status_v2"), true);
+  assert.equal(repairedStatus.includes("player_status_v2: true"), true);
+  assert.equal(repairedStatus.includes("player_status:"), true);
+  assert.equal(repairedStatus.includes("money: 12"), true);
+  assert.equal(repairedStatus.includes("condition: rested"), true);
+  assert.equal(repairedStatus.includes("field-operator"), true);
+  assert.equal(repairedStatus.includes("current: 9"), true);
+  assert.equal(repairedStatus.includes("max: 10"), true);
+  assert.equal(repairedStatus.includes("hp_current:"), false);
+  assert.equal(repairedStatus.includes("funds:\n  coins"), false);
+});
+
+test("status panel ignores legacy top-level fields once v2 migration marker exists", async () => {
+  const plugin = await pluginPromise;
+  const worldRoot = path.resolve(ROOT_DIR, ".tmp-test-world-status-schema-v2-legacy-reject");
+  await fs.rm(worldRoot, { recursive: true, force: true });
+
+  await writeWorldFile(
+    worldRoot,
+    "canon/player.yaml",
+    [
+      "player:",
+      "  name: Mina",
+      "  goal: Keep watch",
+      "game_state:",
+      "  character_created: true",
+      "  bootstrap_complete: true",
+      "",
+    ].join("\n"),
+  );
+  await writeWorldFile(
+    worldRoot,
+    "state/current-scene.yaml",
+    [
+      "scene:",
+      "  id: scene-status-v2",
+      "  scene_flow:",
+      "    player_setup_complete: true",
+      "    intro_shown: true",
+      "",
+    ].join("\n"),
+  );
+  await writeWorldFile(
+    worldRoot,
+    "state/player-status.yaml",
+    [
+      "meta:",
+      "  schema_version: 2",
+      "  status_schema: player_status_v2",
+      "  migrations:",
+      "    player_status_v2: true",
+      "  last_updated: 2026-03-30T00:00:00.000Z",
+      "player_status:",
+      "  name: Mina",
+      "  current_goal: Keep watch",
+      "  money: 5",
+      "  stamina: normal",
+      "  condition: focused",
+      "  tags:",
+      "    - alert",
+      "  bootstrap:",
+      "    name: Mina",
+      "    goal: Keep watch",
+      "    character_created: true",
+      "    bootstrap_complete: true",
+      "status:",
+      "  health:",
+      "    current: 11",
+      "    max: 12",
+      "  stamina:",
+      "    current: 9",
+      "    max: 10",
+      "  stress:",
+      "    current: 1",
+      "    max: 10",
+      "  economy:",
+      "    money: 5",
+      "    funds: 5",
+      "funds:",
+      "  coins: 99",
+      "condition: exhausted",
+      "tags:",
+      "  - legacy-only",
+      "",
+    ].join("\n"),
+  );
+
+  const result = await invokeBeforePrompt(
+    plugin,
+    worldRoot,
+    {
+      prompt: "user: 상태 확인",
+      messages: [{ role: "user", content: "상태 확인" }],
+    },
+    { allowPatchApply: true, canonicalWriteBackEnabled: true },
+  );
+  const context = result?.appendSystemContext || "";
+
+  assert.equal(context.includes("Money: 5 |"), true);
+  assert.equal(context.includes("Condition: focused"), true);
+  assert.equal(context.includes("Player tags: alert"), true);
+  assert.equal(context.includes("legacy-only"), false);
+  assert.equal(context.includes("Money: 99 |"), false);
+});
+
+test("placeholder unknown destination is rejected with clarification and no zone generation", async () => {
+  const plugin = await pluginPromise;
+  const worldRoot = path.resolve(ROOT_DIR, ".tmp-test-world-travel-label-quality-gate");
+  await fs.rm(worldRoot, { recursive: true, force: true });
+
+  await writeWorldFile(
+    worldRoot,
+    "canon/player.yaml",
+    [
+      "player:",
+      "  name: Mina",
+      "game_state:",
+      "  character_created: true",
+      "  bootstrap_complete: true",
+      "",
+    ].join("\n"),
+  );
+  await writeWorldFile(
+    worldRoot,
+    "state/current-scene.yaml",
+    [
+      "scene:",
+      "  id: scene-travel-gate",
+      "  location:",
+      "    zone_id: zone-harbor",
+      "    nearby_zone_ids: []",
+      "  scene_flow:",
+      "    player_setup_complete: true",
+      "    intro_shown: true",
+      "",
+    ].join("\n"),
+  );
+  const pressureBefore = [
+    "meta:",
+    "  schema_version: 1",
+    "zones:",
+    "  - id: zone-harbor",
+    "    name: 항구 중앙",
+    "    type: port",
+    "    parent_region: harbor-city",
+    "    tags:",
+    "      - port",
+    "    aliases:",
+    "      - 항구 중앙",
+    "    connections: []",
+    "zone_topology:",
+    "  nearby_zones: {}",
+    "zone_pressure:",
+    "  zone-harbor:",
+    "    label: 항구 중앙",
+    "    pressure: 45",
+    "    score: 45",
+    "    trend: steady",
+    "district_tension: {}",
+    "",
+  ].join("\n");
+  await writeWorldFile(worldRoot, "state/world-pressure.yaml", pressureBefore);
+  const travelBefore = [
+    "meta:",
+    "  schema_version: 1",
+    "travel_state:",
+    "  current_zone: zone-harbor",
+    "  destination_zone: null",
+    "  path: []",
+    "  travel_mode: walk",
+    "  travel_progress: 0",
+    "  last_user_intent: idle",
+    "",
+  ].join("\n");
+  await writeWorldFile(worldRoot, "state/travel-state.yaml", travelBefore);
+
+  const result = await invokeBeforePrompt(
+    plugin,
+    worldRoot,
+    {
+      prompt: "user: label-029998로 이동한다",
+      messages: [{ role: "user", content: "label-029998로 이동한다" }],
+    },
+    { allowPatchApply: true, canonicalWriteBackEnabled: true },
+  );
+  const context = result?.appendSystemContext || "";
+  assert.equal(context.includes("[TRPG_RUNTIME_TRAVEL_CLARIFICATION_REQUIRED]"), true);
+  assert.equal(context.includes("too vague"), true);
+
+  const pressureAfter = await fs.readFile(path.resolve(worldRoot, "state/world-pressure.yaml"), "utf8");
+  const travelAfter = await fs.readFile(path.resolve(worldRoot, "state/travel-state.yaml"), "utf8");
+  assert.equal(pressureAfter, pressureBefore);
+  assert.equal(travelAfter, travelBefore);
+  assert.equal(pressureAfter.includes("zone-label-029998"), false);
 });
 
 test("scene components enforce system-phase UI in bootstrap", async () => {
@@ -299,8 +591,11 @@ test("scene components enforce system-phase UI in bootstrap", async () => {
     (label) => nonGameAllowedLabels.add(label),
   );
   assert.equal(labels.every((label) => nonGameAllowedLabels.has(label)), true);
-  const hasInventorySelect = (payload.components?.blocks ?? []).some((block) => Boolean(block?.select));
-  assert.equal(hasInventorySelect, false);
+  const inventorySelectBlock = (payload.components?.blocks ?? []).find((block) => Boolean(block?.select));
+  assert.ok(inventorySelectBlock);
+  const inventoryOptions = inventorySelectBlock?.select?.options ?? [];
+  assert.equal(Array.isArray(inventoryOptions), true);
+  assert.ok(inventoryOptions.length > 0);
   assert.equal(Boolean(payload.components?.modal), true);
   const modalFieldLabels = (payload.components?.modal?.fields ?? []).map((field) => field?.label ?? "");
   assert.equal(modalFieldLabels.includes("이름 입력"), true);
@@ -738,9 +1033,14 @@ test("non-game select allows safe dropdown and rejects invalid options", async (
     includeInput: false,
   });
   const invalidPayload = invalidResult?.details ?? JSON.parse(invalidResult?.content?.[0]?.text ?? "{}");
-  const invalidHasSelect = (invalidPayload.components?.blocks ?? []).some((block) => Boolean(block?.select));
+  const invalidSelectBlock = (invalidPayload.components?.blocks ?? []).find((block) => Boolean(block?.select));
   const invalidButtons = (invalidPayload.components?.blocks ?? []).flatMap((block) => block?.buttons ?? []);
-  assert.equal(invalidHasSelect, false);
+  assert.ok(invalidSelectBlock);
+  const invalidSelectOptions = Array.isArray(invalidSelectBlock?.select?.options)
+    ? invalidSelectBlock.select.options
+    : [];
+  const invalidOptionValues = invalidSelectOptions.map((option) => option?.value);
+  assert.equal(invalidOptionValues.includes("bg_invalid_label"), false);
   assert.equal(invalidButtons.some((button) => button.label === "🆕 새 캐릭터 시작"), true);
 });
 
@@ -780,6 +1080,45 @@ test("bootstrap completion syncs canon fields into state/player-status", async (
   assert.equal(statusText.includes("goal: 빚을 갚는다"), true);
   assert.equal(statusText.includes("character_created: true"), true);
   assert.equal(statusText.includes("bootstrap_complete: true"), true);
+});
+
+test("bootstrap persistence is fail-closed when audited apply is disabled", async () => {
+  const plugin = await pluginPromise;
+  const worldRoot = path.resolve(ROOT_DIR, ".tmp-test-world-bootstrap-persistence-fail-closed");
+  await fs.rm(worldRoot, { recursive: true, force: true });
+
+  const initialCanon = [
+    "player:",
+    "  name: Existing",
+    "game_state:",
+    "  character_created: false",
+    "  bootstrap_complete: false",
+    "",
+  ].join("\n");
+  await writeWorldFile(worldRoot, "canon/player.yaml", initialCanon);
+
+  const result = await invokeBeforePrompt(
+    plugin,
+    worldRoot,
+    {
+      prompt: "user: 이름: 리아\n배경: 떠돌이 밀수꾼\n이유: 빚을 갚으려 들어왔다\n비밀: 장부를 숨겼다\n두려움: 바다\n목표: 빚을 갚는다\n준비 완료",
+      messages: [{ role: "user", content: "이름: 리아\n배경: 떠돌이 밀수꾼\n이유: 빚을 갚으려 들어왔다\n비밀: 장부를 숨겼다\n두려움: 바다\n목표: 빚을 갚는다\n준비 완료" }],
+    },
+    { allowPatchApply: false, canonicalWriteBackEnabled: false },
+  );
+
+  assert.equal(result, undefined);
+  const canonAfter = await fs.readFile(path.resolve(worldRoot, "canon/player.yaml"), "utf8");
+  assert.equal(canonAfter, initialCanon);
+
+  const diagnostics = await readRuntimeDiagnostics(worldRoot);
+  const blocked = diagnostics.find((entry) => entry?.event === "bootstrap_persistence_blocked");
+  assert.ok(blocked);
+  assert.equal(blocked?.result, "blocked_fail_closed");
+
+  const failed = diagnostics.find((entry) => entry?.event === "before_prompt_build_failed");
+  assert.ok(failed);
+  assert.match(String(failed?.details?.error ?? ""), /bootstrap persistence is blocked by config/i);
 });
 
 test("status panel profile lines prefer state/player-status over canon drift", async () => {
@@ -849,10 +1188,15 @@ test("status panel profile lines prefer state/player-status over canon drift", a
     ].join("\n"),
   );
 
-  const result = await invokeBeforePrompt(plugin, worldRoot, {
-    prompt: "user: 상태 확인",
-    messages: [{ role: "user", content: "상태 확인" }],
-  });
+  const result = await invokeBeforePrompt(
+    plugin,
+    worldRoot,
+    {
+      prompt: "user: 상태 확인",
+      messages: [{ role: "user", content: "상태 확인" }],
+    },
+    { allowPatchApply: true, canonicalWriteBackEnabled: true },
+  );
   const context = result?.appendSystemContext || "";
   const statusText = await fs.readFile(path.resolve(worldRoot, "state/player-status.yaml"), "utf8");
 
@@ -973,10 +1317,15 @@ test("stale intro_shown does not force IN_GAME phase", async () => {
     ].join("\n"),
   );
 
-  const result = await invokeBeforePrompt(plugin, worldRoot, {
-    prompt: "user: 진행",
-    messages: [{ role: "user", content: "진행" }],
-  });
+  const result = await invokeBeforePrompt(
+    plugin,
+    worldRoot,
+    {
+      prompt: "user: 진행",
+      messages: [{ role: "user", content: "진행" }],
+    },
+    { allowPatchApply: true, canonicalWriteBackEnabled: true },
+  );
   const context = result?.appendSystemContext || "";
   assert.equal(context.includes("character_created=true AND bootstrap_complete=false"), true);
   assert.equal(context.includes("TRPG_RUNTIME_STATUS_PANEL_V1"), false);
@@ -1048,10 +1397,15 @@ test("before_prompt_build uses session workspace as effective worldRoot", async 
     ) + "\n",
   );
 
-  const result = await invokeBeforePrompt(plugin, worldRoot, {
-    prompt: "user: 진행",
-    messages: [{ role: "user", content: "진행" }],
-  });
+  const result = await invokeBeforePrompt(
+    plugin,
+    worldRoot,
+    {
+      prompt: "user: 진행",
+      messages: [{ role: "user", content: "진행" }],
+    },
+    { allowPatchApply: true, canonicalWriteBackEnabled: true },
+  );
   const context = result?.appendSystemContext || "";
 
   assert.equal(context.includes("TRPG_RUNTIME_STATUS_PANEL_V1"), true);
@@ -1064,10 +1418,15 @@ test("runtime diagnostics writes bootstrap + scene-component core events", async
   await fs.rm(worldRoot, { recursive: true, force: true });
   await writeWorldFile(worldRoot, "canon/player.yaml", "{}\n");
 
-  await invokeBeforePrompt(plugin, worldRoot, {
-    prompt: "user: 캐릭터 준비",
-    messages: [{ role: "user", content: "캐릭터 준비" }],
-  });
+  await invokeBeforePrompt(
+    plugin,
+    worldRoot,
+    {
+      prompt: "user: 캐릭터 준비",
+      messages: [{ role: "user", content: "캐릭터 준비" }],
+    },
+    { allowPatchApply: true, canonicalWriteBackEnabled: true },
+  );
 
   await invokeTool(plugin, worldRoot, "trpg_scene_components", {
     scene: "exploration",

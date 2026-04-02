@@ -18,6 +18,9 @@ type BootstrapPersistenceDeps = {
   readString: (value: unknown) => string;
 };
 
+const STATUS_SCHEMA_VERSION = 2;
+const STATUS_SCHEMA_TAG = "player_status_v2";
+
 export async function syncBootstrapStateToStatus(
   params: {
     cfg: TrpgRuntimeConfig;
@@ -35,6 +38,7 @@ export async function syncBootstrapStateToStatus(
 
   const root = deps.toObject(loaded.parsed);
   const meta = deps.toObject(root.meta);
+  const metaMigrations = deps.toObject(meta.migrations);
   const playerStatus = deps.toObject(root.player_status);
   const bootstrapStatus = deps.toObject(playerStatus.bootstrap);
   const desiredName = deps.readString(playerStatus.name) || deps.readString(params.player.name);
@@ -63,7 +67,14 @@ export async function syncBootstrapStateToStatus(
 
   root.meta = {
     ...meta,
-    schema_version: 1,
+    schema_version: STATUS_SCHEMA_VERSION,
+    status_schema: STATUS_SCHEMA_TAG,
+    migrations: {
+      ...metaMigrations,
+      [STATUS_SCHEMA_TAG]: true,
+      [`${STATUS_SCHEMA_TAG}_applied_at`]:
+        deps.readString(metaMigrations[`${STATUS_SCHEMA_TAG}_applied_at`]) || nowIso,
+    },
     last_updated: deps.readString(meta.last_updated) || nowIso,
   };
   root.player_status = {
@@ -114,7 +125,7 @@ export async function applyBootstrapAuditedPersistence(
     runtimePhase: "BOOTSTRAP",
     route: "before_prompt_build",
     gate: "bootstrap_persistence",
-    result: canUseAuditedPatch ? "audited" : "fallback",
+    result: canUseAuditedPatch ? "audited" : "blocked_fail_closed",
     details: {
       title: params.title,
       operationCount: params.operations.length,
@@ -126,68 +137,22 @@ export async function applyBootstrapAuditedPersistence(
       cfg: params.cfg,
       worldRoot: params.worldRoot,
       sessionId: params.sessionId,
-      event: "bootstrap_persistence_fallback",
+      event: "bootstrap_persistence_blocked",
       severity: "warn",
       runtimePhase: "BOOTSTRAP",
       route: "before_prompt_build",
       gate: "bootstrap_persistence",
-      result: "fallback_direct_write",
+      result: "blocked_fail_closed",
       details: {
         allowPatchApply: params.cfg.allowPatchApply,
         canonicalWriteBackEnabled: params.cfg.runtimeSafetyFlags.canonicalWriteBackEnabled,
       },
     });
-    try {
-      for (const operation of params.operations) {
-        const op = deps.readString(operation.op);
-        const file = deps.readString(operation.file);
-        const pointer = deps.readString(operation.pointer);
-        if (op !== "set" || pointer !== "/" || !file) {
-          continue;
-        }
-        const absolute = resolveWorldAbsolutePath(params.worldRoot, file);
-        const ext = file.toLowerCase().endsWith(".json") ? "json" : "yaml";
-        const rendered = renderStructuredContent(ext, operation.value);
-        await fs.writeFile(absolute, rendered, "utf8");
-      }
-      await emitRuntimeDiagnostic({
-        cfg: params.cfg,
-        worldRoot: params.worldRoot,
-        sessionId: params.sessionId,
-        event: "bootstrap_persistence_success",
-        severity: "info",
-        runtimePhase: "BOOTSTRAP",
-        route: "before_prompt_build",
-        gate: "bootstrap_persistence",
-        result: "success",
-        details: {
-          title: params.title,
-          mode: "fallback_direct_write",
-        },
-      });
-      return { ok: true };
-    } catch (error) {
-      await emitRuntimeDiagnostic({
-        cfg: params.cfg,
-        worldRoot: params.worldRoot,
-        sessionId: params.sessionId,
-        event: "bootstrap_persistence_failed",
-        severity: "error",
-        runtimePhase: "BOOTSTRAP",
-        route: "before_prompt_build",
-        gate: "bootstrap_persistence",
-        result: "failed",
-        details: {
-          title: params.title,
-          mode: "fallback_direct_write",
-          error: error instanceof Error ? error.message : String(error),
-        },
-      });
-      return {
-        ok: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
+    return {
+      ok: false,
+      error:
+        "bootstrap persistence is blocked by config (requires allowPatchApply=true and canonicalWriteBackEnabled=true)",
+    };
   }
 
   const dryRunResult = await runPatchDryRun({

@@ -6,6 +6,7 @@ import {
   resolveWorldAbsolutePath,
 } from "../../world-store.js";
 import {
+  assessUnknownDestinationLabelQuality,
   extractUnknownDestinationLabel,
   inferZoneTypeFromLabel,
   isKnownDestinationAlias,
@@ -15,10 +16,12 @@ import {
 } from "./travel-zone-helpers.js";
 
 export type GeneratedZoneResult = {
-  destinationZoneId: string;
+  destinationZoneId: string | null;
   contextLine: string;
   zoneNameValue: string;
   zoneTypeValue: string;
+  rejected?: boolean;
+  rejectionReason?: string;
 };
 
 function toObject(value: unknown): Record<string, unknown> {
@@ -57,10 +60,26 @@ export async function generateLinkedZoneForUnknownDestination(params: {
   const requestedLabel = extractUnknownDestinationLabel(params.latestUserMessage, params.aliasMap);
   if (!requestedLabel) return null;
 
+  const quality = assessUnknownDestinationLabelQuality(requestedLabel);
+  if (!quality.ok) {
+    return {
+      destinationZoneId: null,
+      zoneNameValue: requestedLabel,
+      zoneTypeValue: "settlement",
+      rejected: true,
+      rejectionReason: quality.reason || "low_quality_label",
+      contextLine:
+        `Requested destination '${requestedLabel}' is too vague (${quality.reason || "low_quality_label"}). ` +
+        "Do not generate a new zone yet; ask the player for a concrete place name such as a district, landmark, road, or facility.",
+    };
+  }
+
+  const normalizedLabel = quality.normalized;
+
   const pressureRoot = toObject(params.pressureParsed);
-  const zoneTypeValue = inferZoneTypeFromLabel(requestedLabel);
+  const zoneTypeValue = inferZoneTypeFromLabel(normalizedLabel);
   const timestampSuffix = String(Date.now()).slice(-6);
-  const zoneId = normalizeZoneId(`zone-${requestedLabel}-${timestampSuffix}`);
+  const zoneId = normalizeZoneId(`zone-${normalizedLabel}-${timestampSuffix}`);
   if (!zoneId || params.zoneGraph[zoneId]) return null;
 
   const links = uniqStrings([
@@ -77,16 +96,16 @@ export async function generateLinkedZoneForUnknownDestination(params: {
   const lifecycleNow = new Date().toISOString();
   const zonePayload = {
     id: zoneId,
-    name: requestedLabel,
+    name: normalizedLabel,
     type: zoneTypeValue,
     parent_region: params.zoneGraph[params.currentZoneId]?.parentRegion || "generated-frontier",
     tags: ["generated", zoneTypeValue, "runtime"],
-    aliases: [requestedLabel],
+    aliases: [normalizedLabel],
     connections: links,
     nearby_zone_ids: links,
-    exploration_surface: `${requestedLabel} routes and clues`,
-    social_surface: `${requestedLabel} faction contact friction`,
-    conflict_surface: `${requestedLabel} control contest and hazard points`,
+    exploration_surface: `${normalizedLabel} routes and clues`,
+    social_surface: `${normalizedLabel} faction contact friction`,
+    conflict_surface: `${normalizedLabel} control contest and hazard points`,
     faction_presence: ["city watch", "local brokers", "independent cells"],
     pressure_level: pressureLevel,
     pressure_signals: ["checkpoint_shift", "watch_rotation", "rumor_spread"],
@@ -119,7 +138,7 @@ export async function generateLinkedZoneForUnknownDestination(params: {
 
   const zp = toObject(pressureRoot.zone_pressure);
   zp[zoneId] = {
-    label: requestedLabel,
+    label: normalizedLabel,
     pressure,
     score: pressure,
     trend: "up",
@@ -131,7 +150,7 @@ export async function generateLinkedZoneForUnknownDestination(params: {
 
   const dt = toObject(pressureRoot.district_tension);
   dt[zoneId] = {
-    label: requestedLabel,
+    label: normalizedLabel,
     score: pressure,
     trend: "up",
     soft_threshold: Math.max(35, pressure - 12),
@@ -145,9 +164,9 @@ export async function generateLinkedZoneForUnknownDestination(params: {
 
   return {
     destinationZoneId: zoneId,
-    zoneNameValue: requestedLabel,
+    zoneNameValue: normalizedLabel,
     zoneTypeValue,
-    contextLine: `A new connected area emerges nearby: ${requestedLabel}. It carries ${pressureLevel} pressure with exploration/social/conflict surfaces and active faction presence.`,
+    contextLine: `A new connected area emerges nearby: ${normalizedLabel}. It carries ${pressureLevel} pressure with exploration/social/conflict surfaces and active faction presence.`,
   };
 }
 

@@ -23,11 +23,16 @@ import {
   type StateCompactInput,
 } from "../../lifecycle-compact.js";
 import {
+  runStatusInventoryRepairTool,
+  type StatusInventoryRepairInput,
+} from "./repair-status-inventory.js";
+import {
   DICE_ROLL_PARAMETERS,
   FACTION_TICK_PARAMETERS,
   HOOKS_QUERY_PARAMETERS,
   PATCH_APPLY_PARAMETERS,
   PATCH_DRY_RUN_TOOL_PARAMETERS,
+  STATUS_INVENTORY_REPAIR_PARAMETERS,
   STATE_COMPACT_PARAMETERS,
   STORE_GET_PARAMETERS,
 } from "./core-runtime-tool-schemas.js";
@@ -213,6 +218,36 @@ export function registerCoreRuntimeTools(params: RegisterCoreRuntimeToolsParams)
       },
     }),
     { name: "trpg_state_compact" },
+  );
+
+  api.registerTool(
+    (ctx) => ({
+      name: "trpg_status_inventory_repair",
+      description:
+        "Explicitly repair malformed state/player-status.yaml and state/inventory.yaml files; never runs implicitly on read paths.",
+      parameters: STATUS_INVENTORY_REPAIR_PARAMETERS,
+      async execute(_toolCallId, input) {
+        const gate = toolGate({ cfg, ctx, api });
+        if (!gate.ok) {
+          return jsonToolResult(gate.payload);
+        }
+
+        try {
+          const payload = await runStatusInventoryRepairTool({
+            cfg,
+            worldRoot: gate.worldRoot,
+            input: (input ?? {}) as StatusInventoryRepairInput,
+          });
+          return jsonToolResult(payload);
+        } catch (error) {
+          return jsonToolResult({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
+    }),
+    { name: "trpg_status_inventory_repair" },
   );
 
   api.registerTool(

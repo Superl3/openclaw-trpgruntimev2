@@ -429,6 +429,59 @@ export function normalizeUnknownDestinationLabel(raw: string): string {
   return candidate;
 }
 
+const UNKNOWN_DESTINATION_PLACEHOLDERS = new Set([
+  "label",
+  "unknown",
+  "test",
+  "tmp",
+  "temp",
+  "zone",
+  "location",
+  "destination",
+  "장소",
+  "목적지",
+  "어딘가",
+  "저기",
+  "거기",
+  "그곳",
+]);
+
+export function assessUnknownDestinationLabelQuality(raw: string): {
+  ok: boolean;
+  normalized: string;
+  reason?: string;
+} {
+  const normalized = normalizeUnknownDestinationLabel(raw);
+  if (!normalized) {
+    return { ok: false, normalized: "", reason: "empty_label" };
+  }
+
+  const compact = normalized.toLowerCase().replace(/\s+/g, " ").trim();
+  if (compact.length < 2) {
+    return { ok: false, normalized, reason: "too_short" };
+  }
+  if (/^\d+$/.test(compact)) {
+    return { ok: false, normalized, reason: "numeric_only" };
+  }
+  if (/^(?:label|zone|unknown|test|tmp|temp)(?:[-_\s]?\d+)?$/i.test(compact)) {
+    return { ok: false, normalized, reason: "placeholder_token" };
+  }
+  if (/^(?:zone[-_\s]?label|label[-_\s]?zone)(?:[-_\s]?\d+)?$/i.test(compact)) {
+    return { ok: false, normalized, reason: "generated_placeholder" };
+  }
+  if (UNKNOWN_DESTINATION_PLACEHOLDERS.has(compact)) {
+    return { ok: false, normalized, reason: "generic_placeholder" };
+  }
+  if (/^(?:어딘가|어느\s*곳|어떤\s*곳|장소|목적지|곳)(?:\s*\d+)?$/i.test(compact)) {
+    return { ok: false, normalized, reason: "vague_label" };
+  }
+
+  return {
+    ok: true,
+    normalized,
+  };
+}
+
 export function isKnownDestinationAlias(candidate: string, aliasMap: Record<string, string>): boolean {
   const aliasKey = normalizeAlias(candidate);
   const zoneKey = normalizeAlias(normalizeZoneId(candidate));

@@ -20,6 +20,9 @@ type EconomyPurchaseIntent = {
   cost: number;
 };
 
+const STATUS_SCHEMA_VERSION = 2;
+const STATUS_SCHEMA_TAG = "player_status_v2";
+
 function parseEconomyPurchaseIntent(message: string): EconomyPurchaseIntent | null {
   if (!message) {
     return null;
@@ -109,9 +112,18 @@ export async function applyLightweightEconomyUpdate(
   }
 
   statusRoot.player_status = playerStatus;
+  const statusMeta = deps.toObject(statusRoot.meta);
+  const statusMigrations = deps.toObject(statusMeta.migrations);
   statusRoot.meta = {
-    ...deps.toObject(statusRoot.meta),
-    schema_version: 1,
+    ...statusMeta,
+    schema_version: STATUS_SCHEMA_VERSION,
+    status_schema: STATUS_SCHEMA_TAG,
+    migrations: {
+      ...statusMigrations,
+      [STATUS_SCHEMA_TAG]: true,
+      [`${STATUS_SCHEMA_TAG}_applied_at`]:
+        deps.readString(statusMigrations[`${STATUS_SCHEMA_TAG}_applied_at`]) || new Date().toISOString(),
+    },
     last_updated: new Date().toISOString(),
   };
 

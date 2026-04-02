@@ -1,10 +1,5 @@
-import fs from "node:fs/promises";
 import type { TrpgRuntimeConfig } from "../../config.js";
-import {
-  loadStructuredWorldFile,
-  renderStructuredContent,
-  resolveWorldAbsolutePath,
-} from "../../world-store.js";
+import { loadStructuredWorldFile } from "../../world-store.js";
 
 export type StatusPanelDataResult = {
   hpCurrent: number | null;
@@ -37,6 +32,9 @@ type LoadStatusPanelDataDeps = {
   uniqStrings: (values: string[]) => string[];
 };
 
+const STATUS_SCHEMA_VERSION = 2;
+const STATUS_SCHEMA_TAG = "player_status_v2";
+
 export async function loadStatusPanelData(
   params: {
     cfg: TrpgRuntimeConfig;
@@ -45,19 +43,17 @@ export async function loadStatusPanelData(
   deps: LoadStatusPanelDataDeps,
 ): Promise<StatusPanelDataResult> {
   const nowIso = new Date().toISOString();
-  const loadOrRepair = async (relativePath: string, fallbackRoot: Record<string, unknown>) => {
+  const loadOrDefault = async (relativePath: string, fallbackRoot: Record<string, unknown>) => {
     try {
       return await loadStructuredWorldFile(params.worldRoot, relativePath, {
         allowMissing: true,
         maxReadBytes: params.cfg.maxReadBytes,
       });
     } catch {
-      const rendered = renderStructuredContent("yaml", fallbackRoot);
-      await fs.writeFile(resolveWorldAbsolutePath(params.worldRoot, relativePath), rendered, "utf8");
       return {
-        exists: true,
+        exists: false,
         format: "yaml" as const,
-        sourceText: rendered,
+        sourceText: "",
         parsed: fallbackRoot,
         sha256: "",
       };
@@ -65,8 +61,16 @@ export async function loadStatusPanelData(
   };
 
   const [statusLoaded, inventoryLoaded, sceneLoaded] = await Promise.all([
-    loadOrRepair("state/player-status.yaml", {
-      meta: { schema_version: 1, last_updated: nowIso },
+    loadOrDefault("state/player-status.yaml", {
+      meta: {
+        schema_version: STATUS_SCHEMA_VERSION,
+        status_schema: STATUS_SCHEMA_TAG,
+        migrations: {
+          [STATUS_SCHEMA_TAG]: true,
+          [`${STATUS_SCHEMA_TAG}_applied_at`]: nowIso,
+        },
+        last_updated: nowIso,
+      },
       player_status: { money: 0, stamina: "normal", condition: "healthy", tags: [] },
       status: {
         health: { current: 12, max: 12 },
@@ -75,7 +79,7 @@ export async function loadStatusPanelData(
         economy: { money: 0, funds: 0 },
       },
     }),
-    loadOrRepair("state/inventory.yaml", {
+    loadOrDefault("state/inventory.yaml", {
       meta: { schema_version: 1, last_updated: nowIso },
       inventory: { carried: [], equipped: [], notes: [] },
     }),
@@ -89,10 +93,34 @@ export async function loadStatusPanelData(
   const playerStatus = deps.toObject(statusRoot.player_status);
   const bootstrapStatus = deps.toObject(playerStatus.bootstrap);
   const legacyStatus = deps.toObject(statusRoot.status);
+  const statusMeta = deps.toObject(statusRoot.meta);
+  const statusMigrations = deps.toObject(statusMeta.migrations);
+  const statusSchemaMigrated =
+    (deps.readFiniteNumber(statusMeta.schema_version) ?? 0) >= STATUS_SCHEMA_VERSION ||
+    statusMigrations[STATUS_SCHEMA_TAG] === true;
   const health = deps.toObject(legacyStatus.health);
   const staminaGauge = deps.toObject(legacyStatus.stamina);
   const stress = deps.toObject(legacyStatus.stress);
   const economy = deps.toObject(legacyStatus.economy);
+  const legacyFunds = deps.toObject(statusRoot.funds);
+
+  const hpCurrent =
+    deps.readFiniteNumber(health.current) ??
+    (statusSchemaMigrated ? null : deps.readFiniteNumber(legacyStatus.hp_current));
+  const hpMax =
+    deps.readFiniteNumber(health.max) ?? (statusSchemaMigrated ? null : deps.readFiniteNumber(legacyStatus.hp_max));
+  const staminaCurrent =
+    deps.readFiniteNumber(staminaGauge.current) ??
+    (statusSchemaMigrated ? null : deps.readFiniteNumber(legacyStatus.stamina_current));
+  const staminaMax =
+    deps.readFiniteNumber(staminaGauge.max) ??
+    (statusSchemaMigrated ? null : deps.readFiniteNumber(legacyStatus.stamina_max));
+  const stressCurrent =
+    deps.readFiniteNumber(stress.current) ??
+    (statusSchemaMigrated ? null : deps.readFiniteNumber(legacyStatus.stress_current));
+  const stressMax =
+    deps.readFiniteNumber(stress.max) ??
+    (statusSchemaMigrated ? null : deps.readFiniteNumber(legacyStatus.stress_max));
 
   const inventoryRoot = deps.toObject(inventoryLoaded.parsed);
   const inventoryNode = deps.toObject(inventoryRoot.inventory);
@@ -110,99 +138,42 @@ export async function loadStatusPanelData(
   const money =
     deps.readFiniteNumber(playerStatus.money) ??
     deps.readFiniteNumber(economy.money) ??
-    deps.readFiniteNumber(economy.funds);
+    deps.readFiniteNumber(economy.funds) ??
+    (statusSchemaMigrated ? null : deps.readFiniteNumber(legacyFunds.coins));
+
+  const staminaState =
+    deps.readString(playerStatus.stamina) || deps.readString(playerStatus.stamina_state) || "normal";
+  const conditionState =
+    deps.readString(playerStatus.condition) ||
+    (statusSchemaMigrated ? "" : deps.readString(statusRoot.condition)) ||
+    "healthy";
+  const tags = deps.toStringArray(playerStatus.tags);
+  const effectiveTags =
+    tags.length > 0
+      ? tags.slice(0, 6)
+      : statusSchemaMigrated
+        ? []
+        : deps.toStringArray(statusRoot.tags).slice(0, 6);
+
   const fundsText =
     money !== null
       ? `coins ${String(Math.round(money))}`
       : deps.readString(economy.funds) || deps.readString(economy.currency) || "unknown";
 
-  let statusNeedsRepair = false;
-  if (deps.readFiniteNumber(health.current) === null || deps.readFiniteNumber(health.max) === null) {
-    statusNeedsRepair = true;
-  }
-  if (deps.readFiniteNumber(playerStatus.money) === null && deps.readFiniteNumber(economy.money) === null) {
-    statusNeedsRepair = true;
-  }
-  if (!deps.readString(playerStatus.stamina) && !deps.readString(playerStatus.stamina_state)) {
-    statusNeedsRepair = true;
-  }
-
-  if (statusNeedsRepair) {
-    statusRoot.meta = {
-      ...deps.toObject(statusRoot.meta),
-      schema_version: 1,
-      last_updated: nowIso,
-    };
-    statusRoot.player_status = {
-      ...deps.toObject(statusRoot.player_status),
-      money: deps.readFiniteNumber(playerStatus.money) ?? deps.readFiniteNumber(economy.money) ?? 0,
-      stamina_state:
-        deps.readString(playerStatus.stamina_state) || deps.readString(playerStatus.stamina) || "normal",
-      stamina:
-        deps.readString(playerStatus.stamina) || deps.readString(playerStatus.stamina_state) || "normal",
-      condition: deps.readString(playerStatus.condition) || "healthy",
-      tags: deps.toStringArray(playerStatus.tags),
-    };
-    statusRoot.status = {
-      ...deps.toObject(statusRoot.status),
-      health: {
-        current: deps.readFiniteNumber(health.current) ?? 12,
-        max: deps.readFiniteNumber(health.max) ?? 12,
-      },
-      stamina: {
-        current: deps.readFiniteNumber(staminaGauge.current) ?? 10,
-        max: deps.readFiniteNumber(staminaGauge.max) ?? 10,
-      },
-      stress: {
-        current: deps.readFiniteNumber(stress.current) ?? 0,
-        max: deps.readFiniteNumber(stress.max) ?? 10,
-      },
-      economy: {
-        money: deps.readFiniteNumber(economy.money) ?? deps.readFiniteNumber(playerStatus.money) ?? 0,
-        funds: deps.readFiniteNumber(economy.funds) ?? deps.readFiniteNumber(playerStatus.money) ?? 0,
-      },
-    };
-    await fs.writeFile(
-      resolveWorldAbsolutePath(params.worldRoot, "state/player-status.yaml"),
-      renderStructuredContent(statusLoaded.format, statusRoot),
-      "utf8",
-    );
-  }
-
-  const inventoryNeedsRepair = !Array.isArray(inventoryNode.carried) || !Array.isArray(inventoryNode.notes);
-  if (inventoryNeedsRepair) {
-    inventoryRoot.meta = {
-      ...deps.toObject(inventoryRoot.meta),
-      schema_version: 1,
-      last_updated: nowIso,
-    };
-    inventoryRoot.inventory = {
-      carried: Array.isArray(inventoryNode.carried) ? deps.toStringArray(inventoryNode.carried) : [],
-      equipped: Array.isArray(inventoryNode.equipped) ? deps.toStringArray(inventoryNode.equipped) : [],
-      notes: Array.isArray(inventoryNode.notes) ? deps.toStringArray(inventoryNode.notes) : [],
-    };
-    await fs.writeFile(
-      resolveWorldAbsolutePath(params.worldRoot, "state/inventory.yaml"),
-      renderStructuredContent(inventoryLoaded.format, inventoryRoot),
-      "utf8",
-    );
-  }
-
-  const statusMeta = deps.toObject(statusRoot.meta);
   const sceneMeta = deps.toObject(deps.toObject(sceneLoaded.parsed).meta);
   const worldTime = deps.readString(statusMeta.last_updated) || deps.readString(sceneMeta.last_updated) || nowIso;
 
   return {
-    hpCurrent: deps.readFiniteNumber(health.current),
-    hpMax: deps.readFiniteNumber(health.max),
-    staminaCurrent: deps.readFiniteNumber(staminaGauge.current),
-    staminaMax: deps.readFiniteNumber(staminaGauge.max),
-    stressCurrent: deps.readFiniteNumber(stress.current),
-    stressMax: deps.readFiniteNumber(stress.max),
+    hpCurrent,
+    hpMax,
+    staminaCurrent,
+    staminaMax,
+    stressCurrent,
+    stressMax,
     money,
-    staminaState: deps.readString(playerStatus.stamina) || deps.readString(playerStatus.stamina_state) || "normal",
-    conditionState: deps.readString(playerStatus.condition) || "healthy",
-    tags: deps.toStringArray(playerStatus.tags).slice(0, 6),
+    staminaState,
+    conditionState,
+    tags: effectiveTags,
     fundsText,
     inventoryHighlights: highlights,
     carriedItems: authoritativeCarried,

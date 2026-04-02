@@ -132,3 +132,13 @@ export const STATE_COMPACT_PARAMETERS = {
     },
   },
 } as const;
+
+export const STATUS_INVENTORY_REPAIR_PARAMETERS = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    dryRun: { type: "boolean" },
+    repairStatus: { type: "boolean" },
+    repairInventory: { type: "boolean" },
+  },
+} as const;
