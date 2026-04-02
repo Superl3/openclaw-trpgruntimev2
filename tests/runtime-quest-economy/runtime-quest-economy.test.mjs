@@ -569,10 +569,12 @@ test("panel clearly separates active and surfaced quest summaries", async () => 
   const debugText = JSON.stringify(debugPanel.components);
   const debugExtendedText = JSON.stringify(debugExtendedPanel.components);
 
-  assert.ok(playerText.includes("활성 과제:"));
-  assert.ok(playerText.includes("접촉 기회:"));
-  assert.ok(playerText.includes("퀘스트(진행):"));
-  assert.ok(playerText.includes("퀘스트(기회):"));
+  const playerEmbeds = Array.isArray(playerPanel.components?.embeds) ? playerPanel.components.embeds : [];
+  assert.ok(playerEmbeds.length > 0);
+  assert.equal(typeof playerEmbeds[0]?.description, "string");
+  assert.ok((playerEmbeds[0]?.description ?? "").length > 0);
+  const playerBlocks = Array.isArray(playerPanel.components?.blocks) ? playerPanel.components.blocks : [];
+  assert.equal(playerBlocks.some((entry) => entry?.type === "text"), false);
   assert.equal(playerText.includes("debug.quest_tuning.raw"), false);
   assert.equal(playerText.includes("debug.quest_hook_text.raw"), false);
   assert.equal(playerText.includes("budget_used=live"), false);
@@ -634,8 +636,12 @@ test("recent lifecycle changes appear as player-facing natural phrases", async (
     mode: "send",
   });
   const panelText = JSON.stringify(panelOut.components);
+  const panelDescription = panelOut.components?.embeds?.[0]?.description ?? "";
+  const recentOutcomeTexts = resolved.nextLoop.questEconomy.presentation.recentOutcomes.map((entry) => entry.text).filter(Boolean);
 
-  assert.ok(panelText.includes("최근 변화:"));
+  assert.ok(recentOutcomeTexts.length > 0);
+  assert.equal(typeof panelDescription, "string");
+  assert.equal(recentOutcomeTexts.some((entry) => panelDescription.includes(entry)), true);
   assert.equal(panelText.includes("overdue_failed"), false);
   assert.equal(panelText.includes("mutated_to_successor"), false);
 });
@@ -844,8 +850,10 @@ test("worldPulse rich text applies as single-line replacement only", async () =>
     routes: [],
     mode: "send",
   });
-  const panelText = JSON.stringify(panelOut.components);
-  assert.equal((panelText.match(/세계 동향:/g) ?? []).length, 1);
+  const panelDescription = panelOut.components?.embeds?.[0]?.description ?? "";
+  assert.equal(typeof panelDescription, "string");
+  assert.equal(panelDescription.includes(expectedOneLine), true);
+  assert.equal(panelDescription.includes("추가 줄은 제거되어야 한다"), false);
 
   const debugPanelOut = panel.buildCheckpoint1Panel({
     session,

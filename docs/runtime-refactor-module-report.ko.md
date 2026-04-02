@@ -1,6 +1,6 @@
 # Runtime Refactor Module Report (KO)
 
-_Last updated: 2026-03-31_
+_Last updated: 2026-04-02_
 
 ## 1) 목적
 
@@ -79,7 +79,16 @@ _Last updated: 2026-03-31_
    - legacy alias: `checkpoint0-lifecycle-tool-schemas.ts`
 
 19. `src/runtime-adapter/openclaw/lifecycle-response-helpers.ts`
-   - checkpoint0 lifecycle 응답(jsonToolResult/runtimeError) 보조 모듈
+   - session lifecycle 공통 응답(jsonToolResult/runtimeError) 보조 모듈
+
+20. `src/runtime-adapter/openclaw/session-lifecycle-local-helpers.ts`
+   - session lifecycle 로컬 파싱/정규화/trace-tail payload helper 모듈
+
+21. `src/runtime-adapter/openclaw/session-lifecycle-bootstrap-loaders.ts`
+   - world-seed bootstrap 로딩 + canon provenance 계산 로더 모듈
+
+22. `src/runtime-adapter/openclaw/session-lifecycle-panel-helpers.ts`
+   - panel_interact/commit 입력 파싱 및 요청 유효성 검증 helper 모듈
 
 ### 핵심 파일 구조 트리 (리팩터링 이후)
 
@@ -111,6 +120,9 @@ src/
     checkpoint0-lifecycle.ts                      # legacy alias
     checkpoint0-lifecycle-tool-schemas.ts         # legacy alias
     lifecycle-response-helpers.ts
+    session-lifecycle-local-helpers.ts
+    session-lifecycle-bootstrap-loaders.ts
+    session-lifecycle-panel-helpers.ts
 ```
 
 ---
@@ -187,6 +199,12 @@ src/
 
 ### 공통 유틸 / 훅
 
+- `runtime-engine-helpers.ts`
+  - runtime engine 공통 보조(Clock/Id/metadata/anchor trace type)
+  - quest hook cache prune/policy 적용 + miss 후보 계산(`prepareQuestHookCacheState`) 공통화
+- `runtime-engine-process-helpers.ts`
+  - `processSceneAction` 전용 순수 helper 묶음
+  - hook text 입력 빌드/slot meta 계산 + temporal/quest/hook trace payload 빌더 분리
 - `runtime-guard-utils.ts`
   - toObject/readString/readFiniteNumber/toStringArray/uniqStrings
   - joinLines/clipForGuard/sanitizeIntentText
@@ -230,7 +248,16 @@ src/
 - `checkpoint0-lifecycle.ts`
   - legacy alias re-export (호환 유지)
 - `lifecycle-response-helpers.ts`
-  - checkpoint0 lifecycle 공통 응답 래퍼 분리
+  - session lifecycle 공통 응답 래퍼 분리
+- `session-lifecycle-local-helpers.ts`
+  - `toObject/readString/readBoolean/readInteger/clampTraceTailCount` 추출
+  - legacy bootstrap 요약 sanitize + trace tail payload(summary) 공통화
+- `session-lifecycle-bootstrap-loaders.ts`
+  - world-seed candidate 경로 로딩 + validate/diagnostics 공통화
+  - canon 파일 로딩 + drift status/provenance 계산 공통화
+- `session-lifecycle-panel-helpers.ts`
+  - panel customId/route key 파싱 공통화
+  - panel_message_commit 입력 파싱 + invalid_request 검증 공통화
 - `tool-gate.ts`
   - tool 접근 게이트/응답 보조
 
@@ -264,8 +291,12 @@ src/
 - `build-before-prompt-deps.ts`: 56줄(얇은 deps 조합기)
 - `register-core-runtime-tools.ts`: 400줄 → 276줄(스키마 분리)
 - `register-scene-components-tool.ts`: 271줄 → 159줄(스키마 분리)
-- `session-lifecycle-tools.ts`: 2343줄 → 2288줄(리네임 + 스키마/응답 헬퍼 분리 + command handler 등록 단위 분해)
+- `session-lifecycle-tools.ts`: 2343줄 → 1950줄(리네임 + 스키마/응답/로컬 helper + bootstrap/canon loader + panel parse/validation helper 분리 + command handler 등록 단위 분해)
 - `checkpoint0-lifecycle.ts`: legacy alias(re-export) 유지
+- `runtime-engine.ts`: `processSceneAction`에서 intent 선택/드리프트 적용/훅 텍스트 lane을 private helper로 분해(행동 처리 본문 복잡도 완화)
+- `runtime-engine-helpers.ts`: quest hook cache prune/policy/miss 후보 계산 함수(`prepareQuestHookCacheState`)로 공통화
+- `scene-loop.ts`: `resolveDeterministicSceneAction`를 단계별 helper(prelude/action mutation/temporal-quest-anchor/exchange/assembly)로 분해
+- 회귀 테스트 문자열 GT는 패널 문구 고정 비교 대신 구조/계약(invariant) 중심으로 보강
 - before_prompt 흐름은 아래 파일로 분산:
   - `before-prompt-types.ts` (타입 계약)
   - `before-prompt-diagnostics.ts` (진단)

@@ -17,7 +17,6 @@ import type {
 } from "./contracts.js";
 import type {
   QuestHookTextInput,
-  QuestHookTextSlotType,
   QuestHookTextOutput,
   IntentAnalyzerInput,
   IntentAnalyzerOutput,
@@ -50,8 +49,6 @@ import {
 import { appendTraceEvent, createTraceEvent, ensureTraceState } from "./trace.js";
 import {
   applyQuestHookTextOverrides,
-  buildQuestHookSlotSourceHash,
-  isQuestHookTextCacheValid,
   setQuestHookTextDebugState,
 } from "./quest-economy.js";
 import {
@@ -81,9 +78,18 @@ import {
   buildRuntimeMetadata,
   nextActionSeq,
   nextUiVersion,
-  pressureIntensityBand,
+  prepareQuestHookCacheState,
   readNonEmptyString,
 } from "./runtime-engine-helpers.js";
+import {
+  buildActionResolvedTraceData,
+  buildHookTextInput,
+  buildHookTextSlotMeta,
+  buildHookTraceData,
+  buildQuestLifecycleTraceData,
+  buildTemporalTraceData,
+  type HookTextSlotMeta,
+} from "./runtime-engine-process-helpers.js";
 
 const PANEL_IDS: PanelId[] = ["fixed", "main", "sub"];
 const DEFAULT_HOOK_TEXT_TIMEOUT_MS = 350;
@@ -112,6 +118,35 @@ type RuntimeEngineDependencies = {
   runtimeSafetyFlags?: Partial<RuntimeSafetyFlags>;
   clock?: Clock;
   idGenerator?: IdGenerator;
+};
+
+type IntentSelectionSource = "deterministic" | "analyzer";
+type IntentFallbackStrategy = "none" | "keep_previous" | "scene_safe_default" | "abstain";
+
+type ActionSelectionState = {
+  selectedActionId: DeterministicActionId;
+  selectedSource: IntentSelectionSource;
+  selectedConfidence: number;
+  intentSignals: string[];
+  selectedAnalyzerWeight: number;
+  selectedFallbackStrategy: IntentFallbackStrategy;
+  preResolvedClaimUntrusted: boolean;
+};
+
+type HookTextLaneState = {
+  nextLoop: SessionState["deterministicLoop"];
+  hookTextGenerationAttempted: boolean;
+  hookTextResult: "applied" | "fallback" | "skipped";
+  hookTextReason: string | null;
+  hookTextSlotCount: number;
+  hookTextCacheHitCount: number;
+  hookTextCacheMissCount: number;
+  hookTextUpdatedCount: number;
+  hookTextSkippedByPolicy: boolean;
+  hookTextSkippedByBudget: boolean;
+  hookTextSlotMeta: HookTextSlotMeta[];
+  recentOutcomesRichRequested: boolean;
+  recentOutcomesRichApplied: boolean;
 };
 
 class Checkpoint0RuntimeEngine implements RuntimeEngine {
@@ -568,144 +603,137 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
     return this.store.consumeInteractionRoute(routeKey, this.clock.nowIso());
   }
 
-  async processSceneAction(input: ProcessSceneActionInput): Promise<ProcessSceneActionResult> {
-    const nowIso = this.clock.nowIso();
-    const sessionBase = this.normalizeSessionLoop(input.session, nowIso);
-    const traceVerbose = this.runtimeSafetyFlags.traceVerbose || sessionBase.presentation.verboseMode;
-    const routeActionId = readNonEmptyString(input.routeActionId, "action.unknown");
-    const freeInput = readNonEmptyString(input.freeInput, "");
-    const isFreeSentenceInput = routeActionId === PANEL_MODAL_SUBMIT_ACTION_ID && freeInput.length > 0;
+  private async resolveActionSelection(params: {
+    session: SessionState;
+    freeInput: string;
+    isFreeSentenceInput: boolean;
+    nowIso: string;
+  }): Promise<{ session: SessionState; selection: ActionSelectionState }> {
+    let session = params.session;
+    const selection: ActionSelectionState = {
+      selectedActionId: "action.unknown",
+      selectedSource: "deterministic",
+      selectedConfidence: 1,
+      intentSignals: [],
+      selectedAnalyzerWeight: 0,
+      selectedFallbackStrategy: "none",
+      preResolvedClaimUntrusted: false,
+    };
 
-    let session = appendTraceEvent(
-      sessionBase,
-      createTraceEvent({
-        lane: "engine",
-        type: "interaction.received",
-        tsIso: nowIso,
-        data: {
-          routeActionId,
-          hasFreeInput: isFreeSentenceInput,
-          uiVersion: sessionBase.uiVersion,
-          sceneId: sessionBase.sceneId,
-        },
-      }),
-    );
-
-    let selectedActionId: DeterministicActionId = "action.unknown";
-    let selectedSource: "deterministic" | "analyzer" = "deterministic";
-    let selectedConfidence = 1;
-    let intentSignals: string[] = [];
-    let selectedAnalyzerWeight = 0;
-    let selectedFallbackStrategy: "none" | "keep_previous" | "scene_safe_default" | "abstain" = "none";
-    let preResolvedClaimUntrusted = false;
-
-    if (isFreeSentenceInput) {
-      const deterministicActionId = deterministicActionFromFreeInput(freeInput);
-      const availableActions = session.deterministicLoop.actionPalette.map((entry) => entry.actionId);
-      const intentInput = buildIntentAnalyzerInput({
+    if (!params.isFreeSentenceInput) {
+      return {
         session,
-        freeInput,
-      });
+        selection,
+      };
+    }
 
-      let intentOutput: IntentAnalyzerOutput | null = null;
-      try {
-        const analyzed = await this.analyzeIntent(intentInput);
-        intentOutput = validateIntentAnalyzerOutput(analyzed);
-      } catch {
-        intentOutput = null;
-      }
+    const deterministicActionId = deterministicActionFromFreeInput(params.freeInput);
+    const availableActions = session.deterministicLoop.actionPalette.map((entry) => entry.actionId);
+    const intentInput = buildIntentAnalyzerInput({
+      session,
+      freeInput: params.freeInput,
+    });
 
-      if (!intentOutput) {
-        session = appendTraceEvent(
-          session,
-          createTraceEvent({
-            lane: "analyzer",
-            type: "analyzer.intent.fallback",
-            tsIso: nowIso,
-            severity: "warn",
-            code: "intent_output_invalid",
-            recoverable: true,
-            data: {
-              deterministicActionId,
-            },
-          }),
-        );
-      }
+    let intentOutput: IntentAnalyzerOutput | null = null;
+    try {
+      const analyzed = await this.analyzeIntent(intentInput);
+      intentOutput = validateIntentAnalyzerOutput(analyzed);
+    } catch {
+      intentOutput = null;
+    }
 
-      const selected = selectStructuredActionIntent({
-        deterministicActionId,
-        availableActions,
-        analyzerOutput: intentOutput,
-        inertia: session.deterministicLoop.intentInertia,
-      });
-
-      selectedActionId = readNonEmptyString(selected.actionId, "action.unknown") as DeterministicActionId;
-      selectedSource = selected.source;
-      selectedConfidence = selected.confidence;
-      selectedAnalyzerWeight = selected.analyzerWeight;
-      selectedFallbackStrategy = selected.fallbackStrategy;
-      preResolvedClaimUntrusted = selected.preResolvedClaimUntrusted;
-      intentSignals = selected.analyzerOutput?.extractedSignals ?? [];
-
+    if (!intentOutput) {
       session = appendTraceEvent(
         session,
         createTraceEvent({
           lane: "analyzer",
-          type:
-            selectedSource === "analyzer"
-              ? "analyzer.intent.used"
-              : selectedFallbackStrategy === "none"
-                ? "analyzer.intent.used"
-                : "analyzer.intent.fallback",
-          tsIso: nowIso,
-          severity: preResolvedClaimUntrusted ? "warn" : "info",
-          code: preResolvedClaimUntrusted ? "pre_resolved_claim_untrusted" : undefined,
+          type: "analyzer.intent.fallback",
+          tsIso: params.nowIso,
+          severity: "warn",
+          code: "intent_output_invalid",
           recoverable: true,
           data: {
-            selectedActionId,
-            selectedSource,
-            selectedConfidence,
-            analyzerWeight: selectedAnalyzerWeight,
-            fallbackStrategy: selectedFallbackStrategy,
-            preResolvedClaimUntrusted,
+            deterministicActionId,
           },
         }),
       );
     }
 
-    const resolution = resolveDeterministicSceneAction({
-      loop: session.deterministicLoop,
-      routeActionId,
-      freeInput: freeInput || undefined,
-      resolvedActionOverride: isFreeSentenceInput ? selectedActionId : undefined,
-      nowIso,
-      runtimeSafety: {
-        anchorLifecycleEnabled: this.runtimeSafetyFlags.anchorLifecycleEnabled,
-        anchorSummaryOnly: this.runtimeSafetyFlags.anchorSummaryOnly,
-        // v1 safety policy: deterministic rule adjudication does not read behavioral drift.
-        behavioralDriftAffectsRules: false,
-      },
+    const selected = selectStructuredActionIntent({
+      deterministicActionId,
+      availableActions,
+      analyzerOutput: intentOutput,
+      inertia: session.deterministicLoop.intentInertia,
     });
 
+    selection.selectedActionId = readNonEmptyString(selected.actionId, "action.unknown") as DeterministicActionId;
+    selection.selectedSource = selected.source;
+    selection.selectedConfidence = selected.confidence;
+    selection.selectedAnalyzerWeight = selected.analyzerWeight;
+    selection.selectedFallbackStrategy = selected.fallbackStrategy;
+    selection.preResolvedClaimUntrusted = selected.preResolvedClaimUntrusted;
+    selection.intentSignals = selected.analyzerOutput?.extractedSignals ?? [];
+
+    session = appendTraceEvent(
+      session,
+      createTraceEvent({
+        lane: "analyzer",
+        type:
+          selection.selectedSource === "analyzer"
+            ? "analyzer.intent.used"
+            : selection.selectedFallbackStrategy === "none"
+              ? "analyzer.intent.used"
+              : "analyzer.intent.fallback",
+        tsIso: params.nowIso,
+        severity: selection.preResolvedClaimUntrusted ? "warn" : "info",
+        code: selection.preResolvedClaimUntrusted ? "pre_resolved_claim_untrusted" : undefined,
+        recoverable: true,
+        data: {
+          selectedActionId: selection.selectedActionId,
+          selectedSource: selection.selectedSource,
+          selectedConfidence: selection.selectedConfidence,
+          analyzerWeight: selection.selectedAnalyzerWeight,
+          fallbackStrategy: selection.selectedFallbackStrategy,
+          preResolvedClaimUntrusted: selection.preResolvedClaimUntrusted,
+        },
+      }),
+    );
+
+    return {
+      session,
+      selection,
+    };
+  }
+
+  private async applyIntentAndDriftState(params: {
+    session: SessionState;
+    nextLoop: SessionState["deterministicLoop"];
+    nowIso: string;
+    isFreeSentenceInput: boolean;
+    freeInput: string;
+    resolution: ProcessSceneActionResult["resolution"];
+    selection: ActionSelectionState;
+  }): Promise<{ session: SessionState; nextLoop: SessionState["deterministicLoop"] }> {
+    let session = params.session;
     const nextLoop = {
-      ...resolution.nextLoop,
+      ...params.nextLoop,
     };
 
-    if (isFreeSentenceInput) {
+    if (params.isFreeSentenceInput) {
       nextLoop.intentInertia = updateIntentInertia({
         current: nextLoop.intentInertia,
-        selectedActionId: resolution.resolvedActionId,
-        selectedConfidence,
-        source: selectedSource,
+        selectedActionId: params.resolution.resolvedActionId,
+        selectedConfidence: params.selection.selectedConfidence,
+        source: params.selection.selectedSource,
       });
 
       nextLoop.analyzerMemory = rememberFreeInputTrace({
         current: nextLoop.analyzerMemory,
-        freeInput,
-        resolvedActionId: resolution.resolvedActionId,
-        classification: resolution.classification,
-        intentSignals,
-        nowIso,
+        freeInput: params.freeInput,
+        resolvedActionId: params.resolution.resolvedActionId,
+        classification: params.resolution.classification,
+        intentSignals: params.selection.intentSignals,
+        nowIso: params.nowIso,
         ttlSec: this.analyzerMemoryTtlSec,
       });
 
@@ -713,14 +741,14 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
         nextLoop.behavioralDrift = {
           coreIdentity: nextLoop.behavioralDrift.coreIdentity,
           drift: zeroBehavioralAxisVector(),
-          lastUpdatedAtIso: nowIso,
+          lastUpdatedAtIso: params.nowIso,
         };
         session = appendTraceEvent(
           session,
           createTraceEvent({
             lane: "analyzer",
             type: "analyzer.drift.rejected",
-            tsIso: nowIso,
+            tsIso: params.nowIso,
             severity: "info",
             code: "behavioral_drift_disabled",
             recoverable: true,
@@ -736,7 +764,7 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
             sceneId: nextLoop.scene.sceneId,
             deterministicLoop: nextLoop,
           },
-          nowIso,
+          nowIso: params.nowIso,
         });
 
         let driftOutput: PersonaDriftAnalyzerOutput | null = null;
@@ -752,7 +780,7 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
           createTraceEvent({
             lane: "analyzer",
             type: driftOutput ? "analyzer.drift.used" : "analyzer.drift.fallback",
-            tsIso: nowIso,
+            tsIso: params.nowIso,
             severity: driftOutput ? "info" : "warn",
             code: driftOutput ? undefined : "drift_output_invalid",
             recoverable: true,
@@ -767,25 +795,43 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
         nextLoop.behavioralDrift = accumulateBehavioralDrift({
           current: nextLoop.behavioralDrift,
           analyzerOutput: driftOutput,
-          nowIso,
+          nowIso: params.nowIso,
         });
       }
-    } else {
-      nextLoop.intentInertia = updateIntentInertia({
-        current: nextLoop.intentInertia,
-        selectedActionId: resolution.resolvedActionId,
-        selectedConfidence: 1,
-        source: "deterministic",
-      });
-      if (!this.runtimeSafetyFlags.behavioralDriftEnabled) {
-        nextLoop.behavioralDrift = {
-          coreIdentity: nextLoop.behavioralDrift.coreIdentity,
-          drift: zeroBehavioralAxisVector(),
-          lastUpdatedAtIso: nowIso,
-        };
-      }
+
+      return {
+        session,
+        nextLoop,
+      };
     }
 
+    nextLoop.intentInertia = updateIntentInertia({
+      current: nextLoop.intentInertia,
+      selectedActionId: params.resolution.resolvedActionId,
+      selectedConfidence: 1,
+      source: "deterministic",
+    });
+    if (!this.runtimeSafetyFlags.behavioralDriftEnabled) {
+      nextLoop.behavioralDrift = {
+        coreIdentity: nextLoop.behavioralDrift.coreIdentity,
+        drift: zeroBehavioralAxisVector(),
+        lastUpdatedAtIso: params.nowIso,
+      };
+    }
+
+    return {
+      session,
+      nextLoop,
+    };
+  }
+
+  private async applyHookTextLane(params: {
+    session: SessionState;
+    nextLoop: SessionState["deterministicLoop"];
+    resolution: ProcessSceneActionResult["resolution"];
+    nowIso: string;
+  }): Promise<HookTextLaneState> {
+    let nextLoop = params.nextLoop;
     let hookTextGenerationAttempted = false;
     let hookTextResult: "applied" | "fallback" | "skipped" = "skipped";
     let hookTextReason: string | null = null;
@@ -794,129 +840,35 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
     let hookTextUpdatedCount = 0;
     let hookTextSkippedByPolicy = false;
     let hookTextSkippedByBudget = false;
-    let hookTextSlotMeta: Array<{
-      slotKey: string;
-      slotType: QuestHookTextSlotType;
-      source: "default" | "llm";
-      cacheHit: boolean;
-      skipReason: string | null;
-    }> = [];
+    let hookTextSlotMeta: HookTextSlotMeta[] = [];
 
-    const worldPulseSnapshot = resolution.questSummary.panelSummary.worldPulse;
     const actionableRichEnabled = this.runtimeSafetyFlags.richHookActionableEnabled;
     const worldPulseRichEnabled = this.runtimeSafetyFlags.richHookWorldPulseEnabled;
     const recentOutcomesRichRequested = this.runtimeSafetyFlags.richHookRecentOutcomesEnabled;
     const recentOutcomesRichApplied = false;
     const richHookTextEnabled = actionableRichEnabled || worldPulseRichEnabled;
 
-    const stripExpiredHookSlotCache = <T extends {
-      llmShortText: string | null;
-      llmSourceHash: string | null;
-      llmExpiresAtIso: string | null;
-    }>(slot: T): T => ({
-      ...slot,
-      llmShortText: null,
-      llmSourceHash: null,
-      llmExpiresAtIso: null,
+    const hookCache = prepareQuestHookCacheState({
+      economy: nextLoop.questEconomy,
+      nowIso: params.nowIso,
+      actionableRichEnabled,
+      worldPulseRichEnabled,
     });
+    nextLoop = hookCache.nextEconomy === nextLoop.questEconomy
+      ? nextLoop
+      : {
+          ...nextLoop,
+          questEconomy: hookCache.nextEconomy,
+        };
 
-    const hookSlotsPruned = nextLoop.questEconomy.presentation.hookSlots.map((slot) => {
-      if (!slot.llmShortText && !slot.llmSourceHash && !slot.llmExpiresAtIso) {
-        return slot;
-      }
-      if (isQuestHookTextCacheValid(slot, nowIso)) {
-        return slot;
-      }
-      return stripExpiredHookSlotCache(slot);
-    });
-    const worldPulseSlotRaw = nextLoop.questEconomy.presentation.worldPulseSlot;
-    const worldPulseSlotPruned = worldPulseSlotRaw
-      ? !worldPulseSlotRaw.llmShortText && !worldPulseSlotRaw.llmSourceHash && !worldPulseSlotRaw.llmExpiresAtIso
-        ? worldPulseSlotRaw
-        : isQuestHookTextCacheValid(worldPulseSlotRaw, nowIso)
-          ? worldPulseSlotRaw
-          : stripExpiredHookSlotCache(worldPulseSlotRaw)
-      : null;
+    const cacheStates = hookCache.cacheStates;
+    const cacheHitBySlotKey = hookCache.cacheHitBySlotKey;
+    const cacheMissCandidates = hookCache.cacheMissCandidates;
+    const cacheMissSlotKeys = hookCache.cacheMissSlotKeys;
 
-    const hookSlotsPolicyApplied = actionableRichEnabled
-      ? hookSlotsPruned
-      : hookSlotsPruned.map((slot) => stripExpiredHookSlotCache(slot));
-    const worldPulseSlotPolicyApplied = worldPulseRichEnabled
-      ? worldPulseSlotPruned
-      : worldPulseSlotPruned
-        ? stripExpiredHookSlotCache(worldPulseSlotPruned)
-        : null;
-
-    const hadPrunedSlots = hookSlotsPruned.some((slot, index) => slot !== nextLoop.questEconomy.presentation.hookSlots[index]);
-    const worldPulseSlotChanged = worldPulseSlotPruned !== worldPulseSlotRaw;
-    const hadPolicyClearedActionable = hookSlotsPolicyApplied.some((slot, index) => slot !== hookSlotsPruned[index]);
-    const hadPolicyClearedWorldPulse = worldPulseSlotPolicyApplied !== worldPulseSlotPruned;
-    if (hadPrunedSlots || worldPulseSlotChanged || hadPolicyClearedActionable || hadPolicyClearedWorldPulse) {
-      nextLoop.questEconomy = {
-        ...nextLoop.questEconomy,
-        presentation: {
-          ...nextLoop.questEconomy.presentation,
-          hookSlots: hookSlotsPolicyApplied,
-          worldPulseSlot: worldPulseSlotPolicyApplied,
-        },
-      };
-    }
-
-    const actionableHookSlots = nextLoop.questEconomy.presentation.hookSlots.slice(0, 3);
-    const worldPulseSlot = nextLoop.questEconomy.presentation.worldPulseSlot;
-    const cacheStates: Array<{
-      slot: (typeof actionableHookSlots)[number];
-      slotType: QuestHookTextSlotType;
-      cacheHit: boolean;
-    }> = [];
-
-    if (actionableRichEnabled) {
-      for (const slot of actionableHookSlots) {
-        cacheStates.push({
-          slot,
-          slotType: "actionable",
-          cacheHit: isQuestHookTextCacheValid(slot, nowIso),
-        });
-      }
-    }
-    if (worldPulseSlot && worldPulseRichEnabled) {
-      cacheStates.push({
-        slot: worldPulseSlot,
-        slotType: "worldPulse",
-        cacheHit: isQuestHookTextCacheValid(worldPulseSlot, nowIso),
-      });
-    }
-
-    const cacheHitBySlotKey = new Map(
-      cacheStates.filter((entry) => entry.cacheHit).map((entry) => [entry.slot.slotKey, true]),
-    );
-    const actionableMissSlots = cacheStates.filter((entry) => entry.slotType === "actionable" && !entry.cacheHit);
-    const worldPulseMissSlot = cacheStates.find((entry) => entry.slotType === "worldPulse" && !entry.cacheHit) ?? null;
-
-    const cacheMissCandidates: Array<{ slot: (typeof cacheStates)[number]["slot"]; slotType: QuestHookTextSlotType }> = [];
-    if (worldPulseMissSlot) {
-      cacheMissCandidates.push({
-        slot: worldPulseMissSlot.slot,
-        slotType: "worldPulse",
-      });
-    }
-    for (const miss of actionableMissSlots) {
-      if (cacheMissCandidates.length >= 3) {
-        break;
-      }
-      cacheMissCandidates.push({
-        slot: miss.slot,
-        slotType: "actionable",
-      });
-    }
-    const missedTotalCount = actionableMissSlots.length + (worldPulseMissSlot ? 1 : 0);
-    if (missedTotalCount > cacheMissCandidates.length) {
-      hookTextSkippedByBudget = true;
-    }
-    const cacheMissSlotKeys = new Set(cacheMissCandidates.map((entry) => entry.slot.slotKey));
-
-    hookTextCacheHitCount = cacheHitBySlotKey.size;
-    hookTextCacheMissCount = cacheMissCandidates.length;
+    hookTextCacheHitCount = hookCache.cacheHitCount;
+    hookTextCacheMissCount = hookCache.cacheMissCount;
+    hookTextSkippedByBudget = hookCache.skippedByBudget;
 
     let appliedSlotKeySet = new Set<string>();
     if (!richHookTextEnabled) {
@@ -941,38 +893,14 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
       } else {
         remainingGenerationBudget -= 1;
         hookTextGenerationAttempted = true;
-        const hookTextInput: QuestHookTextInput = {
+        const hookTextInput: QuestHookTextInput = buildHookTextInput({
           contractVersion: LLM_CONTRACT_VERSION,
-          sessionId: session.sessionId,
-          sceneId: nextLoop.scene.sceneId,
-          nowIso,
-          slots: cacheMissCandidates.map((entry) => {
-            if (entry.slotType === "worldPulse") {
-              return {
-                slotKey: entry.slot.slotKey,
-                slotType: "worldPulse" as const,
-                archetype: worldPulseSnapshot.topPressure?.archetype ?? "public_order",
-                trend: worldPulseSnapshot.topPressure?.trend ?? "steady",
-                intensityBand: pressureIntensityBand(worldPulseSnapshot.topPressure?.intensity ?? 0),
-                locationHint: nextLoop.scene.locationId,
-                defaultText: entry.slot.defaultText,
-                sourceHash: buildQuestHookSlotSourceHash(entry.slot),
-              };
-            }
-
-            return {
-              slotKey: entry.slot.slotKey,
-              slotType: "actionable" as const,
-              questId: entry.slot.questId,
-              lifecycle: entry.slot.lifecycle,
-              urgencyBand: entry.slot.urgencyBand,
-              hookType: entry.slot.hookType,
-              locationId: entry.slot.locationId,
-              defaultText: entry.slot.defaultText,
-              sourceHash: buildQuestHookSlotSourceHash(entry.slot),
-            };
-          }),
-        };
+          sessionId: params.session.sessionId,
+          nowIso: params.nowIso,
+          nextLoop,
+          resolution: params.resolution,
+          cacheMissCandidates,
+        });
 
         try {
           const rendered = await this.renderQuestHookTextWithTimeout(hookTextInput);
@@ -984,10 +912,13 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
             const applied = applyQuestHookTextOverrides({
               economy: nextLoop.questEconomy,
               overrides: validated.overrides,
-              nowIso,
+              nowIso: params.nowIso,
               cacheTtlSec: this.hookTextCacheTtlSec,
             });
-            nextLoop.questEconomy = applied.nextEconomy;
+            nextLoop = {
+              ...nextLoop,
+              questEconomy: applied.nextEconomy,
+            };
             hookTextUpdatedCount = applied.appliedSlotKeys.length;
             appliedSlotKeySet = new Set(applied.appliedSlotKeys);
 
@@ -1001,46 +932,26 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
           }
         } catch (error) {
           hookTextResult = "fallback";
-          hookTextReason = error instanceof Error && error.message === "hook_text_timeout" ? "renderer_timeout" : "renderer_error";
+          hookTextReason =
+            error instanceof Error && error.message === "hook_text_timeout" ? "renderer_timeout" : "renderer_error";
         }
       }
     }
 
-    const finalHookSlots = nextLoop.questEconomy.presentation.hookSlots.slice(0, 3);
-    const finalSlotRows: Array<{ slot: (typeof finalHookSlots)[number]; slotType: QuestHookTextSlotType }> = finalHookSlots.map((slot) => ({
-      slot,
-      slotType: "actionable",
-    }));
-    if (nextLoop.questEconomy.presentation.worldPulseSlot) {
-      finalSlotRows.push({
-        slot: nextLoop.questEconomy.presentation.worldPulseSlot,
-        slotType: "worldPulse",
-      });
-    }
-
-    hookTextSlotMeta = finalSlotRows.map((row) => {
-      const cacheHit = cacheHitBySlotKey.get(row.slot.slotKey) === true;
-      const applied = appliedSlotKeySet.has(row.slot.slotKey);
-      const slotTypeEnabled = row.slotType === "actionable" ? actionableRichEnabled : worldPulseRichEnabled;
-      return {
-        slotKey: row.slot.slotKey,
-        slotType: row.slotType,
-        source: row.slot.llmShortText ? "llm" : "default",
-        cacheHit,
-        skipReason:
-          !slotTypeEnabled
-            ? "skippedByPolicy"
-            : cacheHit || applied
-            ? null
-            : !cacheMissSlotKeys.has(row.slot.slotKey)
-              ? "skippedByBudget"
-              : hookTextReason ?? (hookTextResult === "skipped" ? "skipped" : null),
-      };
+    hookTextSlotMeta = buildHookTextSlotMeta({
+      nextLoop,
+      cacheHitBySlotKey,
+      appliedSlotKeySet,
+      cacheMissSlotKeys,
+      actionableRichEnabled,
+      worldPulseRichEnabled,
+      hookTextResult,
+      hookTextReason,
     });
 
-    nextLoop.questEconomy = setQuestHookTextDebugState({
+    const debugEconomy = setQuestHookTextDebugState({
       economy: nextLoop.questEconomy,
-      nowIso,
+      nowIso: params.nowIso,
       generationAttempted: hookTextGenerationAttempted,
       result: hookTextResult,
       reason: hookTextReason,
@@ -1048,6 +959,121 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
       cacheMissCount: hookTextCacheMissCount,
       slotMeta: hookTextSlotMeta,
     });
+
+    nextLoop = {
+      ...nextLoop,
+      questEconomy: debugEconomy,
+    };
+
+    return {
+      nextLoop,
+      hookTextGenerationAttempted,
+      hookTextResult,
+      hookTextReason,
+      hookTextSlotCount: cacheStates.length,
+      hookTextCacheHitCount,
+      hookTextCacheMissCount,
+      hookTextUpdatedCount,
+      hookTextSkippedByPolicy,
+      hookTextSkippedByBudget,
+      hookTextSlotMeta,
+      recentOutcomesRichRequested,
+      recentOutcomesRichApplied,
+    };
+  }
+
+  async processSceneAction(input: ProcessSceneActionInput): Promise<ProcessSceneActionResult> {
+    const nowIso = this.clock.nowIso();
+    const sessionBase = this.normalizeSessionLoop(input.session, nowIso);
+    const traceVerbose = this.runtimeSafetyFlags.traceVerbose || sessionBase.presentation.verboseMode;
+    const routeActionId = readNonEmptyString(input.routeActionId, "action.unknown");
+    const freeInput = readNonEmptyString(input.freeInput, "");
+    const isFreeSentenceInput = routeActionId === PANEL_MODAL_SUBMIT_ACTION_ID && freeInput.length > 0;
+
+    let session = appendTraceEvent(
+      sessionBase,
+      createTraceEvent({
+        lane: "engine",
+        type: "interaction.received",
+        tsIso: nowIso,
+        data: {
+          routeActionId,
+          hasFreeInput: isFreeSentenceInput,
+          uiVersion: sessionBase.uiVersion,
+          sceneId: sessionBase.sceneId,
+        },
+      }),
+    );
+
+    const selectionResult = await this.resolveActionSelection({
+      session,
+      freeInput,
+      isFreeSentenceInput,
+      nowIso,
+    });
+    session = selectionResult.session;
+    const selection = selectionResult.selection;
+
+    const resolution = resolveDeterministicSceneAction({
+      loop: session.deterministicLoop,
+      routeActionId,
+      freeInput: freeInput || undefined,
+      resolvedActionOverride: isFreeSentenceInput ? selection.selectedActionId : undefined,
+      nowIso,
+      runtimeSafety: {
+        anchorLifecycleEnabled: this.runtimeSafetyFlags.anchorLifecycleEnabled,
+        anchorSummaryOnly: this.runtimeSafetyFlags.anchorSummaryOnly,
+        // v1 safety policy: deterministic rule adjudication does not read behavioral drift.
+        behavioralDriftAffectsRules: false,
+      },
+    });
+
+    let nextLoop = {
+      ...resolution.nextLoop,
+    };
+
+    const driftState = await this.applyIntentAndDriftState({
+      session,
+      nextLoop,
+      nowIso,
+      isFreeSentenceInput,
+      freeInput,
+      resolution,
+      selection,
+    });
+    session = driftState.session;
+    nextLoop = driftState.nextLoop;
+
+    const hookTextState = await this.applyHookTextLane({
+      session,
+      nextLoop,
+      resolution,
+      nowIso,
+    });
+    nextLoop = hookTextState.nextLoop;
+
+    const {
+      hookTextGenerationAttempted,
+      hookTextResult,
+      hookTextReason,
+      hookTextSlotCount,
+      hookTextCacheHitCount,
+      hookTextCacheMissCount,
+      hookTextUpdatedCount,
+      hookTextSkippedByPolicy,
+      hookTextSkippedByBudget,
+      hookTextSlotMeta,
+      recentOutcomesRichRequested,
+      recentOutcomesRichApplied,
+    } = hookTextState;
+
+    const {
+      selectedSource,
+      selectedConfidence,
+      selectedAnalyzerWeight,
+      selectedFallbackStrategy,
+      preResolvedClaimUntrusted,
+    } = selection;
 
     const sceneId = nextLoop.scene.sceneId;
     const sceneTransitioned = session.sceneId !== sceneId;
@@ -1100,30 +1126,10 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
       }
     }
 
-    const temporalTraceData = traceVerbose
-      ? {
-          locationId: resolution.temporalSummary.locationId,
-          memoryTouched: resolution.temporalSummary.memoryTouched,
-          memoryDecayed: resolution.temporalSummary.memoryDecayed,
-          freshnessUpdated: resolution.temporalSummary.freshnessUpdated,
-          freshnessDecayed: resolution.temporalSummary.freshnessDecayed,
-          tracesCreated: resolution.temporalSummary.tracesCreated,
-          tracesUpdated: resolution.temporalSummary.tracesUpdated,
-          tracesDecayed: resolution.temporalSummary.tracesDecayed,
-          tracesExpired: resolution.temporalSummary.tracesExpired,
-          locationShifted: resolution.temporalSummary.locationShifted,
-          locationSnapshot: resolution.temporalSummary.locationSnapshot,
-          qualitative: resolution.temporalSummary.qualitative,
-        }
-      : {
-          locationId: resolution.temporalSummary.locationId,
-          memoryTouched: resolution.temporalSummary.memoryTouched,
-          freshnessUpdated: resolution.temporalSummary.freshnessUpdated,
-          tracesCreated: resolution.temporalSummary.tracesCreated,
-          tracesExpired: resolution.temporalSummary.tracesExpired,
-          locationShifted: resolution.temporalSummary.locationShifted,
-          qualitative: resolution.temporalSummary.qualitative,
-        };
+    const temporalTraceData = buildTemporalTraceData({
+      resolution,
+      traceVerbose,
+    });
 
     session = appendTraceEvent(
       session,
@@ -1149,57 +1155,11 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
       }),
     );
 
-    const questLifecycleTraceData: Record<string, unknown> = {
-      transitionCount: resolution.questSummary.transitionCount,
-      surfacedNow: resolution.questSummary.surfacedNow,
-      expiredDeleted: resolution.questSummary.expiredDeleted,
-      failedNow: resolution.questSummary.failedNow,
-      mutatedNow: resolution.questSummary.mutatedNow,
-      archivedNow: resolution.questSummary.archivedNow,
-      budgetUsed: resolution.questSummary.budget.used,
-      budgetCaps: resolution.questSummary.budget.caps,
-      panelSummary: {
-        actionable: {
-          activeCount: resolution.questSummary.panelSummary.actionable.activeCount,
-          surfacedCount: resolution.questSummary.panelSummary.actionable.surfacedCount,
-        },
-        worldPulse: {
-          text: resolution.questSummary.panelSummary.worldPulse.text,
-          trend: resolution.questSummary.panelSummary.worldPulse.topPressure?.trend ?? null,
-        },
-      },
-    };
-    if (traceVerbose) {
-      questLifecycleTraceData.transitions = resolution.questSummary.transitions.slice(0, 6);
-      questLifecycleTraceData.panelSummary = {
-        actionable: {
-          activeCount: resolution.questSummary.panelSummary.actionable.activeCount,
-          surfacedCount: resolution.questSummary.panelSummary.actionable.surfacedCount,
-          activeTop: resolution.questSummary.panelSummary.actionable.activeTop,
-          surfacedTop: resolution.questSummary.panelSummary.actionable.surfacedTop,
-        },
-        worldPulse: resolution.questSummary.panelSummary.worldPulse,
-        recentOutcomes: resolution.questSummary.panelSummary.recentOutcomes.items,
-      };
-    }
-    if (this.runtimeSafetyFlags.telemetryExtended) {
-      questLifecycleTraceData.softQuotaCaps = resolution.questSummary.softQuota.caps;
-      questLifecycleTraceData.topQuotaUsage = {
-        location: resolution.questSummary.softQuota.usageByLocation[0] ?? null,
-        pressure: resolution.questSummary.softQuota.usageByPressure[0] ?? null,
-        archetype: resolution.questSummary.softQuota.usageByArchetype[0] ?? null,
-      };
-      questLifecycleTraceData.tuningSnapshot = {
-        surfacingRate: resolution.questSummary.tuningSnapshot.surfacingRate,
-        expirationRate: resolution.questSummary.tuningSnapshot.expirationRate,
-        mutationRate: resolution.questSummary.tuningSnapshot.mutationRate,
-        successorRate: resolution.questSummary.tuningSnapshot.successorRate,
-        budgetUtilization: resolution.questSummary.tuningSnapshot.budgetUtilization,
-        quotaSaturation: resolution.questSummary.tuningSnapshot.quotaSaturation,
-        averageUrgency: resolution.questSummary.tuningSnapshot.averageUrgency,
-        activeVsSurfacedRatio: resolution.questSummary.tuningSnapshot.activeVsSurfacedRatio,
-      };
-    }
+    const questLifecycleTraceData = buildQuestLifecycleTraceData({
+      resolution,
+      traceVerbose,
+      telemetryExtended: this.runtimeSafetyFlags.telemetryExtended,
+    });
 
     session = appendTraceEvent(
       session,
@@ -1211,24 +1171,22 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
       }),
     );
 
-    const hookTraceData: Record<string, unknown> = {
-      generationAttempted: hookTextGenerationAttempted,
-      result: hookTextResult,
-      reason: hookTextReason,
-      slotCount: cacheStates.length,
-      updatedCount: hookTextUpdatedCount,
-      skippedByPolicy: hookTextSkippedByPolicy,
-      skippedByBudget: hookTextSkippedByBudget,
+    const hookTraceData = buildHookTraceData({
+      hookTextGenerationAttempted,
+      hookTextResult,
+      hookTextReason,
+      hookTextSlotCount,
+      hookTextUpdatedCount,
+      hookTextSkippedByPolicy,
+      hookTextSkippedByBudget,
       recentOutcomesRichRequested,
       recentOutcomesRichApplied,
-    };
-    if (traceVerbose || this.runtimeSafetyFlags.telemetryExtended) {
-      hookTraceData.cacheHitCount = hookTextCacheHitCount;
-      hookTraceData.cacheMissCount = hookTextCacheMissCount;
-    }
-    if (traceVerbose) {
-      hookTraceData.slotMeta = hookTextSlotMeta;
-    }
+      hookTextCacheHitCount,
+      hookTextCacheMissCount,
+      hookTextSlotMeta,
+      traceVerbose,
+      telemetryExtended: this.runtimeSafetyFlags.telemetryExtended,
+    });
 
     session = appendTraceEvent(
       session,
@@ -1249,22 +1207,17 @@ class Checkpoint0RuntimeEngine implements RuntimeEngine {
         lane: "engine",
         type: "engine.action.resolved",
         tsIso: nowIso,
-        data: {
-          inputActionId: routeActionId,
-          resolvedActionId: resolution.resolvedActionId,
-          classification: resolution.classification,
-          deltaTimeSec: resolution.deltaTimeSec,
+        data: buildActionResolvedTraceData({
+          routeActionId,
+          resolution,
           selectedSource,
           selectedConfidence,
-          analyzerWeight: selectedAnalyzerWeight,
-          fallbackStrategy: selectedFallbackStrategy,
+          selectedAnalyzerWeight,
+          selectedFallbackStrategy,
           preResolvedClaimUntrusted,
-          locationId: nextLoop.scene.locationId,
-          temporalLocationShifted: resolution.temporalSummary.locationShifted,
-          questTransitionCount: resolution.questSummary.transitionCount,
-          questSpawnedSeeds: resolution.questSummary.spawnedSeeds,
+          nextLoop,
           sceneTransitioned,
-        },
+        }),
       }),
     );
 

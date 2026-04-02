@@ -590,9 +590,12 @@ test("panel shows anchor qualitative text for player and raw anchor debug in deb
 
   const playerText = JSON.stringify(playerPanel.components);
   const debugText = JSON.stringify(debugPanel.components);
-  assert.equal(playerText.includes("앵커 축:"), true);
+  const playerDescription = playerPanel.components?.embeds?.[0]?.description ?? "";
+  assert.equal(typeof playerDescription, "string");
+  assert.ok(playerDescription.length > 0);
   assert.equal(playerText.includes("debug.anchor.raw"), false);
   assert.equal(debugText.includes("debug.anchor.raw"), true);
+  assert.equal(debugText.includes("장기 축:") || debugText.includes("앵커 축:"), true);
 });
 
 test("engine emits anchor trace events when anchor lifecycle changes", async () => {

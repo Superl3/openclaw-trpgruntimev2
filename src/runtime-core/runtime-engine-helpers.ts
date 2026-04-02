@@ -5,6 +5,12 @@ import type {
   IdGenerator,
 } from "./contracts.js";
 import {
+  isQuestHookTextCacheValid,
+  type QuestEconomyState,
+  type QuestHookSlot,
+  type QuestHookTextSlotType,
+} from "./quest-economy.js";
+import {
   type RuntimeBootstrapDiagnostic,
   type RuntimeBootstrapInput,
   type RuntimeCanonicalProvenance,
@@ -13,6 +19,29 @@ import {
 } from "./types.js";
 
 export const DEFAULT_SCENE_ID = "scene-bootstrap";
+const MAX_HOOK_TEXT_MISS_CANDIDATES = 3;
+
+export type QuestHookCacheState = {
+  slot: QuestHookSlot;
+  slotType: QuestHookTextSlotType;
+  cacheHit: boolean;
+};
+
+export type QuestHookCacheMissCandidate = {
+  slot: QuestHookSlot;
+  slotType: QuestHookTextSlotType;
+};
+
+export type QuestHookCachePreparation = {
+  nextEconomy: QuestEconomyState;
+  cacheStates: QuestHookCacheState[];
+  cacheHitBySlotKey: Map<string, true>;
+  cacheMissCandidates: QuestHookCacheMissCandidate[];
+  cacheMissSlotKeys: Set<string>;
+  cacheHitCount: number;
+  cacheMissCount: number;
+  skippedByBudget: boolean;
+};
 
 export class SystemClock implements Clock {
   nowIso(): string {
@@ -139,4 +168,123 @@ export function anchorEventTypeToTraceType(eventType: AnchorTickEvent["eventType
     default:
       return "engine.anchor.advanced";
   }
+}
+
+function stripExpiredHookSlotCache(slot: QuestHookSlot): QuestHookSlot {
+  return {
+    ...slot,
+    llmShortText: null,
+    llmSourceHash: null,
+    llmExpiresAtIso: null,
+  };
+}
+
+function pruneHookSlotCache(slot: QuestHookSlot, nowIso: string): QuestHookSlot {
+  if (!slot.llmShortText && !slot.llmSourceHash && !slot.llmExpiresAtIso) {
+    return slot;
+  }
+  if (isQuestHookTextCacheValid(slot, nowIso)) {
+    return slot;
+  }
+  return stripExpiredHookSlotCache(slot);
+}
+
+export function prepareQuestHookCacheState(params: {
+  economy: QuestEconomyState;
+  nowIso: string;
+  actionableRichEnabled: boolean;
+  worldPulseRichEnabled: boolean;
+}): QuestHookCachePreparation {
+  const hookSlotsPruned = params.economy.presentation.hookSlots.map((slot) => pruneHookSlotCache(slot, params.nowIso));
+  const worldPulseSlotRaw = params.economy.presentation.worldPulseSlot;
+  const worldPulseSlotPruned = worldPulseSlotRaw ? pruneHookSlotCache(worldPulseSlotRaw, params.nowIso) : null;
+
+  const hookSlotsPolicyApplied = params.actionableRichEnabled
+    ? hookSlotsPruned
+    : hookSlotsPruned.map((slot) => stripExpiredHookSlotCache(slot));
+
+  const worldPulseSlotPolicyApplied = params.worldPulseRichEnabled
+    ? worldPulseSlotPruned
+    : worldPulseSlotPruned
+      ? stripExpiredHookSlotCache(worldPulseSlotPruned)
+      : null;
+
+  const hadPrunedSlots = hookSlotsPruned.some((slot, index) => slot !== params.economy.presentation.hookSlots[index]);
+  const worldPulseSlotChanged = worldPulseSlotPruned !== worldPulseSlotRaw;
+  const hadPolicyClearedActionable = hookSlotsPolicyApplied.some((slot, index) => slot !== hookSlotsPruned[index]);
+  const hadPolicyClearedWorldPulse = worldPulseSlotPolicyApplied !== worldPulseSlotPruned;
+
+  const nextEconomy = hadPrunedSlots || worldPulseSlotChanged || hadPolicyClearedActionable || hadPolicyClearedWorldPulse
+    ? {
+        ...params.economy,
+        presentation: {
+          ...params.economy.presentation,
+          hookSlots: hookSlotsPolicyApplied,
+          worldPulseSlot: worldPulseSlotPolicyApplied,
+        },
+      }
+    : params.economy;
+
+  const actionableHookSlots = nextEconomy.presentation.hookSlots.slice(0, 3);
+  const worldPulseSlot = nextEconomy.presentation.worldPulseSlot;
+  const cacheStates: QuestHookCacheState[] = [];
+
+  if (params.actionableRichEnabled) {
+    for (const slot of actionableHookSlots) {
+      cacheStates.push({
+        slot,
+        slotType: "actionable",
+        cacheHit: isQuestHookTextCacheValid(slot, params.nowIso),
+      });
+    }
+  }
+
+  if (worldPulseSlot && params.worldPulseRichEnabled) {
+    cacheStates.push({
+      slot: worldPulseSlot,
+      slotType: "worldPulse",
+      cacheHit: isQuestHookTextCacheValid(worldPulseSlot, params.nowIso),
+    });
+  }
+
+  const cacheHitBySlotKey = new Map(
+    cacheStates
+      .filter((entry) => entry.cacheHit)
+      .map((entry): [string, true] => [entry.slot.slotKey, true]),
+  );
+
+  const actionableMissSlots = cacheStates.filter((entry) => entry.slotType === "actionable" && !entry.cacheHit);
+  const worldPulseMissSlot = cacheStates.find((entry) => entry.slotType === "worldPulse" && !entry.cacheHit) ?? null;
+
+  const cacheMissCandidates: QuestHookCacheMissCandidate[] = [];
+  if (worldPulseMissSlot) {
+    cacheMissCandidates.push({
+      slot: worldPulseMissSlot.slot,
+      slotType: "worldPulse",
+    });
+  }
+  for (const miss of actionableMissSlots) {
+    if (cacheMissCandidates.length >= MAX_HOOK_TEXT_MISS_CANDIDATES) {
+      break;
+    }
+    cacheMissCandidates.push({
+      slot: miss.slot,
+      slotType: "actionable",
+    });
+  }
+
+  const missedTotalCount = actionableMissSlots.length + (worldPulseMissSlot ? 1 : 0);
+  const skippedByBudget = missedTotalCount > cacheMissCandidates.length;
+  const cacheMissSlotKeys = new Set(cacheMissCandidates.map((entry) => entry.slot.slotKey));
+
+  return {
+    nextEconomy,
+    cacheStates,
+    cacheHitBySlotKey,
+    cacheMissCandidates,
+    cacheMissSlotKeys,
+    cacheHitCount: cacheHitBySlotKey.size,
+    cacheMissCount: cacheMissCandidates.length,
+    skippedByBudget,
+  };
 }

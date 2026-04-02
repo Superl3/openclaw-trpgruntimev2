@@ -81,6 +81,9 @@ export const PANEL_INTERACT_PARAMETERS = {
     actionId: { type: "string" },
     actorId: { type: "string" },
     freeInput: { type: "string" },
+    action: { type: "string" },
+    speech: { type: "string" },
+    tone: { type: "string" },
   },
 } as const;
 

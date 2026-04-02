@@ -7,7 +7,6 @@ import {
   resolveWorldRootForContext,
   type TrpgRuntimeConfig,
 } from "../../config.js";
-import type { RuntimeBootstrapLoadResult } from "../../runtime-core/contracts.js";
 import { createCheckpoint0RuntimeEngine } from "../../runtime-core/runtime-engine.js";
 import { RuleBasedIntentAnalyzer, RuleBasedPersonaDriftAnalyzer } from "../../runtime-core/analyzer-lane.js";
 import { RuleBasedQuestHookTextRenderer } from "../../runtime-core/hook-lane.js";
@@ -15,34 +14,20 @@ import { NoopQuestHookTextRenderer, NoopSceneRenderer } from "../../runtime-core
 import {
   buildCheckpoint1Panel,
   collectPanelRouteActionIds,
-  parsePanelCustomId,
   type PanelMessageMode,
 } from "../../runtime-core/panel-mvp.js";
 import { buildQuestEconomyQualitativeSummary } from "../../runtime-core/quest-economy.js";
 import { buildTemporalQualitativeSummary } from "../../runtime-core/temporal-systems.js";
 import { ensureDeterministicSceneLoopState } from "../../runtime-core/scene-loop.js";
-import { buildRuntimeBootstrapInput, validateWorldSeed } from "../../runtime-core/world-seed.js";
-import {
-  buildFactionCanonFingerprint,
-  buildFactionCanonReferenceIndexFromWorldSeed,
-  detectFactionCanonScaffoldDrift,
-  validateFactionCanon,
-} from "../../faction-canon.js";
-import {
-  createRuntimeCanonicalProvenance,
-  driftStatusFromLoadStatus,
-  type CanonicalLoadStatus,
-} from "../../runtime-core/sync-meta.js";
+import { createRuntimeCanonicalProvenance } from "../../runtime-core/sync-meta.js";
 import { appendTraceEvent, createTraceEvent, ensureTraceState } from "../../runtime-core/trace.js";
 import { JsonFileStateStore } from "../../runtime-store/file-state-store.js";
 import {
   ensureSessionPresentationState,
   ensureRuntimeMetadata,
   type InteractionRouteRecord,
-  type RuntimeCanonicalProvenance,
   type SessionState,
 } from "../../runtime-core/types.js";
-import { loadStructuredWorldFile } from "../../world-store.js";
 import {
   SESSION_DATA_SECTIONS,
   consumeSessionResetConfirmation,
@@ -75,309 +60,28 @@ import {
   resolveSessionContextId,
 } from "./lifecycle-tool-helpers.js";
 import { jsonToolResult, runtimeError } from "./lifecycle-response-helpers.js";
+import {
+  clampTraceTailCount,
+  readBoolean,
+  readInteger,
+  readString,
+  sanitizeLegacyBootstrapTemplateText,
+  toObject,
+  traceTailPayload,
+} from "./session-lifecycle-local-helpers.js";
+import {
+  loadRuntimeBootstrapFromWorldSeed,
+  loadRuntimeCanonicalProvenance,
+} from "./session-lifecycle-bootstrap-loaders.js";
+import {
+  parsePanelMessageCommitInput,
+  resolvePanelRouteInput,
+  type PanelRouteKey,
+  validatePanelMessageCommitInput,
+} from "./session-lifecycle-panel-helpers.js";
 
 const CHECKPOINT0_STORE_RELATIVE_PATH = "state/runtime-core";
-const FACTION_CANON_PATH = "canon/factions.yaml";
-const WORLD_SEED_CANDIDATE_PATHS = [
-  "canon/world-seed.yaml",
-  "canon/world-seed.yml",
-  "canon/world-seed.json",
-  "state/world-seed.yaml",
-  "state/world-seed.yml",
-  "state/world-seed.json",
-  "state/world-seeds.yaml",
-  "state/world-seeds.yml",
-  "state/world-seeds.json",
-] as const;
 const NEW_CONFIRM_TOKEN_TTL_MS = 5 * 60 * 1000;
-
-function toObject(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function readString(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function sanitizeLegacyBootstrapTemplateText(value: string): string {
-  const normalized = readString(value);
-  if (!normalized) {
-    return "";
-  }
-
-  const hasForbidden =
-    /\bpart\s*a\b|\bpart\s*b\b/i.test(normalized) ||
-    /좋아요\s*,?\s*새\s*캐릭터\s*생성을\s*시작할게요/i.test(normalized) ||
-    /숨기고\s*있는\s*비밀/i.test(normalized) ||
-    (normalized.match(/(?:^|\n)\s*[1-6]\s*[\).:：-]\s+/g)?.length ?? 0) >= 4;
-
-  if (hasForbidden) {
-    return "캐릭터 준비를 이어갈게요.";
-  }
-
-  return normalized;
-}
-
-function readBoolean(value: unknown, fallback: boolean): boolean {
-  return typeof value === "boolean" ? value : fallback;
-}
-
-function readInteger(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return Math.trunc(value);
-  }
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number.parseInt(value, 10);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-  return null;
-}
-
-function clampTraceTailCount(value: unknown, fallback: number): number {
-  const parsed = readInteger(value);
-  if (!parsed) {
-    return fallback;
-  }
-  return Math.max(1, Math.min(12, parsed));
-}
-
-function summarizeTraceData(value: Record<string, unknown>): Record<string, string | number | boolean | null> {
-  const allowedKeys = new Set([
-    "routeActionId",
-    "inputActionId",
-    "resolvedActionId",
-    "selectedActionId",
-    "selectedSource",
-    "selectedConfidence",
-    "classification",
-    "deltaTimeSec",
-    "sceneId",
-    "uiVersion",
-    "result",
-    "reason",
-    "transitionCount",
-    "surfacedNow",
-    "expiredDeleted",
-    "failedNow",
-    "mutatedNow",
-    "archivedNow",
-    "generationAttempted",
-    "updatedCount",
-    "slotCount",
-    "locationId",
-    "locationShifted",
-    "memoryTouched",
-    "tracesCreated",
-    "tracesExpired",
-    "dispatchId",
-    "mode",
-    "actionId",
-  ]);
-  const out: Record<string, string | number | boolean | null> = {};
-  for (const [key, raw] of Object.entries(value)) {
-    if (!allowedKeys.has(key)) {
-      continue;
-    }
-    if (typeof raw === "string") {
-      out[key] = raw.length <= 72 ? raw : `${raw.slice(0, 69)}...`;
-      continue;
-    }
-    if (typeof raw === "number" || typeof raw === "boolean" || raw === null) {
-      out[key] = raw;
-    }
-  }
-  return out;
-}
-
-function traceTailPayload(session: SessionState, tailCount: number, includeData: boolean): Array<Record<string, unknown>> {
-  return session.trace.events.slice(-tailCount).map((event) => {
-    const base: Record<string, unknown> = {
-      tsIso: event.tsIso,
-      lane: event.lane,
-      type: event.type,
-      severity: event.severity,
-    };
-    if (event.code) {
-      base.code = event.code;
-    }
-    if (includeData) {
-      base.data = summarizeTraceData(event.data);
-    }
-    return base;
-  });
-}
-
-function toSeedDiagnostics(
-  issues: Array<{ code: string; message: string; path: string; severity: "warn" | "error" }>,
-  sourcePath: string,
-): RuntimeBootstrapLoadResult["diagnostics"] {
-  return issues.slice(0, 24).map((issue) => ({
-    code: issue.code,
-    message: issue.message,
-    path: issue.path ? `${sourcePath}${issue.path}` : sourcePath,
-    severity: issue.severity,
-  }));
-}
-
-async function loadRuntimeBootstrapFromWorldSeed(params: {
-  worldRoot: string;
-  cfg: TrpgRuntimeConfig;
-}): Promise<RuntimeBootstrapLoadResult> {
-  for (const candidatePath of WORLD_SEED_CANDIDATE_PATHS) {
-    let loaded;
-    try {
-      loaded = await loadStructuredWorldFile(params.worldRoot, candidatePath, {
-        allowMissing: true,
-        maxReadBytes: params.cfg.maxReadBytes,
-      });
-    } catch (error) {
-      return {
-        status: "error",
-        sourcePath: candidatePath,
-        bootstrap: null,
-        validatedSeed: null,
-        diagnostics: [
-          {
-            code: "world_seed_load_error",
-            message: error instanceof Error ? error.message : String(error),
-            path: candidatePath,
-            severity: "error",
-          },
-        ],
-      };
-    }
-
-    if (!loaded.exists) {
-      continue;
-    }
-
-    const validated = validateWorldSeed(loaded.parsed);
-    if (!validated.ok) {
-      return {
-        status: "invalid",
-        sourcePath: candidatePath,
-        bootstrap: null,
-        validatedSeed: null,
-        diagnostics: toSeedDiagnostics(validated.issues, candidatePath),
-      };
-    }
-
-    return {
-      status: "used",
-      sourcePath: candidatePath,
-      bootstrap: buildRuntimeBootstrapInput(validated.seed),
-      validatedSeed: validated.seed,
-      diagnostics: toSeedDiagnostics(validated.issues, candidatePath),
-    };
-  }
-
-  return {
-    status: "missing",
-    sourcePath: null,
-    bootstrap: null,
-    validatedSeed: null,
-    diagnostics: [],
-  };
-}
-
-async function loadRuntimeCanonicalProvenance(params: {
-  worldRoot: string;
-  cfg: TrpgRuntimeConfig;
-  seedBootstrap: RuntimeBootstrapLoadResult;
-}): Promise<RuntimeCanonicalProvenance> {
-  const nowIso = new Date().toISOString();
-  const seedStatus = params.seedBootstrap.status as CanonicalLoadStatus;
-  const seed = params.seedBootstrap.validatedSeed;
-
-  let canonStatus: CanonicalLoadStatus = "missing";
-  let canonSourcePath: string | null = null;
-  let canonFingerprint: string | null = null;
-  let canonWorldId: string | null = null;
-  let driftCounts = {
-    addedInSeed: 0,
-    missingInSeed: 0,
-    changedScaffold: 0,
-    incompatible: 0,
-  };
-  let hasDrift = false;
-  let hasIncompatible = false;
-
-  try {
-    const loadedCanon = await loadStructuredWorldFile(params.worldRoot, FACTION_CANON_PATH, {
-      allowMissing: true,
-      maxReadBytes: params.cfg.maxReadBytes,
-    });
-
-    if (!loadedCanon.exists) {
-      canonStatus = "missing";
-    } else {
-      canonSourcePath = FACTION_CANON_PATH;
-      const referenceIndex = seed ? buildFactionCanonReferenceIndexFromWorldSeed(seed) : null;
-      const validatedCanon = validateFactionCanon(loadedCanon.parsed, {
-        references: referenceIndex
-          ? {
-              worldId: referenceIndex.worldId,
-              locationIds: referenceIndex.locationIds,
-              pressureIds: referenceIndex.pressureIds,
-            }
-          : undefined,
-      });
-
-      if (!validatedCanon.ok) {
-        canonStatus = "invalid";
-      } else {
-        canonStatus = "used";
-        canonWorldId = validatedCanon.canon.worldId;
-        canonFingerprint = buildFactionCanonFingerprint(validatedCanon.canon);
-        if (seed) {
-          const drift = detectFactionCanonScaffoldDrift({
-            seed,
-            canon: validatedCanon.canon,
-          });
-          driftCounts = {
-            addedInSeed: drift.summary.addedInSeed,
-            missingInSeed: drift.summary.missingInSeed,
-            changedScaffold: drift.summary.changedScaffold,
-            incompatible: drift.summary.incompatible,
-          };
-          hasDrift =
-            drift.summary.addedInSeed > 0 ||
-            drift.summary.missingInSeed > 0 ||
-            drift.summary.changedScaffold > 0 ||
-            drift.summary.incompatible > 0;
-          hasIncompatible = drift.status === "incompatible";
-        }
-      }
-    }
-  } catch {
-    canonStatus = "error";
-  }
-
-  const driftStatus = driftStatusFromLoadStatus({
-    seedStatus,
-    canonStatus,
-    hasDrift,
-    hasIncompatible,
-  });
-
-  return createRuntimeCanonicalProvenance({
-    sourcePolicy: "canon_authoritative",
-    worldId: seed?.worldId ?? canonWorldId ?? null,
-    schemaVersion: seed?.schemaVersion ?? null,
-    seedSourcePath: params.seedBootstrap.sourcePath,
-    seedFingerprint: params.seedBootstrap.bootstrap?.seedFingerprint ?? null,
-    canonSourcePath,
-    canonFingerprint,
-    generatedAtIso: seed?.createdAtIso ?? null,
-    validatedAtIso: nowIso,
-    driftStatus,
-    driftCounts,
-  });
-}
 
 function normalizeSession(session: SessionState): SessionState {
   const nowIso = readString((session as Record<string, unknown>).updatedAt) || new Date().toISOString();
@@ -867,50 +571,82 @@ function preparePanelDispatch(params: {
     }),
   );
 
-  const panelDispatchMessage =
-    params.session.status === "active" ? `${panel.message} · 데이터 관리 명령: /trpg help` : panel.message;
+  const panelDispatchMessage = panel.message;
+
+  const panelInternal = {
+    fixed: {
+      sessionId: params.session.sessionId,
+      ownerId: params.session.ownerId,
+      sceneId: params.session.sceneId,
+      locationId: loop.scene.locationId,
+      uiVersion: params.session.uiVersion,
+      status: params.session.status,
+      worldNowIso: loop.time.worldNowIso,
+      worldElapsedSec: loop.time.worldElapsedSec,
+    },
+    main: {
+      actionSeq: params.session.actionSeq,
+      legacyTurnIndex: params.session.turnIndex,
+      lastActionSummary: params.session.lastActionSummary,
+      beatId: loop.beat.beatId,
+      exchangeId: loop.exchange?.exchangeId ?? null,
+      deltaTimeSec: loop.time.lastDeltaSec,
+      temporalSummary: temporalSummaryPayload,
+      questSummary: questSummaryPayload,
+    },
+    sub: {
+      availableButtons,
+      modalSubmitAction: "action.free_input.submit",
+      dataManagementGuide: {
+        text: "데이터 관리 명령 안내: /trpg save · /trpg load · /trpg data-delete",
+        helpCommand: "/trpg help",
+      },
+      blockedActions: loop.actionPalette
+        .filter((entry) => entry.availability === "currently_impossible" || entry.availability === "impossible")
+        .map((entry) => ({ actionId: entry.actionId, reason: entry.reason })),
+    },
+  };
+
+  const playerView = {
+    knowledgeScope: "player_known",
+    message: panelDispatchMessage,
+    components: panel.components,
+  };
 
   const payload = {
     sourceOfTruth: "state-store",
-    panel: {
-      fixed: {
-        sessionId: params.session.sessionId,
-        ownerId: params.session.ownerId,
-        sceneId: params.session.sceneId,
-        locationId: loop.scene.locationId,
-        uiVersion: params.session.uiVersion,
-        status: params.session.status,
-        worldNowIso: loop.time.worldNowIso,
-        worldElapsedSec: loop.time.worldElapsedSec,
-      },
-      main: {
-        actionSeq: params.session.actionSeq,
-        legacyTurnIndex: params.session.turnIndex,
-        lastActionSummary: params.session.lastActionSummary,
-        beatId: loop.beat.beatId,
-        exchangeId: loop.exchange?.exchangeId ?? null,
-        deltaTimeSec: loop.time.lastDeltaSec,
-        temporalSummary: temporalSummaryPayload,
-        questSummary: questSummaryPayload,
-      },
-      sub: {
-        availableButtons,
-        modalSubmitAction: "action.free_input.submit",
-        dataManagementGuide: {
-          text: "데이터 관리 명령 안내: /trpg save · /trpg load · /trpg data-delete",
-          helpCommand: "/trpg help",
-        },
-        blockedActions: loop.actionPalette
-          .filter((entry) => entry.availability === "currently_impossible" || entry.availability === "impossible")
-          .map((entry) => ({ actionId: entry.actionId, reason: entry.reason })),
-      },
+    visibilityContract: {
+      internalContextKey: "panelInternal",
+      displayContextKey: "playerView",
+      displayPolicy: "player_known",
+      rules: [
+        "Only playerView.message/components are player-visible output.",
+        "panelInternal/verbose are internal runtime context and must not be shown verbatim.",
+      ],
     },
+    panel: panelInternal,
+    panelInternal,
+    playerView,
     panelDispatch: {
       action: panel.mode,
       dispatchId,
       message: panelDispatchMessage,
       messageId: panel.messageId,
       components: panel.components,
+    },
+    panelMessageTemplate: {
+      tool: "message",
+      params: {
+        action: panel.mode,
+        message: panelDispatchMessage,
+        ...(panel.messageId ? { messageId: panel.messageId } : {}),
+        components: panel.components,
+      },
+      guidance: [
+        "To provide a rich narrative scene with dynamic colors, use the 'trpg_scene_components' tool instead of this fallback.",
+        "If you use this template, send panelMessageTemplate.params as-is without adding markdown text.",
+        "Do not rewrite components.modal.fields[*].type.",
+      ],
     },
     verbose: {
       enabled: verboseMode,
@@ -932,32 +668,6 @@ function preparePanelDispatch(params: {
   return {
     session: preparedSession,
     payload,
-  };
-}
-
-function resolveRouteInput(input: Record<string, unknown>) {
-  const customId = readString(input.customId);
-  if (customId) {
-    const parsed = parsePanelCustomId(customId);
-    if (!parsed) {
-      throw new Error("Invalid customId format. expected trpg:v1:<sessionId>:<uiVersion>:<sceneId>:<actionId>");
-    }
-    return parsed;
-  }
-
-  const sessionId = readString(input.sessionId);
-  const uiVersion = readInteger(input.uiVersion);
-  const sceneId = readString(input.sceneId);
-  const actionId = readString(input.actionId);
-  if (!sessionId || !sceneId || !actionId || !uiVersion || uiVersion < 1) {
-    throw new Error("Route key is incomplete. Provide customId or all of sessionId/uiVersion/sceneId/actionId.");
-  }
-
-  return {
-    sessionId,
-    uiVersion,
-    sceneId,
-    actionId,
   };
 }
 
@@ -1106,15 +816,79 @@ function registerSessionNewTool(params: {
                 ownerId,
               });
               if (!verified.ok) {
-                return jsonToolResult(
-                  runtimeError({
-                    command: "/trpg new",
-                    errorCode: "invalid_confirm_token",
-                    message: "confirmToken is invalid, expired, or mismatched with current context.",
-                    recoverable: true,
-                    recoveryHint: "Run /trpg new again and use the latest YES token.",
-                  }),
-                );
+                const refresh = await issueSessionResetConfirmation({
+                  canonicalWorldRoot: gate.worldRoot,
+                  sessionContextId,
+                  channelKey,
+                  ownerId,
+                  ttlMs: NEW_CONFIRM_TOKEN_TTL_MS,
+                });
+                return jsonToolResult({
+                  ok: false,
+                  command: "/trpg new",
+                  errorCode: "invalid_confirm_token",
+                  error: "confirmToken is invalid, expired, or mismatched with current context.",
+                  recoverable: true,
+                  recoveryHint: "Use the refreshed YES token from nextActions.",
+                  confirmToken: refresh.token,
+                  confirmExpiresAt: refresh.expiresAt,
+                  nextActions: buildNewConfirmationActionHints(refresh.token),
+                  actionableComponents: {
+                    type: "actions",
+                    title: "토큰이 갱신되었습니다. 아래 버튼으로 다시 확인하세요.",
+                    token: refresh.token,
+                    buttons: [
+                      {
+                        id: "trpg_new_confirm_yes",
+                        label: "YES",
+                        style: "danger",
+                        tool: "trpg_session_new",
+                        params: {
+                          confirmReset: true,
+                          confirmToken: refresh.token,
+                          wipeMode: "force",
+                        },
+                      },
+                      {
+                        id: "trpg_new_confirm_no",
+                        label: "NO",
+                        style: "secondary",
+                        tool: "trpg_session_new",
+                        params: {
+                          confirmReset: false,
+                          wipeMode: "ask",
+                        },
+                      },
+                    ],
+                  },
+                  components: {
+                    text: "토큰이 만료/불일치하여 새 토큰을 발급했습니다.",
+                    buttons: [
+                      {
+                        id: "trpg_new_confirm_yes",
+                        label: "YES",
+                        style: "danger",
+                        tool: "trpg_session_new",
+                        params: {
+                          confirmReset: true,
+                          confirmToken: refresh.token,
+                          wipeMode: "force",
+                        },
+                      },
+                      {
+                        id: "trpg_new_confirm_no",
+                        label: "NO",
+                        style: "secondary",
+                        tool: "trpg_session_new",
+                        params: {
+                          confirmReset: false,
+                          wipeMode: "ask",
+                        },
+                      },
+                    ],
+                  },
+                  commandHints: buildVisibleCommandHints(),
+                });
               }
             }
 
@@ -1747,9 +1521,9 @@ function registerPanelInteractionTools(params: {
         try {
           const input = toObject(params);
           const actorId = resolveActorId(input, ctx);
-          let routeKey: { sessionId: string; uiVersion: number; sceneId: string; actionId: string };
+          let routeKey: PanelRouteKey;
           try {
-            routeKey = resolveRouteInput(input);
+            routeKey = resolvePanelRouteInput(input);
           } catch {
             return jsonToolResult(
               runtimeError({
@@ -1761,7 +1535,18 @@ function registerPanelInteractionTools(params: {
               }),
             );
           }
-          const freeInput = readString(input.freeInput) || undefined;
+          const actionInput = readString(input.action);
+          const speechInput = readString(input.speech);
+          const toneInput = readString(input.tone);
+          let rawFreeInput = readString(input.freeInput);
+          if (!rawFreeInput && (actionInput || speechInput || toneInput)) {
+            rawFreeInput = [
+              actionInput ? `행동: ${actionInput}` : "",
+              speechInput ? `대사: "${speechInput}"` : "",
+              toneInput ? `태도: ${toneInput}` : ""
+            ].filter(Boolean).join(" | ");
+          }
+          const freeInput = rawFreeInput || undefined;
           const runtime = createRuntimeContext(gate.worldRoot, cfg);
 
           const routePreview = await runtime.engine.resolveInteractionRoute({
@@ -2043,33 +1828,18 @@ function registerPanelInteractionTools(params: {
         try {
           const input = toObject(params);
           const runtime = createRuntimeContext(gate.worldRoot, cfg);
-          const sessionId = readString(input.sessionId);
           const actorId = resolveActorId(input, ctx);
-          const dispatchId = readString(input.dispatchId);
-          const clear = readBoolean(input.clear, false);
-          const messageId = clear ? null : readString(input.messageId);
-          const channelMessageRef = readString(input.channelMessageRef) || undefined;
-          const uiVersion = readInteger(input.uiVersion) ?? undefined;
-          const sceneId = readString(input.sceneId) || undefined;
+          const parsedInput = parsePanelMessageCommitInput(input);
+          const { sessionId, dispatchId, clear, messageId, channelMessageRef, uiVersion, sceneId } = parsedInput;
           const nowIso = new Date().toISOString();
 
-          if (!sessionId) {
+          const validation = validatePanelMessageCommitInput(parsedInput);
+          if (!validation.ok) {
             return jsonToolResult(
               runtimeError({
                 command: "panel-message-commit",
-                errorCode: "invalid_request",
-                message: "sessionId is required.",
-                recoverable: false,
-              }),
-            );
-          }
-
-          if (!clear && !messageId) {
-            return jsonToolResult(
-              runtimeError({
-                command: "panel-message-commit",
-                errorCode: "invalid_request",
-                message: "messageId is required unless clear=true.",
+                errorCode: validation.errorCode,
+                message: validation.message,
                 recoverable: false,
               }),
             );

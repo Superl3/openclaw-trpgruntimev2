@@ -88,6 +88,15 @@ export interface SceneComponentInput {
 
   /** Runtime phase contract for UI gating */
   runtimePhase?: RuntimePhase;
+
+  /** Global player status injected by backend */
+  status?: {
+    hpCurrent: number | null;
+    hpMax: number | null;
+    staminaState: string;
+    money: number | null;
+    currentGoal?: string;
+  };
 }
 
 function progressBar(current: number, max: number, length = 10): string {
@@ -493,6 +502,30 @@ export function buildSceneComponents(input: SceneComponentInput): Record<string,
         title: BLOCK_TITLES[normalizedScene],
         description: input.description,
         color: input.npc?.color || ACCENT_COLORS[normalizedScene],
+        ...(input.status
+          ? {
+              fields: [
+                {
+                  name: "\ud83d\udc96 체력",
+                  value: `${input.status.hpCurrent ?? "?"}/${input.status.hpMax ?? "?"}`,
+                  inline: true,
+                },
+                {
+                  name: "\u26a1 기력",
+                  value: input.status.staminaState,
+                  inline: true,
+                },
+                {
+                  name: "\ud83d\udcb0 소지금",
+                  value: `${input.status.money ?? "?"}G`,
+                  inline: true,
+                },
+                ...(input.status.currentGoal
+                  ? [{ name: "\ud83c\udfaf 현재 목표", value: input.status.currentGoal.slice(0, 1024), inline: false }]
+                  : []),
+              ],
+            }
+          : {}),
       },
     ],
     blocks,

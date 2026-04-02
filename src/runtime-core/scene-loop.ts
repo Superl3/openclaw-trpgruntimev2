@@ -931,11 +931,51 @@ export function collectButtonActionIds(loop: DeterministicSceneLoopState): strin
   return Array.from(dedup);
 }
 
-export function resolveDeterministicSceneAction(input: DeterministicActionInput): DeterministicActionResolution {
+type ClassifiedAction = ReturnType<typeof classifyAction>;
+type TemporalPipelineResult = ReturnType<typeof runTemporalUpdatePipeline>;
+type QuestTickResult = ReturnType<typeof runQuestEconomyTick>;
+
+type ActionResolutionPrelude = {
+  current: DeterministicSceneLoopState;
+  resolvedAction: ResolvedAction;
+  classified: ClassifiedAction;
+  deltaTimeSec: number;
+};
+
+type SceneMutationResult = {
+  nextScene: SceneState;
+  ongoingAction: OngoingActionState | null;
+  sceneTransitioned: boolean;
+};
+
+type AnchorTickResult = {
+  nextAnchor: AnchorRuntimeState;
+  summary: AnchorTickSummary;
+};
+
+type TemporalQuestAnchorResult = {
+  nextScene: SceneState;
+  worldNowIso: string;
+  temporalPipeline: TemporalPipelineResult;
+  questTick: QuestTickResult;
+  anchorTick: AnchorTickResult;
+};
+
+type ExchangeArtifacts = {
+  exchangeIndex: number;
+  beat: BeatState;
+  riskNote: string | null;
+  resultSummary: string;
+  reactionChain: string[];
+  exchange: ExchangeState;
+};
+
+function prepareActionResolutionPrelude(input: DeterministicActionInput): ActionResolutionPrelude {
   const current = ensureDeterministicSceneLoopState(input.loop, {
     sceneId: input.loop.scene.sceneId,
     nowIso: input.nowIso,
   });
+
   const resolvedAction = resolveActionId(input.routeActionId, input.loop, input.freeInput, input.resolvedActionOverride);
   const classified = classifyAction({
     loop: current,
@@ -948,20 +988,36 @@ export function resolveDeterministicSceneAction(input: DeterministicActionInput)
     loop: current,
   });
 
+  return {
+    current,
+    resolvedAction,
+    classified,
+    deltaTimeSec,
+  };
+}
+
+function applyActionToSceneState(params: {
+  currentScene: SceneState;
+  currentOngoingAction: OngoingActionState | null;
+  resolvedActionId: DeterministicActionId;
+  classification: ActionFeasibility;
+  deltaTimeSec: number;
+  nowIso: string;
+}): SceneMutationResult {
   const nextScene: SceneState = {
-    ...current.scene,
+    ...params.currentScene,
   };
 
-  let ongoingAction: OngoingActionState | null = current.ongoingAction
+  let ongoingAction: OngoingActionState | null = params.currentOngoingAction
     ? {
-        ...current.ongoingAction,
+        ...params.currentOngoingAction,
       }
     : null;
 
   let sceneTransitioned = false;
 
-  if (classified.classification === "possible" || classified.classification === "reckless") {
-    switch (resolvedAction.resolvedActionId) {
+  if (params.classification === "possible" || params.classification === "reckless") {
+    switch (params.resolvedActionId) {
       case "action.observe":
         nextScene.pressure = clampInt(nextScene.pressure - 6, 0, 100);
         if (nextScene.pressure <= 60) {
@@ -971,7 +1027,7 @@ export function resolveDeterministicSceneAction(input: DeterministicActionInput)
       case "action.wait":
         nextScene.pressure = clampInt(nextScene.pressure + 4, 0, 100);
         if (ongoingAction && ongoingAction.kind === "move" && ongoingAction.status === "in_progress") {
-          ongoingAction.elapsedSec += deltaTimeSec;
+          ongoingAction.elapsedSec += params.deltaTimeSec;
         }
         break;
       case "action.talk":
@@ -986,16 +1042,16 @@ export function resolveDeterministicSceneAction(input: DeterministicActionInput)
         const requiredSec = 180;
         if (!ongoingAction || ongoingAction.kind !== "move" || ongoingAction.status !== "in_progress") {
           ongoingAction = {
-            id: `${nextScene.sceneId}:move-${Date.parse(input.nowIso) || Date.now()}`,
+            id: `${nextScene.sceneId}:move-${Date.parse(params.nowIso) || Date.now()}`,
             kind: "move",
             status: "in_progress",
             requiredSec,
             elapsedSec: 0,
             interruptible: false,
-            startedAtIso: input.nowIso,
+            startedAtIso: params.nowIso,
           };
         }
-        ongoingAction.elapsedSec += deltaTimeSec;
+        ongoingAction.elapsedSec += params.deltaTimeSec;
         nextScene.phase = "transitioning";
         nextScene.pressure = clampInt(nextScene.pressure + 2, 0, 100);
         break;
@@ -1003,7 +1059,7 @@ export function resolveDeterministicSceneAction(input: DeterministicActionInput)
       default:
         break;
     }
-  } else if (classified.classification === "currently_impossible") {
+  } else if (params.classification === "currently_impossible") {
     nextScene.pressure = clampInt(nextScene.pressure + 1, 0, 100);
   }
 
@@ -1022,16 +1078,36 @@ export function resolveDeterministicSceneAction(input: DeterministicActionInput)
     }
   }
 
-  const worldNowIso = addSecondsToIso(current.time.worldNowIso || input.nowIso, deltaTimeSec);
+  return {
+    nextScene,
+    ongoingAction,
+    sceneTransitioned,
+  };
+}
+
+function runTemporalQuestAnchorPipelines(params: {
+  input: DeterministicActionInput;
+  current: DeterministicSceneLoopState;
+  nextScene: SceneState;
+  ongoingAction: OngoingActionState | null;
+  resolvedActionId: DeterministicActionId;
+  classification: ActionFeasibility;
+  deltaTimeSec: number;
+}): TemporalQuestAnchorResult {
+  const nextScene: SceneState = {
+    ...params.nextScene,
+  };
+
+  const worldNowIso = addSecondsToIso(params.current.time.worldNowIso || params.input.nowIso, params.deltaTimeSec);
   const temporalPipeline = runTemporalUpdatePipeline({
-    temporal: current.temporal,
+    temporal: params.current.temporal,
     sceneId: nextScene.sceneId,
     locationId: nextScene.locationId,
-    actionId: resolvedAction.resolvedActionId,
-    classification: classified.classification,
-    deltaTimeSec,
+    actionId: params.resolvedActionId,
+    classification: params.classification,
+    deltaTimeSec: params.deltaTimeSec,
     nowIso: worldNowIso,
-    ongoingAction,
+    ongoingAction: params.ongoingAction,
   });
 
   if (temporalPipeline.projection) {
@@ -1042,7 +1118,7 @@ export function resolveDeterministicSceneAction(input: DeterministicActionInput)
     );
     if (temporalPipeline.projection.alertness >= 78) {
       nextScene.npcAvailable = false;
-    } else if (temporalPipeline.projection.alertness <= 45 && classified.classification !== "reckless") {
+    } else if (temporalPipeline.projection.alertness <= 45 && params.classification !== "reckless") {
       nextScene.npcAvailable = true;
     }
   }
@@ -1053,33 +1129,33 @@ export function resolveDeterministicSceneAction(input: DeterministicActionInput)
   });
 
   const questTick = runQuestEconomyTick({
-    economy: current.questEconomy,
+    economy: params.current.questEconomy,
     nowIso: worldNowIso,
-    deltaTimeSec,
+    deltaTimeSec: params.deltaTimeSec,
     sceneId: nextScene.sceneId,
     locationId: nextScene.locationId,
-    actionId: resolvedAction.resolvedActionId,
-    classification: classified.classification,
+    actionId: params.resolvedActionId,
+    classification: params.classification,
     temporalSignal: questTemporalSignal,
   });
 
-  const anchorLifecycleEnabled = input.runtimeSafety?.anchorLifecycleEnabled !== false;
-  const anchorSummaryOnly = input.runtimeSafety?.anchorSummaryOnly !== false;
-  const anchorTick = anchorLifecycleEnabled
+  const anchorLifecycleEnabled = params.input.runtimeSafety?.anchorLifecycleEnabled !== false;
+  const anchorSummaryOnly = params.input.runtimeSafety?.anchorSummaryOnly !== false;
+  const anchorTick: AnchorTickResult = anchorLifecycleEnabled
     ? runAnchorTick({
-        anchor: current.anchor,
-        economyBefore: current.questEconomy,
+        anchor: params.current.anchor,
+        economyBefore: params.current.questEconomy,
         economyAfter: questTick.nextEconomy,
         questSummary: questTick.summary,
         nowIso: worldNowIso,
-        deltaTimeSec,
-        actionId: resolvedAction.resolvedActionId,
-        classification: classified.classification,
+        deltaTimeSec: params.deltaTimeSec,
+        actionId: params.resolvedActionId,
+        classification: params.classification,
         sceneId: nextScene.sceneId,
         summaryOnly: anchorSummaryOnly,
       })
     : {
-        nextAnchor: current.anchor,
+        nextAnchor: params.current.anchor,
         summary: createNoopAnchorTickSummary({
           signalMode: "noop",
           signalReason: "anchor_lifecycle_disabled",
@@ -1088,86 +1164,175 @@ export function resolveDeterministicSceneAction(input: DeterministicActionInput)
 
   nextScene.riskTier = riskTierFromPressure(nextScene.pressure);
 
-  const exchangeIndex = sceneTransitioned ? 1 : (current.exchange?.exchangeIndex ?? 0) + 1;
+  return {
+    nextScene,
+    worldNowIso,
+    temporalPipeline,
+    questTick,
+    anchorTick,
+  };
+}
+
+function buildExchangeArtifacts(params: {
+  current: DeterministicSceneLoopState;
+  nextScene: SceneState;
+  sceneTransitioned: boolean;
+  resolvedAction: ResolvedAction;
+  classification: ClassifiedAction;
+  deltaTimeSec: number;
+  nowIso: string;
+}): ExchangeArtifacts {
+  const exchangeIndex = params.sceneTransitioned ? 1 : (params.current.exchange?.exchangeIndex ?? 0) + 1;
   const beat = updateBeat({
-    previous: current.beat,
-    sceneId: nextScene.sceneId,
-    classification: classified.classification,
-    sceneTransitioned,
+    previous: params.current.beat,
+    sceneId: params.nextScene.sceneId,
+    classification: params.classification.classification,
+    sceneTransitioned: params.sceneTransitioned,
     exchangeIndex,
-    resolvedActionId: resolvedAction.resolvedActionId,
+    resolvedActionId: params.resolvedAction.resolvedActionId,
   });
 
   const riskNote =
-    classified.classification === "reckless"
+    params.classification.classification === "reckless"
       ? "무리한 행동이라 위험이 상승했다. 다음 행동에서 보수적 선택이 권장된다."
       : null;
 
   const resultSummary =
-    classified.classification === "impossible"
-      ? `행동을 처리할 수 없다: ${classified.reason}`
-      : classified.classification === "currently_impossible"
-        ? `지금은 실행할 수 없다: ${classified.reason}`
-        : classified.classification === "reckless"
-          ? `${actionLabelFor(resolvedAction.resolvedActionId)}를 강행했다.`
-          : `${actionLabelFor(resolvedAction.resolvedActionId)}를 처리했다.`;
+    params.classification.classification === "impossible"
+      ? `행동을 처리할 수 없다: ${params.classification.reason}`
+      : params.classification.classification === "currently_impossible"
+        ? `지금은 실행할 수 없다: ${params.classification.reason}`
+        : params.classification.classification === "reckless"
+          ? `${actionLabelFor(params.resolvedAction.resolvedActionId)}를 강행했다.`
+          : `${actionLabelFor(params.resolvedAction.resolvedActionId)}를 처리했다.`;
 
   const reactionChain = buildReactionChain({
-    actionId: resolvedAction.resolvedActionId,
-    classification: classified.classification,
-    sceneTransitioned,
+    actionId: params.resolvedAction.resolvedActionId,
+    classification: params.classification.classification,
+    sceneTransitioned: params.sceneTransitioned,
   });
 
   const exchange: ExchangeState = {
     exchangeId: makeExchangeId(beat.beatId, exchangeIndex),
     exchangeIndex,
-    inputActionId: resolvedAction.inputActionId,
-    resolvedActionId: resolvedAction.resolvedActionId,
-    classification: classified.classification,
-    deltaTimeSec,
+    inputActionId: params.resolvedAction.inputActionId,
+    resolvedActionId: params.resolvedAction.resolvedActionId,
+    classification: params.classification.classification,
+    deltaTimeSec: params.deltaTimeSec,
     resultSummary,
     riskNote,
     reactionChain,
-    occurredAtIso: input.nowIso,
+    occurredAtIso: params.nowIso,
   };
 
-  const nextLoop: DeterministicSceneLoopState = {
-    scene: nextScene,
+  return {
+    exchangeIndex,
     beat,
+    riskNote,
+    resultSummary,
+    reactionChain,
     exchange,
-    exchangeHistory: [...current.exchangeHistory, exchange].slice(-8),
+  };
+}
+
+function assembleNextLoop(params: {
+  current: DeterministicSceneLoopState;
+  nextScene: SceneState;
+  beat: BeatState;
+  exchange: ExchangeState;
+  worldNowIso: string;
+  deltaTimeSec: number;
+  ongoingAction: OngoingActionState | null;
+  temporalPipeline: TemporalPipelineResult;
+  questTick: QuestTickResult;
+  anchorTick: AnchorTickResult;
+  nowIso: string;
+}): DeterministicSceneLoopState {
+  const nextLoop: DeterministicSceneLoopState = {
+    scene: params.nextScene,
+    beat: params.beat,
+    exchange: params.exchange,
+    exchangeHistory: [...params.current.exchangeHistory, params.exchange].slice(-8),
     time: {
-      worldElapsedSec: current.time.worldElapsedSec + deltaTimeSec,
-      lastDeltaSec: deltaTimeSec,
-      worldNowIso,
+      worldElapsedSec: params.current.time.worldElapsedSec + params.deltaTimeSec,
+      lastDeltaSec: params.deltaTimeSec,
+      worldNowIso: params.worldNowIso,
     },
-    ongoingAction,
-    behavioralDrift: current.behavioralDrift,
-    intentInertia: current.intentInertia,
+    ongoingAction: params.ongoingAction,
+    behavioralDrift: params.current.behavioralDrift,
+    intentInertia: params.current.intentInertia,
     analyzerMemory: {
-      ...current.analyzerMemory,
-      expiresAtIso: current.analyzerMemory.expiresAtIso ?? nextAnalyzerMemoryExpiry(input.nowIso),
+      ...params.current.analyzerMemory,
+      expiresAtIso: params.current.analyzerMemory.expiresAtIso ?? nextAnalyzerMemoryExpiry(params.nowIso),
     },
-    temporal: temporalPipeline.nextTemporal,
-    questEconomy: questTick.nextEconomy,
-    anchor: anchorTick.nextAnchor,
+    temporal: params.temporalPipeline.nextTemporal,
+    questEconomy: params.questTick.nextEconomy,
+    anchor: params.anchorTick.nextAnchor,
     actionPalette: [],
   };
 
   nextLoop.actionPalette = buildActionPalette(nextLoop);
+  return nextLoop;
+}
+
+export function resolveDeterministicSceneAction(input: DeterministicActionInput): DeterministicActionResolution {
+  const prelude = prepareActionResolutionPrelude(input);
+
+  const sceneMutation = applyActionToSceneState({
+    currentScene: prelude.current.scene,
+    currentOngoingAction: prelude.current.ongoingAction,
+    resolvedActionId: prelude.resolvedAction.resolvedActionId,
+    classification: prelude.classified.classification,
+    deltaTimeSec: prelude.deltaTimeSec,
+    nowIso: input.nowIso,
+  });
+
+  const pipelines = runTemporalQuestAnchorPipelines({
+    input,
+    current: prelude.current,
+    nextScene: sceneMutation.nextScene,
+    ongoingAction: sceneMutation.ongoingAction,
+    resolvedActionId: prelude.resolvedAction.resolvedActionId,
+    classification: prelude.classified.classification,
+    deltaTimeSec: prelude.deltaTimeSec,
+  });
+
+  const exchangeArtifacts = buildExchangeArtifacts({
+    current: prelude.current,
+    nextScene: pipelines.nextScene,
+    sceneTransitioned: sceneMutation.sceneTransitioned,
+    resolvedAction: prelude.resolvedAction,
+    classification: prelude.classified,
+    deltaTimeSec: prelude.deltaTimeSec,
+    nowIso: input.nowIso,
+  });
+
+  const nextLoop = assembleNextLoop({
+    current: prelude.current,
+    nextScene: pipelines.nextScene,
+    beat: exchangeArtifacts.beat,
+    exchange: exchangeArtifacts.exchange,
+    worldNowIso: pipelines.worldNowIso,
+    deltaTimeSec: prelude.deltaTimeSec,
+    ongoingAction: sceneMutation.ongoingAction,
+    temporalPipeline: pipelines.temporalPipeline,
+    questTick: pipelines.questTick,
+    anchorTick: pipelines.anchorTick,
+    nowIso: input.nowIso,
+  });
 
   return {
     nextLoop,
-    inputActionId: resolvedAction.inputActionId,
-    resolvedActionId: resolvedAction.resolvedActionId,
-    classification: classified.classification,
-    deltaTimeSec,
-    resultSummary,
-    riskNote,
-    reactionChain,
-    exchange,
-    temporalSummary: temporalPipeline.summary,
-    questSummary: questTick.summary,
-    anchorSummary: anchorTick.summary,
+    inputActionId: prelude.resolvedAction.inputActionId,
+    resolvedActionId: prelude.resolvedAction.resolvedActionId,
+    classification: prelude.classified.classification,
+    deltaTimeSec: prelude.deltaTimeSec,
+    resultSummary: exchangeArtifacts.resultSummary,
+    riskNote: exchangeArtifacts.riskNote,
+    reactionChain: exchangeArtifacts.reactionChain,
+    exchange: exchangeArtifacts.exchange,
+    temporalSummary: pipelines.temporalPipeline.summary,
+    questSummary: pipelines.questTick.summary,
+    anchorSummary: pipelines.anchorTick.summary,
   };
 }

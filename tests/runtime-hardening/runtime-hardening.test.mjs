@@ -608,7 +608,10 @@ test("hook lane timeout falls back immediately with deterministic panel output",
     mode: "send",
   });
   const panelText = JSON.stringify(panelOut.components);
-  assert.ok(panelText.includes("활성 과제:") || panelText.includes("접촉 기회:"));
+  const panelDescription = panelOut.components?.embeds?.[0]?.description ?? "";
+  assert.equal(typeof panelDescription, "string");
+  assert.ok(panelDescription.length > 0);
+  assert.equal(panelText.includes("debug.quest_hook_text.raw"), false);
 });
 
 test("hook text cache hit skips regeneration on next action", async () => {
@@ -1116,6 +1119,12 @@ test("/trpg new requires confirmation token on contamination and validates token
   );
   assert.equal(invalid.ok, false);
   assert.equal(invalid.errorCode, "invalid_confirm_token");
+  assert.ok(typeof invalid.confirmToken === "string" && invalid.confirmToken.length >= 8);
+  assert.equal(Array.isArray(invalid?.actionableComponents?.buttons), true);
+  const invalidConfirmLabels = (invalid?.actionableComponents?.buttons ?? []).map((entry) => entry?.label);
+  assert.equal(invalidConfirmLabels.includes("YES"), true);
+  assert.equal(invalidConfirmLabels.includes("NO"), true);
+  assert.equal(typeof invalid?.nextActions?.yes?.manualExample, "string");
 
   const confirmed = parse(
     await newTool.execute("new-3", {
@@ -1214,7 +1223,18 @@ test("/trpg help returns visible command list and examples", async () => {
   assert.equal(typeof created?.commandHints?.dataManagementNote, "string");
   assert.equal(Array.isArray(created?.actionableComponents?.buttons), true);
   assert.equal(typeof created?.panel?.sub?.dataManagementGuide?.text, "string");
-  assert.equal(String(created?.panelDispatch?.message).includes("/trpg help"), true);
+  assert.equal(String(created?.panelDispatch?.message).includes("/trpg help"), false);
+  assert.equal(created?.visibilityContract?.displayPolicy, "player_known");
+  assert.equal(created?.playerView?.knowledgeScope, "player_known");
+  assert.equal(created?.playerView?.message, created?.panelDispatch?.message);
+  assert.equal(created?.playerView?.components?.text, created?.panelDispatch?.components?.text);
+  assert.equal(typeof created?.panelInternal?.fixed?.sessionId, "string");
+  assert.equal(created?.panelMessageTemplate?.tool, "message");
+  assert.equal(created?.panelMessageTemplate?.params?.action, created?.panelDispatch?.action);
+  assert.equal(created?.panelMessageTemplate?.params?.message, created?.panelDispatch?.message);
+  const createdModalField = created?.panelMessageTemplate?.params?.components?.modal?.fields?.[0] ?? null;
+  assert.equal(createdModalField?.type, "text");
+  assert.equal(createdModalField?.style, "paragraph");
 
   const resumed = parse(
     await resumeTool.execute("resume", {
@@ -1224,6 +1244,13 @@ test("/trpg help returns visible command list and examples", async () => {
   );
   assert.equal(typeof resumed?.commandHints?.dataManagementNote, "string");
   assert.equal(Array.isArray(resumed?.actionableComponents?.buttons), true);
+  assert.equal(resumed?.visibilityContract?.displayPolicy, "player_known");
+  assert.equal(resumed?.playerView?.knowledgeScope, "player_known");
+  assert.equal(resumed?.playerView?.message, resumed?.panelDispatch?.message);
+  assert.equal(resumed?.panelMessageTemplate?.tool, "message");
+  const resumedModalField = resumed?.panelMessageTemplate?.params?.components?.modal?.fields?.[0] ?? null;
+  assert.equal(resumedModalField?.type, "text");
+  assert.equal(resumedModalField?.style, "paragraph");
   const resumeActionLabels = (resumed?.actionableComponents?.buttons ?? []).map((entry) => entry?.label);
   assert.equal(resumeActionLabels.includes("🔄 패널 새로고침"), true);
 });

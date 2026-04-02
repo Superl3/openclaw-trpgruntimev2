@@ -37,6 +37,15 @@ type RegisterSceneComponentsToolParams = {
   ) => SceneComponentInput;
   classifyTurnKind: (latestUserMessage: string) => "scene-turn" | "etc";
   readString: (value: unknown) => string;
+  loadStatusPanelData: (params: { cfg: TrpgRuntimeConfig; worldRoot: string }) => Promise<{
+    hpCurrent: number | null;
+    hpMax: number | null;
+    staminaState: string;
+    money: number | null;
+    currentGoal: string;
+    carriedItems: string[];
+    equippedItems: string[];
+  }>;
 };
 
 export function registerSceneComponentsTool(params: RegisterSceneComponentsToolParams): void {
@@ -49,6 +58,7 @@ export function registerSceneComponentsTool(params: RegisterSceneComponentsToolP
     normalizeSceneComponentInputByPhase,
     classifyTurnKind,
     readString,
+    loadStatusPanelData,
   } = params;
 
   api.registerTool(
@@ -107,7 +117,42 @@ export function registerSceneComponentsTool(params: RegisterSceneComponentsToolP
           }
 
           const normalizedInput = normalizeSceneComponentInputByPhase(rawInput, runtimePhase);
-          const components = buildSceneComponents(normalizedInput);
+          
+          const statusData = await loadStatusPanelData({ cfg, worldRoot: gate.worldRoot });
+          
+          // Inject player status into the Embed fields of the scene component
+          const normalizedInputWithStatus: SceneComponentInput = {
+            ...normalizedInput,
+            status: {
+              hpCurrent: statusData.hpCurrent,
+              hpMax: statusData.hpMax,
+              staminaState: statusData.staminaState,
+              money: statusData.money,
+              currentGoal: statusData.currentGoal || undefined,
+            },
+          };
+          
+          const components = buildSceneComponents(normalizedInputWithStatus);
+          
+          const inventoryOptions = [
+            ...statusData.equippedItems.map((item) => ({ label: `[\uc7a5\ucc29] ${item}`.slice(0, 80), value: `eq_${item}`.slice(0, 100) })),
+            ...statusData.carriedItems.map((item) => ({ label: item.slice(0, 80), value: `carry_${item}`.slice(0, 100) }))
+          ].slice(0, 25);
+          
+          if (inventoryOptions.length === 0) {
+            inventoryOptions.push({ label: "\ube48 \uac00\ubc29", value: "empty" });
+          }
+          
+          if (Array.isArray(components.blocks)) {
+            components.blocks.push({
+              type: "actions",
+              select: {
+                type: "string",
+                placeholder: `\ud83c\udf92 \uac00\ubc29 \ud655\uc778 (HP: ${statusData.hpCurrent ?? "?"}/${statusData.hpMax ?? "?"})`,
+                options: inventoryOptions
+              }
+            });
+          }
           const requestedButtons = Array.isArray(rawInput.buttons)
             ? rawInput.buttons?.length ?? 0
             : 0;
