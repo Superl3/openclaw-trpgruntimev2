@@ -1,0 +1,92 @@
+version: 1
+
+response_format:
+  ok: boolean
+  request_id: string
+  session_id: string
+  data: object
+  error:
+    code: string
+    message: string
+    retryable: boolean
+    next_action: string
+    details: object
+
+errors:
+  E_TOOL_NOT_REGISTERED:
+    http_status: 404
+    retryable: false
+    message: "등록되지 않은 도구입니다."
+    next_action: "tool_name 확인 후 재요청"
+
+  E_TOOL_NOT_ALLOWED_IN_STATE:
+    http_status: 409
+    retryable: false
+    message: "현재 세션 상태에서 호출 불가한 도구입니다."
+    next_action: "허용 상태로 전이 후 재시도"
+
+  E_SCOPE_DENIED:
+    http_status: 403
+    retryable: false
+    message: "현재 권한으로 호출 불가합니다."
+    next_action: "권한(scope) 상향 또는 호출 변경"
+
+  E_CONFIRMATION_REQUIRED:
+    http_status: 400
+    retryable: false
+    message: "확인 플래그가 필요한 작업입니다."
+    next_action: "confirm=true 포함 후 재요청"
+
+  E_IDEMPOTENCY_KEY_REQUIRED:
+    http_status: 400
+    retryable: false
+    message: "idempotency_key가 필요합니다."
+    next_action: "고유 key를 포함해 재요청"
+
+  E_IDEMPOTENCY_CONFLICT:
+    http_status: 409
+    retryable: false
+    message: "같은 idempotency_key에 다른 payload가 감지되었습니다."
+    next_action: "새 key 사용 또는 동일 payload로 재요청"
+
+  E_REQUEST_IN_FLIGHT:
+    http_status: 409
+    retryable: true
+    message: "동일 요청이 처리 중입니다."
+    next_action: "짧은 지연 후 동일 key로 재시도"
+
+  E_STATE_VERSION_REQUIRED:
+    http_status: 400
+    retryable: false
+    message: "expected_state_version이 필요합니다."
+    next_action: "store_get으로 버전 조회 후 재요청"
+
+  E_STATE_VERSION_CONFLICT:
+    http_status: 409
+    retryable: true
+    message: "state_version 충돌이 발생했습니다."
+    next_action: "최신 상태 재조회 후 dry_run부터 재실행"
+
+  E_PATCH_VALIDATION_FAILED:
+    http_status: 422
+    retryable: false
+    message: "패치 검증 실패"
+    next_action: "패치 내용 수정 후 재시도"
+
+  E_SESSION_NOT_FOUND:
+    http_status: 404
+    retryable: false
+    message: "세션을 찾을 수 없습니다."
+    next_action: "session_id 확인 또는 session_new"
+
+  E_SESSION_ALREADY_ACTIVE:
+    http_status: 409
+    retryable: false
+    message: "이미 활성 세션이 존재합니다."
+    next_action: "기존 세션 종료 또는 저장 후 재시도"
+
+  E_INTERNAL:
+    http_status: 500
+    retryable: true
+    message: "내부 오류"
+    next_action: "request_id로 로그 추적 후 재시도"

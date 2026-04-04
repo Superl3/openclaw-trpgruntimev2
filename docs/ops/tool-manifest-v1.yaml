@@ -1,0 +1,198 @@
+version: 1
+default_policies:
+  mutation_requires_idempotency_key: true
+  stale_version_policy: reject
+  idempotency_ttl_hours: 24
+
+tools:
+  trpg_store_get:
+    category: runtime.read
+    mutates_state: false
+    deterministic: true
+    idempotent: true
+    requires_session_state: [ACTIVE, PAUSED, ENDED]
+    required_scope_any: [player, gm, system]
+    retry_policy: safe
+
+  trpg_patch_dry_run:
+    category: runtime.validate
+    mutates_state: false
+    deterministic: true
+    idempotent: true
+    requires_session_state: [ACTIVE, PAUSED]
+    required_scope_any: [gm, system]
+    requires_expected_state_version: true
+    retry_policy: safe
+
+  trpg_patch_apply:
+    category: runtime.mutate
+    mutates_state: true
+    deterministic: true
+    idempotent: true
+    requires_session_state: [ACTIVE, PAUSED]
+    required_scope_any: [gm, system]
+    requires_expected_state_version: true
+    requires_idempotency_key: true
+    retry_policy: with_key
+
+  trpg_state_compact:
+    category: runtime.maintenance
+    mutates_state: true
+    deterministic: true
+    idempotent: true
+    requires_session_state: [PAUSED, ENDED]
+    required_scope_any: [system]
+    requires_idempotency_key: true
+    retry_policy: with_key
+
+  trpg_status_inventory_repair:
+    category: runtime.repair
+    mutates_state: true
+    deterministic: true
+    idempotent: true
+    requires_session_state: [ACTIVE, PAUSED]
+    required_scope_any: [gm, system]
+    requires_expected_state_version: true
+    requires_idempotency_key: true
+    retry_policy: with_key
+
+  trpg_faction_tick:
+    category: runtime.mutate
+    mutates_state: true
+    deterministic: true
+    idempotent: true
+    requires_session_state: [ACTIVE]
+    required_scope_any: [gm, system]
+    requires_expected_state_version: true
+    requires_idempotency_key: true
+    retry_policy: with_key
+
+  trpg_hooks_query:
+    category: runtime.read
+    mutates_state: false
+    deterministic: true
+    idempotent: true
+    requires_session_state: [ACTIVE, PAUSED]
+    required_scope_any: [player, gm, system]
+    retry_policy: safe
+
+  trpg_dice_roll:
+    category: runtime.random
+    mutates_state: false
+    deterministic: false
+    idempotent: true
+    requires_session_state: [ACTIVE]
+    required_scope_any: [player, gm, system]
+    requires_idempotency_key: true
+    retry_policy: with_key
+
+  trpg_scene_components:
+    category: runtime.read
+    mutates_state: false
+    deterministic: true
+    idempotent: true
+    requires_session_state: [ACTIVE, PAUSED]
+    required_scope_any: [player, gm, system]
+    retry_policy: safe
+
+  trpg_session_help:
+    category: lifecycle.read
+    mutates_state: false
+    deterministic: true
+    idempotent: true
+    requires_session_state: [NO_SESSION, ACTIVE, PAUSED, ENDED]
+    required_scope_any: [player, gm, system]
+    retry_policy: safe
+
+  trpg_session_new:
+    category: lifecycle.mutate
+    mutates_state: true
+    deterministic: true
+    idempotent: true
+    requires_session_state: [NO_SESSION, ENDED]
+    required_scope_any: [gm, system]
+    requires_idempotency_key: true
+    retry_policy: with_key
+
+  trpg_session_resume:
+    category: lifecycle.mutate
+    mutates_state: true
+    deterministic: true
+    idempotent: true
+    requires_session_state: [NO_SESSION, PAUSED, ENDED]
+    required_scope_any: [gm, system]
+    requires_idempotency_key: true
+    retry_policy: with_key
+
+  trpg_session_end:
+    category: lifecycle.mutate
+    mutates_state: true
+    deterministic: true
+    idempotent: true
+    requires_session_state: [ACTIVE, PAUSED]
+    required_scope_any: [gm, system]
+    requires_idempotency_key: true
+    requires_confirmation: true
+    retry_policy: with_key
+
+  trpg_session_verbose:
+    category: lifecycle.config
+    mutates_state: true
+    deterministic: true
+    idempotent: true
+    requires_session_state: [NO_SESSION, ACTIVE, PAUSED, ENDED]
+    required_scope_any: [gm, system]
+    requires_idempotency_key: true
+    retry_policy: with_key
+
+  trpg_session_save:
+    category: lifecycle.mutate
+    mutates_state: true
+    deterministic: true
+    idempotent: true
+    requires_session_state: [ACTIVE, PAUSED]
+    required_scope_any: [gm, system]
+    requires_idempotency_key: true
+    retry_policy: with_key
+
+  trpg_session_load:
+    category: lifecycle.mutate
+    mutates_state: true
+    deterministic: true
+    idempotent: true
+    requires_session_state: [NO_SESSION, PAUSED, ENDED]
+    required_scope_any: [gm, system]
+    requires_idempotency_key: true
+    requires_confirmation: true
+    retry_policy: with_key
+
+  trpg_session_data_delete:
+    category: lifecycle.destructive
+    mutates_state: true
+    deterministic: true
+    idempotent: true
+    requires_session_state: [NO_SESSION, ENDED]
+    required_scope_any: [system]
+    requires_idempotency_key: true
+    requires_confirmation: true
+    retry_policy: with_key
+
+  trpg_panel_interact:
+    category: panel.mutate
+    mutates_state: true
+    deterministic: true
+    idempotent: true
+    requires_session_state: [ACTIVE]
+    required_scope_any: [player, gm, system]
+    requires_idempotency_key: true
+    retry_policy: with_key
+
+  trpg_panel_message_commit:
+    category: panel.mutate
+    mutates_state: true
+    deterministic: true
+    idempotent: true
+    requires_session_state: [ACTIVE]
+    required_scope_any: [gm, system]
+    requires_idempotency_key: true
+    retry_policy: with_key
