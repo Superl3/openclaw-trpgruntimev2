@@ -1,0 +1,21 @@
+paths:
+  runtime_plugin_active: ~/.openclaw/extensions/trpg-runtime-v2
+  runtime_plugin_legacy_archive: ~/archive/extensions/trpg-runtime
+  config: ~/.openclaw/openclaw.json
+
+  runtime_workspace_active: ~/.openclaw/extensions/trpg-runtime-v2/workspace
+  world_root_active: ~/.openclaw/extensions/trpg-runtime-v2/workspace/world
+  world_state_active: ~/.openclaw/extensions/trpg-runtime-v2/workspace/world/state
+  world_canon_active: ~/.openclaw/extensions/trpg-runtime-v2/workspace/world/canon
+  world_logs_active: ~/.openclaw/extensions/trpg-runtime-v2/workspace/world/logs
+  world_npcs_active: ~/.openclaw/extensions/trpg-runtime-v2/workspace/world/npcs
+  world_zones_active: ~/.openclaw/extensions/trpg-runtime-v2/workspace/world/zones
+
+  docs_workspace: ~/.openclaw/extensions/trpg-runtime-v2
+  skills: ~/.openclaw/extensions/trpg-runtime-v2/agent/skills
+  ops_docs: ~/.openclaw/extensions/trpg-runtime-v2/docs/ops
+
+  runtime_source:
+    index: ~/.openclaw/extensions/trpg-runtime-v2/src/index.ts
+    faction_engine: ~/.openclaw/extensions/trpg-runtime-v2/src/faction-engine.ts
+    patch_engine: ~/.openclaw/extensions/trpg-runtime-v2/src/patch-engine.ts
