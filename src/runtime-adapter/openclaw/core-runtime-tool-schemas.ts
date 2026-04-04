@@ -11,10 +11,18 @@ const PATCH_OPERATION_SCHEMA = {
   required: ["op", "file", "pointer"],
 } as const;
 
+const GOVERNANCE_FIELDS = {
+  requestId: { type: "string" },
+  idempotencyKey: { type: "string" },
+  expectedStateVersion: { type: "integer", minimum: 0 },
+  confirm: { type: "boolean" },
+} as const;
+
 const PATCH_DRY_RUN_PARAMETERS = {
   type: "object",
   additionalProperties: false,
   properties: {
+    ...GOVERNANCE_FIELDS,
     patchId: { type: "string" },
     title: { type: "string" },
     allowNewFiles: { type: "boolean" },
@@ -27,6 +35,7 @@ export const STORE_GET_PARAMETERS = {
   type: "object",
   additionalProperties: false,
   properties: {
+    ...GOVERNANCE_FIELDS,
     entityIds: { type: "array", items: { type: "string" } },
     paths: { type: "array", items: { type: "string" } },
     scope: { type: "string", enum: ["all", "canon", "state", "secrets", "logs"] },
@@ -45,6 +54,7 @@ export const PATCH_APPLY_PARAMETERS = {
   type: "object",
   additionalProperties: false,
   properties: {
+    ...GOVERNANCE_FIELDS,
     validatedPatchId: { type: "string" },
     patchPayload: PATCH_DRY_RUN_PARAMETERS,
     audit: {
@@ -71,6 +81,7 @@ export const HOOKS_QUERY_PARAMETERS = {
   type: "object",
   additionalProperties: false,
   properties: {
+    ...GOVERNANCE_FIELDS,
     currentSceneTags: { type: "array", items: { type: "string" } },
     actorIds: { type: "array", items: { type: "string" } },
     pacingTarget: { type: "string", enum: ["slow-burn", "steady", "escalate", "cooldown"] },
@@ -82,6 +93,7 @@ export const DICE_ROLL_PARAMETERS = {
   type: "object",
   additionalProperties: false,
   properties: {
+    ...GOVERNANCE_FIELDS,
     notation: { type: "string" },
     modifier: { type: "number" },
     seedPolicy: { type: "string", enum: ["session", "fixed", "random"] },
@@ -94,6 +106,7 @@ export const FACTION_TICK_PARAMETERS = {
   type: "object",
   additionalProperties: false,
   properties: {
+    ...GOVERNANCE_FIELDS,
     trigger: { type: "string", enum: ["turn", "scene_transition", "session", "downtime"] },
     mode: { type: "string", enum: ["read-only", "dry-run"] },
     maxEvents: { type: "integer", minimum: 1, maximum: 8 },
@@ -106,6 +119,7 @@ export const STATE_COMPACT_PARAMETERS = {
   type: "object",
   additionalProperties: false,
   properties: {
+    ...GOVERNANCE_FIELDS,
     mode: { type: "string", enum: ["dry-run", "audited-apply"] },
     trigger: {
       type: "string",
@@ -137,6 +151,7 @@ export const STATUS_INVENTORY_REPAIR_PARAMETERS = {
   type: "object",
   additionalProperties: false,
   properties: {
+    ...GOVERNANCE_FIELDS,
     dryRun: { type: "boolean" },
     repairStatus: { type: "boolean" },
     repairInventory: { type: "boolean" },

@@ -79,9 +79,33 @@ import {
   type PanelRouteKey,
   validatePanelMessageCommitInput,
 } from "./session-lifecycle-panel-helpers.js";
+import {
+  runGovernedTool,
+  type GovernanceToolMeta,
+  type ToolSessionState,
+} from "./tool-governance-guard.js";
+import { createInMemoryIdempotencyStore } from "./tool-governance-idempotency-store.js";
 
 const CHECKPOINT0_STORE_RELATIVE_PATH = "state/runtime-core";
 const NEW_CONFIRM_TOKEN_TTL_MS = 5 * 60 * 1000;
+type JsonToolResult = ReturnType<typeof jsonToolResult>;
+const LIFECYCLE_GOVERNANCE_IDEMPOTENCY_STORE = createInMemoryIdempotencyStore<JsonToolResult>();
+
+const PANEL_TOOL_GOVERNANCE: Record<"trpg_panel_interact" | "trpg_panel_message_commit", GovernanceToolMeta> = {
+  trpg_panel_interact: {
+    mutatesState: true,
+    requiresSessionStates: ["NO_SESSION", "ACTIVE"],
+    allowedScopes: ["system"],
+    requiresIdempotencyKey: true,
+  },
+  trpg_panel_message_commit: {
+    mutatesState: true,
+    requiresSessionStates: ["ACTIVE"],
+    allowedScopes: ["system"],
+    requiresIdempotencyKey: true,
+    requiresExpectedStateVersion: true,
+  },
+};
 
 function normalizeSession(session: SessionState): SessionState {
   const nowIso = readString((session as Record<string, unknown>).updatedAt) || new Date().toISOString();
@@ -192,6 +216,102 @@ function createRuntimeContext(worldRoot: string, cfg: TrpgRuntimeConfig) {
     store,
     engine,
   };
+}
+
+function resolveGovernanceRequestId(input: Record<string, unknown>, toolCallId: string): string {
+  const requestId = readString(input.requestId);
+  if (requestId) {
+    return requestId;
+  }
+  return toolCallId || `tool-call-${Date.now().toString(36)}`;
+}
+
+function resolveGovernanceIdempotencyKey(input: Record<string, unknown>, requestId: string): string {
+  const idempotencyKey = readString(input.idempotencyKey);
+  if (idempotencyKey) {
+    return idempotencyKey;
+  }
+  return requestId;
+}
+
+function mapSessionStatusToGovernanceState(status: SessionState["status"]): ToolSessionState {
+  return status === "active" ? "ACTIVE" : "ENDED";
+}
+
+async function resolveLifecycleSessionState(params: {
+  worldRoot: string;
+  cfg: TrpgRuntimeConfig;
+  sessionId: string;
+}): Promise<ToolSessionState> {
+  const runtime = createRuntimeContext(params.worldRoot, params.cfg);
+  const session = await runtime.store.readSession(params.sessionId);
+  if (!session) {
+    return "NO_SESSION";
+  }
+  return mapSessionStatusToGovernanceState(session.status);
+}
+
+async function runPanelToolGoverned(params: {
+  toolName: "trpg_panel_interact" | "trpg_panel_message_commit";
+  toolCallId: string;
+  input: Record<string, unknown>;
+  ctx: OpenClawPluginToolContext;
+  cfg: TrpgRuntimeConfig;
+  worldRoot: string;
+  fallbackSessionId?: string;
+  execute: () => Promise<JsonToolResult>;
+}): Promise<JsonToolResult> {
+  const requestId = resolveGovernanceRequestId(params.input, params.toolCallId);
+  const idempotencyKey = resolveGovernanceIdempotencyKey(params.input, requestId);
+  const sessionId = readString(params.input.sessionId) || params.fallbackSessionId;
+
+  const governed = await runGovernedTool<Record<string, unknown>, JsonToolResult>({
+    req: {
+      toolName: params.toolName,
+      requestId,
+      actor: {
+        id: readString(params.ctx.agentId) || "agent:unknown",
+        scope: "system",
+      },
+      input: params.input,
+      sessionId,
+      idempotencyKey,
+      expectedStateVersion:
+        params.toolName === "trpg_panel_message_commit"
+          ? (readInteger(params.input.expectedStateVersion) ?? readInteger(params.input.uiVersion) ?? undefined)
+          : undefined,
+      confirm: params.input.confirm === true,
+    },
+    meta: PANEL_TOOL_GOVERNANCE[params.toolName],
+    resolvers: {
+      resolveSessionState: async (targetSessionId) =>
+        resolveLifecycleSessionState({
+          worldRoot: params.worldRoot,
+          cfg: params.cfg,
+          sessionId: targetSessionId,
+        }),
+      resolveStateVersion:
+        params.toolName === "trpg_panel_message_commit"
+          ? async (targetSessionId) => {
+              const runtime = createRuntimeContext(params.worldRoot, params.cfg);
+              const session = await runtime.store.readSession(targetSessionId);
+              if (!session) {
+                return -1;
+              }
+              const normalized = normalizeSession(session);
+              return normalized.uiVersion;
+            }
+          : undefined,
+    },
+    idempotencyStore: LIFECYCLE_GOVERNANCE_IDEMPOTENCY_STORE,
+    execute: async () => params.execute(),
+  });
+
+  if (governed && typeof governed === "object" && Array.isArray((governed as JsonToolResult).content)) {
+    return governed as JsonToolResult;
+  }
+
+  return jsonToolResult(governed);
 }
 
 async function resolveSessionTarget(params: {
@@ -1520,8 +1640,17 @@ function registerPanelInteractionTools(params: {
 
         try {
           const input = toObject(params);
-          const actorId = resolveActorId(input, ctx);
-          let routeKey: PanelRouteKey;
+          return await runPanelToolGoverned({
+            toolName: "trpg_panel_interact",
+            toolCallId: _toolCallId,
+            input,
+            ctx,
+            cfg,
+            worldRoot: gate.worldRoot,
+            fallbackSessionId: readString(input.sessionId) || ctx.sessionId || undefined,
+            execute: async () => {
+              const actorId = resolveActorId(input, ctx);
+              let routeKey: PanelRouteKey;
           try {
             routeKey = resolvePanelRouteInput(input);
           } catch {
@@ -1802,6 +1931,8 @@ function registerPanelInteractionTools(params: {
             routes: resumed.routes,
             ...prepared.payload,
           });
+            },
+          });
         } catch (error) {
           return jsonToolResult({
             ok: false,
@@ -1827,23 +1958,32 @@ function registerPanelInteractionTools(params: {
 
         try {
           const input = toObject(params);
-          const runtime = createRuntimeContext(gate.worldRoot, cfg);
-          const actorId = resolveActorId(input, ctx);
-          const parsedInput = parsePanelMessageCommitInput(input);
-          const { sessionId, dispatchId, clear, messageId, channelMessageRef, uiVersion, sceneId } = parsedInput;
-          const nowIso = new Date().toISOString();
+          return await runPanelToolGoverned({
+            toolName: "trpg_panel_message_commit",
+            toolCallId: _toolCallId,
+            input,
+            ctx,
+            cfg,
+            worldRoot: gate.worldRoot,
+            fallbackSessionId: readString(input.sessionId) || ctx.sessionId || undefined,
+            execute: async () => {
+              const runtime = createRuntimeContext(gate.worldRoot, cfg);
+              const actorId = resolveActorId(input, ctx);
+              const parsedInput = parsePanelMessageCommitInput(input);
+              const { sessionId, dispatchId, clear, messageId, channelMessageRef, uiVersion, sceneId } = parsedInput;
+              const nowIso = new Date().toISOString();
 
-          const validation = validatePanelMessageCommitInput(parsedInput);
-          if (!validation.ok) {
-            return jsonToolResult(
-              runtimeError({
-                command: "panel-message-commit",
-                errorCode: validation.errorCode,
-                message: validation.message,
-                recoverable: false,
-              }),
-            );
-          }
+              const validation = validatePanelMessageCommitInput(parsedInput);
+              if (!validation.ok) {
+                return jsonToolResult(
+                  runtimeError({
+                    command: "panel-message-commit",
+                    errorCode: validation.errorCode,
+                    message: validation.message,
+                    recoverable: false,
+                  }),
+                );
+              }
 
           const existing = await runtime.store.readSession(sessionId);
           if (!existing) {
@@ -2015,13 +2155,15 @@ function registerPanelInteractionTools(params: {
 
           await runtime.store.upsertSession(committed);
 
-          return jsonToolResult({
-            ok: true,
-            command: "panel-message-commit",
-            dispatchId: dispatchId || null,
-            storeRoot: runtime.storeRoot,
-            sourceOfTruth: "state-store",
-            session: committed,
+              return jsonToolResult({
+                ok: true,
+                command: "panel-message-commit",
+                dispatchId: dispatchId || null,
+                storeRoot: runtime.storeRoot,
+                sourceOfTruth: "state-store",
+                session: committed,
+              });
+            },
           });
         } catch (error) {
           return jsonToolResult({

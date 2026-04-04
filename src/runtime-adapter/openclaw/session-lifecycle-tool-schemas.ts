@@ -5,10 +5,18 @@ const SECTION_ITEMS_SCHEMA = {
   enum: SESSION_DATA_SECTIONS,
 } as const;
 
+const GOVERNANCE_FIELDS = {
+  requestId: { type: "string" },
+  idempotencyKey: { type: "string" },
+  expectedStateVersion: { type: "integer", minimum: 0 },
+  confirm: { type: "boolean" },
+} as const;
+
 export const SESSION_NEW_PARAMETERS = {
   type: "object",
   additionalProperties: false,
   properties: {
+    ...GOVERNANCE_FIELDS,
     channelKey: { type: "string" },
     ownerId: { type: "string" },
     actorId: { type: "string" },
@@ -23,6 +31,7 @@ export const SESSION_SECTION_TOOL_PARAMETERS = {
   type: "object",
   additionalProperties: false,
   properties: {
+    ...GOVERNANCE_FIELDS,
     sessionId: { type: "string" },
     channelKey: { type: "string" },
     actorId: { type: "string" },
@@ -34,6 +43,7 @@ export const SESSION_RESUME_PARAMETERS = {
   type: "object",
   additionalProperties: false,
   properties: {
+    ...GOVERNANCE_FIELDS,
     sessionId: { type: "string" },
     channelKey: { type: "string" },
     actorId: { type: "string" },
@@ -45,6 +55,7 @@ export const SESSION_END_PARAMETERS = {
   type: "object",
   additionalProperties: false,
   properties: {
+    ...GOVERNANCE_FIELDS,
     sessionId: { type: "string" },
     channelKey: { type: "string" },
     actorId: { type: "string" },
@@ -55,13 +66,16 @@ export const SESSION_END_PARAMETERS = {
 export const SESSION_HELP_PARAMETERS = {
   type: "object",
   additionalProperties: false,
-  properties: {},
+  properties: {
+    ...GOVERNANCE_FIELDS,
+  },
 } as const;
 
 export const SESSION_VERBOSE_PARAMETERS = {
   type: "object",
   additionalProperties: false,
   properties: {
+    ...GOVERNANCE_FIELDS,
     sessionId: { type: "string" },
     channelKey: { type: "string" },
     actorId: { type: "string" },
@@ -74,6 +88,7 @@ export const PANEL_INTERACT_PARAMETERS = {
   type: "object",
   additionalProperties: false,
   properties: {
+    ...GOVERNANCE_FIELDS,
     customId: { type: "string" },
     sessionId: { type: "string" },
     uiVersion: { type: "integer" },
@@ -91,6 +106,7 @@ export const PANEL_MESSAGE_COMMIT_PARAMETERS = {
   type: "object",
   additionalProperties: false,
   properties: {
+    ...GOVERNANCE_FIELDS,
     sessionId: { type: "string" },
     actorId: { type: "string" },
     dispatchId: { type: "string" },
